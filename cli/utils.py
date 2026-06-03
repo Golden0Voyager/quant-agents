@@ -276,7 +276,7 @@ def select_llm_provider() -> tuple[str, str | None]:
     PROVIDERS = [
         ("MiMo", "mimo", "https://token-plan-cn.xiaomimimo.com/v1"),
         ("Kimi", "kimi", "https://api.kimi.com/coding/v1"),
-        ("SenseNova", "sensenova", "https://api.sensenova.cn/compatible-mode/v2"),
+        ("SenseNova", "sensenova", "https://token.sensenova.cn/v1"),
         ("OpenAI", "openai", "https://api.openai.com/v1"),
         ("Google", "google", None),
         ("Anthropic", "anthropic", "https://api.anthropic.com/"),
