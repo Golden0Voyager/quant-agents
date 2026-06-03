@@ -2,11 +2,14 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_company_announcements,
+    get_dragon_tiger,
     get_insider_transactions,
     get_institutional_holdings,
     get_language_instruction,
+    get_margin_trading,
     get_news,
     get_northbound_hold,
+    get_pledge_ratio,
     get_restricted_release,
     sanitize_company_name_in_report,
 )
@@ -27,6 +30,9 @@ def create_governance_analyst(llm):
             get_restricted_release,
             get_institutional_holdings,
             get_northbound_hold,
+            get_margin_trading,
+            get_pledge_ratio,
+            get_dragon_tiger,
         ]
 
         company_name = state.get("company_name", "")
@@ -45,7 +51,10 @@ def create_governance_analyst(llm):
             "for related news coverage, get_restricted_release to identify upcoming "
             "share unlock events and their potential supply pressure, "
             "get_institutional_holdings to track top shareholder and fund positioning, "
-            "and get_northbound_hold to monitor foreign investor sentiment. "
+            "get_northbound_hold to monitor foreign investor sentiment, "
+            "get_margin_trading to assess leverage and speculative sentiment, "
+            "get_pledge_ratio to evaluate equity pledge risk and liquidation pressure, "
+            "and get_dragon_tiger to track hot-money and institutional trading activity. "
             "Provide specific, actionable insights on governance risks, capital structure "
             "changes, management signals, and any red flags that could impact investment decisions."
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
