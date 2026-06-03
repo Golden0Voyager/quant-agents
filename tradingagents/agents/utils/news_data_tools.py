@@ -124,3 +124,71 @@ def get_northbound_hold(
         str: A formatted report of northbound holdings
     """
     return route_to_vendor("get_northbound_hold", ticker)
+
+
+@tool
+def get_dragon_tiger(
+    ticker: Annotated[str, "Ticker symbol"],
+) -> str:
+    """
+    Retrieve dragon-tiger board (龙虎榜) data for a given ticker.
+    Shows daily limit-up/exceptional volatility listings with institutional and hot-money trading details.
+    Useful for identifying short-term sentiment and hot-money accumulation/distribution.
+    Uses the configured news_data vendor (smartmoney_db local cache or akshare for A-shares).
+    Args:
+        ticker (str): Ticker symbol
+    Returns:
+        str: A formatted report of dragon-tiger board appearances
+    """
+    return route_to_vendor("get_dragon_tiger", ticker)
+
+
+@tool
+def get_block_trade(
+    ticker: Annotated[str, "Ticker symbol"],
+) -> str:
+    """
+    Retrieve block-trade (大宗交易) data for a given ticker.
+    Shows off-exchange large-block transactions, discount/premium rates, and buyer/seller brokerages.
+    Large discounts may signal institutional selling; premiums suggest institutional buying.
+    Uses the configured news_data vendor (smartmoney_db local cache or akshare for A-shares).
+    Args:
+        ticker (str): Ticker symbol
+    Returns:
+        str: A formatted report of block-trade transactions
+    """
+    return route_to_vendor("get_block_trade", ticker)
+
+
+@tool
+def get_pledge_ratio(
+    ticker: Annotated[str, "Ticker symbol"],
+) -> str:
+    """
+    Retrieve pledge-ratio (股权质押) data for a given ticker.
+    Shows shareholder pledge details, pledge ratio, and estimated liquidation lines.
+    High pledge ratio combined with falling stock price indicates liquidation risk.
+    Uses the configured governance_risk vendor (akshare for A-shares, real-time).
+    Args:
+        ticker (str): Ticker symbol
+    Returns:
+        str: A formatted report of pledge ratio details
+    """
+    return route_to_vendor("get_pledge_ratio", ticker)
+
+
+@tool
+def get_research_reports(
+    ticker: Annotated[str, "Ticker symbol"],
+) -> str:
+    """
+    Retrieve research reports (个股研报) for a given ticker.
+    Shows broker ratings, target prices, and analyst opinions.
+    Useful for understanding institutional consensus and forward-looking expectations.
+    Uses the configured research_opinion vendor (akshare for A-shares, real-time).
+    Args:
+        ticker (str): Ticker symbol
+    Returns:
+        str: A formatted report of research reports
+    """
+    return route_to_vendor("get_research_reports", ticker)
