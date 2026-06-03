@@ -91,3 +91,37 @@ def get_earnings_estimates(
         str: A formatted report of earnings estimates
     """
     return route_to_vendor("get_earnings_estimates", ticker)
+
+
+@tool
+def get_shareholder_count(
+    ticker: Annotated[str, "Ticker symbol"],
+) -> str:
+    """
+    Retrieve shareholder count (股东户数) data for a given ticker.
+    Shows the number of shareholders and average shares per holder to assess筹码集中度.
+    Declining shareholder count suggests institutional accumulation; rising count suggests retail influx.
+    Uses the configured fundamental_data vendor (smartmoney_db local cache or akshare for A-shares).
+    Args:
+        ticker (str): Ticker symbol
+    Returns:
+        str: A formatted report of shareholder count data
+    """
+    return route_to_vendor("get_shareholder_count", ticker)
+
+
+@tool
+def get_dividend_history(
+    ticker: Annotated[str, "Ticker symbol"],
+) -> str:
+    """
+    Retrieve dividend history (分红送转) for a given ticker.
+    Shows past dividend schemes, ex-dividend dates, and record dates.
+    Useful for dividend yield analysis and ex-dividend timing.
+    Uses the configured shareholder_return vendor (akshare for A-shares).
+    Args:
+        ticker (str): Ticker symbol
+    Returns:
+        str: A formatted report of dividend history
+    """
+    return route_to_vendor("get_dividend_history", ticker)
