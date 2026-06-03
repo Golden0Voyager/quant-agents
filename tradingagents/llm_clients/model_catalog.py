@@ -127,16 +127,13 @@ MODEL_OPTIONS: ProviderModeOptions = {
     },
     "sensenova": {
         "quick": [
-            ("DeepSeek-V3-1 - 通用对话，快速响应（限时免费至8/9）", "DeepSeek-V3-1"),
-            ("DeepSeek-R1-Distill-Qwen-14B - 轻量推理，32K上下文，永久免费", "DeepSeek-R1-Distill-Qwen-14B"),
-            ("DeepSeek-R1-Distill-Qwen-32B - 平衡推理，8K上下文，永久免费", "DeepSeek-R1-Distill-Qwen-32B"),
-            ("DeepSeek-V3 - 通用对话（限时免费至8/9）", "DeepSeek-V3"),
+            ("sensenova-6.7-flash-lite - 轻量多模态，256K 上下文，每5小时1500次", "sensenova-6.7-flash-lite"),
+            ("deepseek-v4-flash - 高性能对话，256K 上下文，支持思考模式", "deepseek-v4-flash"),
             ("自定义模型 ID", "custom"),
         ],
         "deep": [
-            ("DeepSeek-R1 - 原生推理，最强质量（限时免费至8/9）", "DeepSeek-R1"),
-            ("DeepSeek-R1-Distill-Qwen-32B - 蒸馏推理，8K上下文，永久免费", "DeepSeek-R1-Distill-Qwen-32B"),
-            ("DeepSeek-V3-1 - 通用大模型（限时免费至8/9）", "DeepSeek-V3-1"),
+            ("deepseek-v4-flash - 高性能对话，256K 上下文，支持思考模式", "deepseek-v4-flash"),
+            ("sensenova-6.7-flash-lite - 轻量多模态，256K 上下文", "sensenova-6.7-flash-lite"),
             ("自定义模型 ID", "custom"),
         ],
     },
