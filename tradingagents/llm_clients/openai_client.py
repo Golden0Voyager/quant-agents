@@ -148,7 +148,7 @@ _PROVIDER_CONFIG = {
     "glm": ("https://api.z.ai/api/paas/v4/", "ZHIPU_API_KEY"),
     "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
     "ollama": ("http://localhost:11434/v1", None),
-    "sensenova": ("https://api.sensenova.cn/compatible-mode/v2", "SENSENOVA_API_KEY"),
+    "sensenova": ("https://token.sensenova.cn/v1", "SENSENOVA_API_KEY"),
     "mimo": ("https://token-plan-cn.xiaomimimo.com/v1", "MIMO_API_KEY"),
     "kimi": ("https://api.kimi.com/coding/v1", "KIMI_API_KEY"),
 }
@@ -216,7 +216,21 @@ class OpenAIClient(BaseLLMClient):
 
         # DeepSeek's thinking-mode quirks live in their own subclass so the
         # base NormalizedChatOpenAI stays free of provider-specific branches.
-        chat_cls = DeepSeekChatOpenAI if self.provider in ("deepseek", "sensenova", "mimo") else NormalizedChatOpenAI
+        #
+        # Provider routing for reasoning-enabled models:
+        #   - deepseek (official): all models may return reasoning_content
+        #   - mimo: v2.5 / v2.5-pro support thinking
+        #   - sensenova: only deepseek-v4-flash returns reasoning_content;
+        #     sensenova-6.7-flash-lite does NOT via the OpenAI-compatible API
+        _reasoning_models: set[str] = {
+            "deepseek-v4-flash", "deepseek-reasoner", "deepseek-r1",
+            "mimo-v2.5", "mimo-v2.5-pro",
+        }
+        use_reasoning_cls = (
+            self.provider in ("deepseek", "mimo")
+            or (self.provider == "sensenova" and self.model.lower() in _reasoning_models)
+        )
+        chat_cls = DeepSeekChatOpenAI if use_reasoning_cls else NormalizedChatOpenAI
         return chat_cls(**llm_kwargs)
 
     def validate_model(self) -> bool:
