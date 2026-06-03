@@ -462,3 +462,204 @@ def get_earnings_estimates(symbol: str) -> str:
 
 def get_macro_indicators() -> str:
     raise RuntimeError("Macro indicators not available in quant_core.db")
+
+
+# ===========================================================================
+# Margin Trading (融资融券) — v2.2
+# ===========================================================================
+
+def get_margin_trading(symbol: str) -> str:
+    """Fetch margin-trading (融资融券) data from quant_core.db."""
+    code = _to_smartmoney_symbol(symbol)
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, margin_balance, margin_buy, margin_repay,
+               short_balance, short_sell, short_repay, total_balance
+        FROM margin_trading
+        WHERE ts_code = ?
+        ORDER BY trade_date DESC
+        LIMIT 5
+        """,
+        (code,),
+    )
+
+    if df is None or df.empty:
+        raise RuntimeError(f"No margin-trading data in quant_core.db for {symbol}")
+
+    lines = [
+        f"## {symbol.upper()} Margin Trading (融资融券) "
+        f"(source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)} trading days",
+        "",
+    ]
+    for _, row in df.iterrows():
+        lines.append(f"**Date**: {row['Date']}")
+        lines.append(f"- 融资余额: {row['margin_balance']:,.0f}")
+        lines.append(f"- 融资买入额: {row['margin_buy']:,.0f}")
+        lines.append(f"- 融券余量: {row['short_balance']:,.0f}")
+        lines.append(f"- 融资融券余额: {row['total_balance']:,.0f}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+# ===========================================================================
+# Dragon Tiger (龙虎榜) — v2.2
+# ===========================================================================
+
+def get_dragon_tiger(symbol: str) -> str:
+    """Fetch dragon-tiger-board (龙虎榜) data from quant_core.db."""
+    code = _to_smartmoney_symbol(symbol)
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, close_price, pct_change, net_buy_amount,
+               buy_amount, sell_amount, turnover_rate, market_cap, reason
+        FROM dragon_tiger
+        WHERE ts_code = ?
+        ORDER BY trade_date DESC
+        LIMIT 5
+        """,
+        (code,),
+    )
+
+    if df is None or df.empty:
+        raise RuntimeError(f"No dragon-tiger data in quant_core.db for {symbol}")
+
+    lines = [
+        f"## {symbol.upper()} Dragon Tiger Board (龙虎榜) "
+        f"(source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)} appearances",
+        "",
+    ]
+    for _, row in df.iterrows():
+        lines.append(f"**Date**: {row['Date']}")
+        lines.append(f"- Close: {row['close_price']:.2f} ({row['pct_change']:.2f}%)")
+        lines.append(f"- Net Buy: {row['net_buy_amount']:,.0f}")
+        lines.append(f"- Buy/Sell: {row['buy_amount']:,.0f} / {row['sell_amount']:,.0f}")
+        if row.get("reason"):
+            lines.append(f"- Reason: {row['reason']}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+# ===========================================================================
+# Block Trade (大宗交易) — v2.2
+# ===========================================================================
+
+def get_block_trade(symbol: str) -> str:
+    """Fetch block-trade (大宗交易) data from quant_core.db."""
+    code = _to_smartmoney_symbol(symbol)
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, deal_price, close_price, discount_rate,
+               volume, amount, buyer_branch, seller_branch
+        FROM block_trade
+        WHERE ts_code = ?
+        ORDER BY trade_date DESC
+        LIMIT 5
+        """,
+        (code,),
+    )
+
+    if df is None or df.empty:
+        raise RuntimeError(f"No block-trade data in quant_core.db for {symbol}")
+
+    lines = [
+        f"## {symbol.upper()} Block Trade (大宗交易) "
+        f"(source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)} transactions",
+        "",
+    ]
+    for _, row in df.iterrows():
+        lines.append(f"**Date**: {row['Date']}")
+        lines.append(f"- Deal Price: {row['deal_price']:.2f}")
+        lines.append(f"- Discount Rate: {row['discount_rate']:.2f}%")
+        lines.append(f"- Volume: {row['volume']:,.0f}")
+        lines.append(f"- Amount: {row['amount']:,.0f}")
+        lines.append(f"- Buyer: {row.get('buyer_branch', 'N/A')}")
+        lines.append(f"- Seller: {row.get('seller_branch', 'N/A')}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+# ===========================================================================
+# Sector Fund Flow (板块资金流向) — v2.2
+# ===========================================================================
+
+def get_sector_fund_flow(sector_name: str) -> str:
+    """Fetch sector fund-flow (板块资金流向) from quant_core.db."""
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, main_net_inflow, main_net_inflow_pct,
+               super_large_net_inflow, large_net_inflow,
+               medium_net_inflow, small_net_inflow
+        FROM sector_fund_flow
+        WHERE sector_name = ?
+        ORDER BY trade_date DESC
+        LIMIT 5
+        """,
+        (sector_name,),
+    )
+
+    if df is None or df.empty:
+        raise RuntimeError(
+            f"No sector fund-flow data in quant_core.db for '{sector_name}'"
+        )
+
+    lines = [
+        f"## {sector_name} Sector Fund Flow (板块资金流向) "
+        f"(source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)} trading days",
+        "",
+    ]
+    for _, row in df.iterrows():
+        lines.append(f"**Date**: {row['Date']}")
+        lines.append(
+            f"- Main Force: {row['main_net_inflow']:,.0f} ({row['main_net_inflow_pct']:.2f}%)"
+        )
+        lines.append(f"- Super Large: {row['super_large_net_inflow']:,.0f}")
+        lines.append(f"- Large: {row['large_net_inflow']:,.0f}")
+        lines.append(f"- Medium: {row['medium_net_inflow']:,.0f}")
+        lines.append(f"- Small: {row['small_net_inflow']:,.0f}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+# ===========================================================================
+# Shareholder Count (股东户数) — v2.2
+# ===========================================================================
+
+def get_shareholder_count(symbol: str) -> str:
+    """Fetch shareholder-count (股东户数) from quant_core.db."""
+    code = _to_smartmoney_symbol(symbol)
+
+    df = _df_from_sql(
+        """
+        SELECT report_date AS Date, holder_count, holder_count_change_pct,
+               avg_shares_per_holder
+        FROM shareholder_count
+        WHERE ts_code = ?
+        ORDER BY report_date DESC
+        LIMIT 4
+        """,
+        (code,),
+    )
+
+    if df is None or df.empty:
+        raise RuntimeError(f"No shareholder-count data in quant_core.db for {symbol}")
+
+    lines = [
+        f"## {symbol.upper()} Shareholder Count (股东户数) "
+        f"(source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)} report periods",
+        "",
+    ]
+    for _, row in df.iterrows():
+        lines.append(f"**Report Date**: {row['Date']}")
+        lines.append(f"- 股东户数: {row['holder_count']:,.0f}")
+        lines.append(f"- 环比变化: {row['holder_count_change_pct']:.2f}%")
+        lines.append(f"- 人均持股: {row['avg_shares_per_holder']:,.0f}")
+        lines.append("")
+    return "\n".join(lines)
