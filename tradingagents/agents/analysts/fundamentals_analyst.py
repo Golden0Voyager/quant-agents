@@ -3,11 +3,13 @@ from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_balance_sheet,
     get_cashflow,
+    get_dividend_history,
     get_earnings_estimates,
     get_fundamentals,
     get_income_statement,
     get_insider_transactions,
     get_language_instruction,
+    get_shareholder_count,
 )
 from tradingagents.dataflows.config import get_config
 
@@ -23,6 +25,8 @@ def create_fundamentals_analyst(llm):
             get_cashflow,
             get_income_statement,
             get_earnings_estimates,
+            get_shareholder_count,
+            get_dividend_history,
         ]
 
         system_message = (
@@ -30,6 +34,8 @@ def create_fundamentals_analyst(llm):
             + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
             + " Use the available tools: `get_fundamentals` for comprehensive company analysis, `get_balance_sheet`, `get_cashflow`, and `get_income_statement` for specific financial statements."
             + " Also use `get_earnings_estimates` to understand forward-looking consensus expectations for revenue, EPS, and profit growth. Compare estimates with historical actuals to identify expectation gaps."
+            + " Use `get_shareholder_count` to assess筹码集中度 (declining count suggests institutional accumulation; rising count suggests retail influx)."
+            + " Use `get_dividend_history` to evaluate shareholder return policy and dividend yield trends."
             + get_language_instruction(),
         )
 
