@@ -43,6 +43,14 @@ from .akshare_vendor import (
     get_macro_indicators as get_akshare_macro_indicators,
     get_earnings_estimates as get_akshare_earnings_estimates,
     get_institutional_holdings as get_akshare_institutional_holdings,
+    get_margin_trading as get_akshare_margin_trading,
+    get_dragon_tiger as get_akshare_dragon_tiger,
+    get_block_trade as get_akshare_block_trade,
+    get_sector_fund_flow as get_akshare_sector_fund_flow,
+    get_shareholder_count as get_akshare_shareholder_count,
+    get_pledge_ratio as get_akshare_pledge_ratio,
+    get_dividend_history as get_akshare_dividend_history,
+    get_research_reports as get_akshare_research_reports,
 )
 from .akshare_common import is_a_share_ticker
 from .smartmoney_vendor import (
@@ -62,6 +70,11 @@ from .smartmoney_vendor import (
     get_industry_valuation as get_smartmoney_industry_valuation,
     get_earnings_estimates as get_smartmoney_earnings_estimates,
     get_macro_indicators as get_smartmoney_macro_indicators,
+    get_margin_trading as get_smartmoney_margin_trading,
+    get_dragon_tiger as get_smartmoney_dragon_tiger,
+    get_block_trade as get_smartmoney_block_trade,
+    get_sector_fund_flow as get_smartmoney_sector_fund_flow,
+    get_shareholder_count as get_smartmoney_shareholder_count,
 )
 
 # Configuration and routing logic
@@ -104,6 +117,24 @@ TOOLS_CATEGORIES = {
             "get_northbound_hold",
             "get_macro_indicators",
         ]
+    },
+    "governance_risk": {
+        "description": "Corporate governance and risk metrics",
+        "tools": [
+            "get_pledge_ratio",
+        ]
+    },
+    "shareholder_return": {
+        "description": "Dividend and shareholder return data",
+        "tools": [
+            "get_dividend_history",
+        ]
+    },
+    "research_opinion": {
+        "description": "Analyst research reports and ratings",
+        "tools": [
+            "get_research_reports",
+        ]
     }
 }
 
@@ -133,6 +164,26 @@ VENDOR_METHODS = {
     "get_fund_flow": {
         "smartmoney_db": get_smartmoney_fund_flow,
         "akshare": get_akshare_fund_flow,
+    },
+    "get_margin_trading": {
+        "smartmoney_db": get_smartmoney_margin_trading,
+        "akshare": get_akshare_margin_trading,
+    },
+    "get_dragon_tiger": {
+        "smartmoney_db": get_smartmoney_dragon_tiger,
+        "akshare": get_akshare_dragon_tiger,
+    },
+    "get_block_trade": {
+        "smartmoney_db": get_smartmoney_block_trade,
+        "akshare": get_akshare_block_trade,
+    },
+    "get_sector_fund_flow": {
+        "smartmoney_db": get_smartmoney_sector_fund_flow,
+        "akshare": get_akshare_sector_fund_flow,
+    },
+    "get_shareholder_count": {
+        "smartmoney_db": get_smartmoney_shareholder_count,
+        "akshare": get_akshare_shareholder_count,
     },
     # fundamental_data
     "get_fundamentals": {
@@ -203,6 +254,18 @@ VENDOR_METHODS = {
     "get_macro_indicators": {
         "smartmoney_db": get_smartmoney_macro_indicators,
         "akshare": get_akshare_macro_indicators,
+    },
+    # governance_risk (v2.2)
+    "get_pledge_ratio": {
+        "akshare": get_akshare_pledge_ratio,
+    },
+    # shareholder_return (v2.2)
+    "get_dividend_history": {
+        "akshare": get_akshare_dividend_history,
+    },
+    # research_opinion (v2.2)
+    "get_research_reports": {
+        "akshare": get_akshare_research_reports,
     },
 }
 
