@@ -750,6 +750,152 @@ def get_macro_indicators(
 
 
 # ---------------------------------------------------------------------------
+# Margin trading (融资融券) — v2.2
+# ---------------------------------------------------------------------------
+
+
+def get_margin_trading(symbol: str) -> str:
+    """Fetch A-share margin-trading data via akshare."""
+    raise RuntimeError("Margin trading via akshare not yet implemented")
+
+
+# ---------------------------------------------------------------------------
+# Dragon tiger (龙虎榜) — v2.2
+# ---------------------------------------------------------------------------
+
+
+def get_dragon_tiger(symbol: str) -> str:
+    """Fetch A-share dragon-tiger-board data via akshare."""
+    raise RuntimeError("Dragon tiger via akshare not yet implemented")
+
+
+# ---------------------------------------------------------------------------
+# Block trade (大宗交易) — v2.2
+# ---------------------------------------------------------------------------
+
+
+def get_block_trade(symbol: str) -> str:
+    """Fetch A-share block-trade data via akshare."""
+    raise RuntimeError("Block trade via akshare not yet implemented")
+
+
+# ---------------------------------------------------------------------------
+# Sector fund flow (板块资金流向) — v2.2
+# ---------------------------------------------------------------------------
+
+
+def get_sector_fund_flow(sector_name: str) -> str:
+    """Fetch A-share sector fund-flow data via akshare."""
+    raise RuntimeError("Sector fund flow via akshare not yet implemented")
+
+
+# ---------------------------------------------------------------------------
+# Shareholder count (股东户数) — v2.2
+# ---------------------------------------------------------------------------
+
+
+def get_shareholder_count(symbol: str) -> str:
+    """Fetch A-share shareholder-count data via akshare."""
+    raise RuntimeError("Shareholder count via akshare not yet implemented")
+
+
+# ---------------------------------------------------------------------------
+# Pledge ratio (股权质押) — real-time fallback, not batched
+# ---------------------------------------------------------------------------
+
+
+def get_pledge_ratio(symbol: str) -> str:
+    """Fetch A-share pledge-ratio data via akshare (real-time)."""
+    code = to_akshare_symbol(symbol, "bare")
+
+    with _akshare_task_context(f"🔒 {symbol} 股权质押"), no_proxy():
+        df = _safe_call(ak.stock_gpzy_individual_pledge_ratio_detail_em, symbol=code)
+
+    if df is None or df.empty:
+        return f"No pledge-ratio data found for {symbol} via akshare."
+
+    lines = [
+        f"## {symbol.upper()} Pledge Ratio (source: akshare / Eastmoney)",
+        f"Total records: {len(df)}",
+        "",
+    ]
+    for _, row in df.iterrows():
+        lines.append(f"**Pledger**: {row.get('股东名称', 'N/A')}")
+        lines.append(f"- 质押数量: {row.get('质押股份数量', 'N/A')}")
+        lines.append(f"- 占所持比例: {row.get('占所持股份比例', 'N/A')}%")
+        lines.append(f"- 占总股本比例: {row.get('占总股本比例', 'N/A')}%")
+        lines.append(f"- 质押机构: {row.get('质押机构', 'N/A')}")
+        lines.append(f"- 最新价: {row.get('最新价', 'N/A')}")
+        lines.append(f"- 预估平仓线: {row.get('预估平仓线', 'N/A')}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Dividend history (分红送转) — real-time fallback, not batched
+# ---------------------------------------------------------------------------
+
+
+def get_dividend_history(symbol: str) -> str:
+    """Fetch A-share dividend history via akshare (real-time)."""
+    code = to_akshare_symbol(symbol, "bare")
+
+    with _akshare_task_context(f"💰 {symbol} 分红送转"), no_proxy():
+        df = _safe_call(ak.stock_fhps_detail_em, symbol=code)
+
+    if df is None or df.empty:
+        return f"No dividend history found for {symbol} via akshare."
+
+    lines = [
+        f"## {symbol.upper()} Dividend History (source: akshare / Eastmoney)",
+        f"Total records: {len(df)}",
+        "",
+    ]
+    for _, row in df.iterrows():
+        lines.append(f"**Report Period**: {row.get('报告期', 'N/A')}")
+        lines.append(f"- 分红方案: {row.get('分红方案', 'N/A')}")
+        lines.append(f"- 除权除息日: {row.get('除权除息日', 'N/A')}")
+        lines.append(f"- 股权登记日: {row.get('股权登记日', 'N/A')}")
+        lines.append(f"- 红股上市日: {row.get('红股上市日', 'N/A')}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Research reports (个股研报) — real-time fallback, not batched
+# ---------------------------------------------------------------------------
+
+
+def get_research_reports(symbol: str) -> str:
+    """Fetch A-share research reports via akshare (real-time)."""
+    code = to_akshare_symbol(symbol, "bare")
+
+    with _akshare_task_context(f"📄 {symbol} 个股研报"), no_proxy():
+        df = _safe_call(ak.stock_research_report_em, symbol=code)
+
+    if df is None or df.empty:
+        return f"No research reports found for {symbol} via akshare."
+
+    lines = [
+        f"## {symbol.upper()} Research Reports (source: akshare / Eastmoney)",
+        f"Total records: {len(df)}",
+        "",
+    ]
+    for _, row in df.iterrows():
+        lines.append(f"**Title**: {row.get('报告标题', 'N/A')}")
+        lines.append(f"- 机构: {row.get('机构名称', 'N/A')}")
+        lines.append(f"- 分析师: {row.get('分析师', 'N/A')}")
+        lines.append(f"- 评级: {row.get('评级', 'N/A')}")
+        lines.append(f"- 目标价: {row.get('目标价', 'N/A')}")
+        lines.append(f"- 发布日期: {row.get('发布日期', 'N/A')}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Earnings estimates (analyst consensus)
 # ---------------------------------------------------------------------------
 
