@@ -62,10 +62,14 @@ def _akshare_retry(
     base_delay: float = 1.0,
 ) -> T:
     """Execute an akshare call with exponential backoff on transient network errors."""
+    import requests.exceptions as _re  # local import — requests is an akshare dependency
+
+    _network_errors = (ConnectionError, TimeoutError, _re.ConnectionError, _re.Timeout)
+
     for attempt in range(max_retries + 1):
         try:
             return func()
-        except (ConnectionError, TimeoutError) as exc:
+        except _network_errors as exc:
             if attempt < max_retries:
                 delay = base_delay * (2 ** attempt)
                 logger.warning(
@@ -82,7 +86,19 @@ def _akshare_retry(
 
 @contextmanager
 def no_proxy() -> Generator[None, None, None]:
-    """Temporarily strip proxy env vars so domestic APIs are reached directly."""
+    """Temporarily strip proxy env vars so domestic APIs are reached directly.
+
+    Also monkey-patches ``requests.utils.getproxies`` because on macOS
+    ``requests`` reads system proxy settings (e.g. Clash at 127.0.0.1:7897)
+    via ``_scproxy`` even when no HTTP_PROXY env var is present.
+
+    Additionally forces IPv4-only for socket resolution because Eastmoney's
+    IPv6 endpoint (2408:870c::/32) frequently drops connections with
+    ``RemoteDisconnected`` while IPv4 works reliably.
+    """
+    import requests.utils as _ru  # local import to avoid startup side-effects
+    import socket
+
     keys = (
         "http_proxy",
         "https_proxy",
@@ -91,14 +107,28 @@ def no_proxy() -> Generator[None, None, None]:
         "all_proxy",
         "ALL_PROXY",
     )
-    saved = {k: os.environ[k] for k in keys if k in os.environ}
-    for k in saved:
+    saved_env = {k: os.environ[k] for k in keys if k in os.environ}
+    for k in saved_env:
         del os.environ[k]
+
+    _orig_getproxies = _ru.getproxies
+    _ru.getproxies = lambda: {}
+
+    _orig_getaddrinfo = socket.getaddrinfo
+
+    def _ipv4_only_getaddrinfo(*args, **kwargs):
+        res = _orig_getaddrinfo(*args, **kwargs)
+        ipv4 = [r for r in res if r[0] == socket.AF_INET]
+        return ipv4 if ipv4 else res
+
+    socket.getaddrinfo = _ipv4_only_getaddrinfo
     try:
         yield
     finally:
-        for k, v in saved.items():
+        for k, v in saved_env.items():
             os.environ[k] = v
+        _ru.getproxies = _orig_getproxies
+        socket.getaddrinfo = _orig_getaddrinfo
 
 
 _UNIT_FACTORS = {
