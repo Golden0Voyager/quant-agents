@@ -33,3 +33,35 @@ def get_northbound_hold(
         str: A formatted report of northbound holdings
     """
     return route_to_vendor("get_northbound_hold", ticker)
+
+
+@tool
+def get_margin_trading(
+    ticker: Annotated[str, "Ticker symbol"],
+) -> str:
+    """
+    Retrieve margin-trading (融资融券) data for a given ticker.
+    Shows margin balance, short balance, and total leverage to assess speculative sentiment.
+    Uses the configured technical_indicators vendor (smartmoney_db local cache or akshare for A-shares).
+    Args:
+        ticker (str): Ticker symbol
+    Returns:
+        str: A formatted report of margin trading data
+    """
+    return route_to_vendor("get_margin_trading", ticker)
+
+
+@tool
+def get_sector_fund_flow(
+    sector_name: Annotated[str, "Sector or industry name, e.g. 白酒, 银行, 新能源"],
+) -> str:
+    """
+    Retrieve sector-level fund flow data (板块资金流向).
+    Shows main-force, super-large, large, medium and small-order net inflow by industry.
+    Uses the configured technical_indicators vendor (smartmoney_db local cache or akshare for A-shares).
+    Args:
+        sector_name (str): Sector or industry name in Chinese
+    Returns:
+        str: A formatted report of sector fund flow data
+    """
+    return route_to_vendor("get_sector_fund_flow", sector_name)
