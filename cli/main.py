@@ -1116,8 +1116,6 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
             report_file = save_report_to_disk(final_state, selections["ticker"], save_path)
             console.print(f"\n[green]✓ Report saved to:[/green] {save_path.resolve()}")
             console.print(f"  [dim]Complete report:[/dim] {report_file.name}")
-            if selections.get("output_language", "English") == "Chinese":
-                run_translation_pipeline(save_path, config)
         except Exception as e:
             console.print(f"[red]Error saving report: {e}[/red]")
 
