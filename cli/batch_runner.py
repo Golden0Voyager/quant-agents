@@ -194,7 +194,6 @@ class BatchRunner:
         from cli.main import (
             ANALYST_ORDER,
             save_report_to_disk,
-            run_translation_pipeline,
         )
         from tradingagents.ticker_resolver import resolve_ticker
 
@@ -300,18 +299,6 @@ class BatchRunner:
             ticker_dir = self.output_dir / ticker_dir_name
             ticker_dir.mkdir(parents=True, exist_ok=True)
             save_report_to_disk(final_state, ticker, ticker_dir)
-
-            # Translation
-            if config.get("output_language") == "Chinese":
-                if self.workers > 1:
-                    # Parallel mode: unattended — auto-translate without prompting
-                    run_translation_pipeline(ticker_dir, config)
-                else:
-                    # Sequential mode: ask user interactively
-                    console.print(f"\n[cyan]Report saved for {ticker}.[/cyan]")
-                    user_input = input("Translate this report to Chinese? [y/N]: ").strip().lower()
-                    if user_input in ("y", "yes"):
-                        run_translation_pipeline(ticker_dir, config)
 
             # Extract summary (lock-protected for concurrent batch mode)
             with self._lock:
@@ -545,62 +532,5 @@ class BatchRunner:
         # Write JSON summary for downstream processing
         json_path = self.output_dir / "batch_summary.json"
         json_path.write_text(json.dumps(json_rows, ensure_ascii=False, indent=2), encoding="utf-8")
-
-        # Translate batch summary
-        if self.profile_config.get("output_language") == "Chinese":
-            if self.workers > 1:
-                # Parallel mode: unattended — auto-translate without prompting
-                from cli.main import _translate_content, _split_translation_chunks
-                from tradingagents.llm_clients.factory import create_llm_client
-                try:
-                    provider = self.profile_config.get("llm_provider", DEFAULT_CONFIG["llm_provider"])
-                    model = (
-                        self.profile_config.get("shallow_thinker")
-                        or self.profile_config.get("quick_think_llm")
-                        or self.profile_config.get("deep_thinker")
-                        or self.profile_config.get("deep_think_llm")
-                        or DEFAULT_CONFIG["quick_think_llm"]
-                    )
-                    base_url = self.profile_config.get("backend_url")
-                    if model:
-                        client = create_llm_client(provider, model, base_url)
-                        llm = client.get_llm()
-                        content = md_path.read_text(encoding="utf-8")
-                        chunks = _split_translation_chunks(content)
-                        chunk_info = f" ({len(chunks)} chunks)" if len(chunks) > 1 else ""
-                        translated = _translate_content(llm, content)
-                        cn_path = self.output_dir / "batch_summary_CN.md"
-                        cn_path.write_text(translated, encoding="utf-8")
-                        console.print(f"  [green]✓[/green] [dim]{cn_path.name}{chunk_info}[/dim]")
-                except Exception as e:
-                    console.print(f"[yellow]Warning: Failed to translate batch summary: {e}[/yellow]")
-            else:
-                # Sequential mode: ask user interactively
-                user_input = input("Translate batch summary to Chinese? [y/N]: ").strip().lower()
-                if user_input in ("y", "yes"):
-                    from cli.main import _translate_content, _split_translation_chunks
-                    from tradingagents.llm_clients.factory import create_llm_client
-                    try:
-                        provider = self.profile_config.get("llm_provider", DEFAULT_CONFIG["llm_provider"])
-                        model = (
-                            self.profile_config.get("shallow_thinker")
-                            or self.profile_config.get("quick_think_llm")
-                            or self.profile_config.get("deep_thinker")
-                            or self.profile_config.get("deep_think_llm")
-                            or DEFAULT_CONFIG["quick_think_llm"]
-                        )
-                        base_url = self.profile_config.get("backend_url")
-                        if model:
-                            client = create_llm_client(provider, model, base_url)
-                            llm = client.get_llm()
-                            content = md_path.read_text(encoding="utf-8")
-                            chunks = _split_translation_chunks(content)
-                            chunk_info = f" ({len(chunks)} chunks)" if len(chunks) > 1 else ""
-                            translated = _translate_content(llm, content)
-                            cn_path = self.output_dir / "batch_summary_CN.md"
-                            cn_path.write_text(translated, encoding="utf-8")
-                            console.print(f"  [green]✓[/green] [dim]{cn_path.name}{chunk_info}[/dim]")
-                    except Exception as e:
-                        console.print(f"[yellow]Warning: Failed to translate batch summary: {e}[/yellow]")
 
         return md_path
