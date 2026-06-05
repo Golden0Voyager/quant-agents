@@ -163,7 +163,7 @@ class TestSaveReportToDisk:
         content = report_path.read_text(encoding="utf-8")
         assert "Analysis Date: 2026-05-19" in content
 
-    def test_creates_subfolders_and_merged_docs(self, tmp_path, sample_final_state):
+    def test_creates_subfolders_and_consolidated_report(self, tmp_path, sample_final_state):
         save_path = tmp_path / "reports" / "AAPL"
         save_report_to_disk(sample_final_state, "AAPL", save_path)
 
