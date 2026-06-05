@@ -330,28 +330,59 @@ class BatchRunner:
         decision = final_state.get("final_trade_decision", "")
         company = final_state.get("company_name", "")
 
-        def _find(names: str) -> str:
-            """Try key-value format first, then markdown table format."""
-            # Key-value: 入场价: 187.00
+        # Fallback: try to extract company name from report text if missing in state
+        if not company and decision:
+            # Try patterns like "## 600050.SS - 中国联通 投资分析" or "**公司名称**: 中国联通"
+            company_patterns = [
+                r"#+\s*(?:\S+\s+)?-\s*([^\n\(（]{2,20}?)\s*(?:\(|（|\n|$)",
+                r"(?:公司名称|Company Name)[:：]\s*([^\n]{2,20})",
+                r"关于\s*([^\n\(（]{2,20}?)\s*(?:\(|（|\d{6})",
+            ]
+            for pattern in company_patterns:
+                m = re.search(pattern, decision)
+                if m:
+                    candidate = m.group(1).strip()
+                    # Filter out pure ticker codes or numeric values
+                    if candidate and not re.match(r"^\d+$", candidate):
+                        company = candidate
+                        break
+
+        def _find_strict_numeric(names: str) -> str:
+            """Extract numeric/percentage values only."""
+            # Key-value: strictly capture numeric values (digits, decimal, %)
+            # Tolerates surrounding markdown bold ** and trailing unit words.
+            patterns = [
+                rf"(?:^|\n|\|)\s*\*?\*?(?:{names})\*?\*?\s*[:：]\s*\*?\*?([0-9]+%?(?:\.[0-9]+)?)\s*(?:USD|CNY|元|%)?\*?\*?(?:\s|$|\|)",
+                rf"(?:^|\n|\|)\s*\*?\*?(?:{names})\*?\*?\s*[:：]\s*\*?\*?([0-9]+%?(?:\.[0-9]+)?(?:\s*-\s*[0-9]+%?(?:\.[0-9]+)?)?)\s*(?:USD|CNY|元|%)?\*?\*?(?:\s|$|\|)",
+            ]
+            for pattern in patterns:
+                m = re.search(pattern, decision, re.IGNORECASE | re.MULTILINE)
+                if m:
+                    return m.group(1).strip()
+            return ""
+
+        def _find_flexible(names: str) -> str:
+            """Fallback: more lenient matching for non-standard formats."""
             m = re.search(
-                rf"(?:\*\*)?(?:{names})(?:\*\*)?\s*[:：]\s*(?:\*\*)?([^\n]+?)(?:\*\*)?",
-                decision,
-                re.IGNORECASE,
-            )
-            if m:
-                return m.group(1).strip()
-            # Table: | 入场价 | 187.00元 |
-            m = re.search(
-                rf"(?:^|\|)\s*(?:\*\*)?(?:{names})(?:\*\*)?\s*\|\s*([^|\n]+?)\s*(?:\||$)",
+                rf"(?:^|\n|\|)\s*\*?\*?(?:{names})\*?\*?\s*[:：]\s*\*?\*?([^\n|]+?)(?:\*\*|\n|\||$)",
                 decision,
                 re.IGNORECASE | re.MULTILINE,
             )
-            return m.group(1).strip() if m else ""
+            if m:
+                return m.group(1).strip()
+            return ""
+
+        def _find(names: str) -> str:
+            """Prefer strict numeric extraction, fallback to flexible."""
+            val = _find_strict_numeric(names)
+            if val:
+                return val
+            return _find_flexible(names)
 
         # Rating — key-value or quoted like 「持有」评级
         rating_raw = ""
         rating_m = re.search(
-            r"(?:\*\*)?(?:Rating|Decision|评级|建议)(?:\*\*)?\s*[:：]\s*(?:\*\*)?([\w一-鿿]+)(?:\*\*)?",
+            r"(?:\*\*)?(?:Rating|Decision|评级|建议|决策|结论)(?:\*\*)?\s*[:：]\s*(?:\*\*)?([\w一-鿿]+)(?:\*\*)?",
             decision,
             re.IGNORECASE,
         )
@@ -359,7 +390,7 @@ class BatchRunner:
             rating_raw = rating_m.group(1)
         else:
             rating_m = re.search(
-                r"[\"「【]([\w一-鿿]+)[\"」】]\s*(?:评级|建议)",
+                r"[\"「【]([\w一-鿿]+)[\"」】]\s*(?:评级|建议|决策|结论)",
                 decision,
                 re.IGNORECASE,
             )
@@ -372,21 +403,36 @@ class BatchRunner:
 
         entry = _find(r"Entry|entry_price|入场价|买入价|目标价")
         stop = _find(r"Stop|stop_loss|止损价|止损线|止损")
-        size = _find(r"Size|position_size|position_sizing|仓位上限|仓位|持仓|持仓比例|仓位占比")
+        size = _find(r"Size|position_size|position_sizing|仓位上限|仓位|持仓比例|仓位占比")
 
         def _clean(val: str) -> str:
             if not val:
                 return val
+            # Remove prefix symbols
             val = re.sub(r"^[≤≥~≈]\s*", "", val)
-            val = re.sub(r"\s*[元%\s]+$", "", val)
+            # Remove CJK characters and common non-numeric text
+            val = re.sub(r"[一-鿿]", "", val)
+            # Remove everything except digits, dot, dash (for ranges), and %
+            val = re.sub(r"[^0-9.\-%]", "", val)
+            # Clean up leading/trailing non-numeric chars
+            val = re.sub(r"^[^0-9.]+", "", val)
+            val = re.sub(r"[^0-9.%]+$", "", val)
             return val.strip()
+
+        def _validate_numeric(val: str) -> bool:
+            """Check if cleaned value contains at least one digit."""
+            return bool(val) and bool(re.search(r"[0-9]", val))
+
+        cleaned_entry = _clean(entry)
+        cleaned_stop = _clean(stop)
+        cleaned_size = _clean(size)
 
         self.summaries[ticker] = {
             "company": company or ticker,
             "rating": rating,
-            "entry": _clean(entry) or "—",
-            "stop": _clean(stop) or "—",
-            "size": _clean(size) or "—",
+            "entry": cleaned_entry if _validate_numeric(cleaned_entry) else "—",
+            "stop": cleaned_stop if _validate_numeric(cleaned_stop) else "—",
+            "size": cleaned_size if _validate_numeric(cleaned_size) else "—",
         }
 
     def run(self) -> None:
