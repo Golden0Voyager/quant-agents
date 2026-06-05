@@ -119,12 +119,22 @@ class BatchRunner:
         return ticker
 
     def _is_already_completed(self, ticker: str) -> bool:
-        """Check if ticker was already analysed for the target date.
+        """Return True if a matching report already exists for the target date.
+
+        Thin boolean wrapper around :meth:`_find_existing_report` so the skip
+        path can reuse the located report to backfill the batch summary.
+        """
+        return self._find_existing_report(ticker) is not None
+
+    def _find_existing_report(self, ticker: str) -> Optional[Path]:
+        """Locate an existing ``complete_report.md`` for the target date.
 
         Scans the current output directory *and* all historical batch_* folders
         under the same ``reports/`` root.  A report is considered a match only
         when its embedded ``Analysis Date`` equals the configured
         ``analysis_date`` (falls back to today for legacy reports).
+
+        Returns the matching report path, or ``None`` when no report matches.
         """
         target_date = self.profile_config.get("analysis_date") or datetime.now().strftime("%Y-%m-%d")
 
@@ -153,18 +163,20 @@ class BatchRunner:
 
         # 1. Check current batch directory
         for cand in candidates:
-            if _has_matching_report(self.output_dir / cand / "complete_report.md"):
-                return True
+            path = self.output_dir / cand / "complete_report.md"
+            if _has_matching_report(path):
+                return path
 
         # 2. Check historical batch_* directories
         reports_dir = self.output_dir.parent
         if reports_dir.exists():
             for batch_dir in reports_dir.glob("batch_*"):
                 for cand in candidates:
-                    if _has_matching_report(batch_dir / cand / "complete_report.md"):
-                        return True
+                    path = batch_dir / cand / "complete_report.md"
+                    if _has_matching_report(path):
+                        return path
 
-        return False
+        return None
 
     def _build_config(self) -> dict:
         config = DEFAULT_CONFIG.copy()
@@ -318,16 +330,18 @@ class BatchRunner:
                 graph.graph = graph.workflow.compile()
 
     def _extract_summary(self, ticker: str, final_state: dict) -> None:
-        """Extract portfolio decision for batch summary.
+        """Extract the portfolio decision for the batch summary.
 
-        Supports both English (structured-output) and Chinese (free-text fallback)
-        decision formats. When the LLM falls back to free text because the provider
-        lacks structured-output support, the prose may use Chinese labels such as
-        ``评级：减持`` or ``止损价 24.30``.
+        Reads rating / entry / stop / size out of the Portfolio Manager's
+        decision, falling back to the Trader's proposal for the numeric levels
+        (the PM is told to leave those blank when the Trader omits them, but the
+        Trader is required to always provide them). Supports both English
+        (structured-output) and Chinese (free-text fallback) decision formats.
         """
         import re
 
         decision = final_state.get("final_trade_decision", "")
+        trader = final_state.get("trader_investment_plan", "")
         company = final_state.get("company_name", "")
 
         # Fallback: try to extract company name from report text if missing in state
@@ -347,93 +361,160 @@ class BatchRunner:
                         company = candidate
                         break
 
-        def _find_strict_numeric(names: str) -> str:
-            """Extract numeric/percentage values only."""
-            # Key-value: strictly capture numeric values (digits, decimal, %)
-            # Tolerates surrounding markdown bold ** and trailing unit words.
+        fields = self._parse_summary_fields(decision, trader)
+        self.summaries[ticker] = {"company": company or ticker, **fields}
+
+    @staticmethod
+    def _parse_summary_fields(decision: str, trader: str) -> dict:
+        """Parse rating / entry / stop / size from decision text, with Trader fallback.
+
+        ``decision`` is the Portfolio Manager's final decision (authoritative
+        for the rating); ``trader`` is the Trader's proposal, used as a fallback
+        source for the numeric entry / stop / size levels the PM often omits.
+        """
+        import re
+        from tradingagents.agents.utils.rating import parse_rating
+
+        def _find_strict_numeric(text: str, names: str) -> str:
+            """Extract numeric/percentage values only, tolerating markdown bold."""
             patterns = [
                 rf"(?:^|\n|\|)\s*\*?\*?(?:{names})\*?\*?\s*[:：]\s*\*?\*?([0-9]+%?(?:\.[0-9]+)?)\s*(?:USD|CNY|元|%)?\*?\*?(?:\s|$|\|)",
                 rf"(?:^|\n|\|)\s*\*?\*?(?:{names})\*?\*?\s*[:：]\s*\*?\*?([0-9]+%?(?:\.[0-9]+)?(?:\s*-\s*[0-9]+%?(?:\.[0-9]+)?)?)\s*(?:USD|CNY|元|%)?\*?\*?(?:\s|$|\|)",
             ]
             for pattern in patterns:
-                m = re.search(pattern, decision, re.IGNORECASE | re.MULTILINE)
+                m = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
                 if m:
                     return m.group(1).strip()
             return ""
 
-        def _find_flexible(names: str) -> str:
+        def _find_flexible(text: str, names: str) -> str:
             """Fallback: more lenient matching for non-standard formats."""
             m = re.search(
                 rf"(?:^|\n|\|)\s*\*?\*?(?:{names})\*?\*?\s*[:：]\s*\*?\*?([^\n|]+?)(?:\*\*|\n|\||$)",
-                decision,
+                text,
                 re.IGNORECASE | re.MULTILINE,
             )
-            if m:
-                return m.group(1).strip()
-            return ""
+            return m.group(1).strip() if m else ""
 
         def _find(names: str) -> str:
-            """Prefer strict numeric extraction, fallback to flexible."""
-            val = _find_strict_numeric(names)
-            if val:
-                return val
-            return _find_flexible(names)
+            """Prefer the PM decision, fall back to the Trader's proposal."""
+            for text in (decision, trader):
+                val = _find_strict_numeric(text, names)
+                if val:
+                    return val
+            for text in (decision, trader):
+                val = _find_flexible(text, names)
+                if val:
+                    return val
+            return ""
 
-        # Rating — key-value or quoted like 「持有」评级
-        rating_raw = ""
-        rating_m = re.search(
-            r"(?:\*\*)?(?:Rating|Decision|评级|建议|决策|结论)(?:\*\*)?\s*[:：]\s*(?:\*\*)?([\w一-鿿]+)(?:\*\*)?",
-            decision,
-            re.IGNORECASE,
-        )
-        if rating_m:
-            rating_raw = rating_m.group(1)
-        else:
-            rating_m = re.search(
-                r"[\"「【]([\w一-鿿]+)[\"」】]\s*(?:评级|建议|决策|结论)",
-                decision,
-                re.IGNORECASE,
+        def _find_rating_label(text: str) -> str:
+            m = re.search(
+                r"(?:\*\*)?(?:Rating|Decision|评级|建议|决策|结论)(?:\*\*)?\s*[:：]\s*(?:\*\*)?([\w一-鿿]+)(?:\*\*)?",
+                text, re.IGNORECASE,
             )
-            if rating_m:
-                rating_raw = rating_m.group(1)
+            if m:
+                return m.group(1)
+            m = re.search(
+                r"[\"「【]([\w一-鿿]+)[\"」】]\s*(?:评级|建议|决策|结论)",
+                text, re.IGNORECASE,
+            )
+            return m.group(1) if m else ""
 
-        from tradingagents.agents.utils.rating import parse_rating
-
+        # Rating: PM decision is authoritative; fall back to the Trader's label,
+        # then the Trader's "FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**" line.
+        rating_raw = _find_rating_label(decision) or _find_rating_label(trader)
+        if not rating_raw:
+            m = re.search(r"FINAL TRANSACTION PROPOSAL:\s*\*?\*?([A-Za-z]+)", trader, re.IGNORECASE)
+            if m:
+                rating_raw = m.group(1)
         rating = parse_rating(rating_raw) if rating_raw else "—"
 
-        entry = _find(r"Entry|entry_price|入场价|买入价|目标价")
-        stop = _find(r"Stop|stop_loss|止损价|止损线|止损")
-        size = _find(r"Size|position_size|position_sizing|仓位上限|仓位|持仓比例|仓位占比")
+        entry = _find(r"Entry Price|Entry|entry_price|入场价|买入价|目标价")
+        stop = _find(r"Stop Loss|Stop|stop_loss|止损价|止损线|止损")
+        size = _find(r"Position Sizing|Size|position_size|position_sizing|仓位上限|仓位|持仓比例|仓位占比")
 
         def _clean(val: str) -> str:
             if not val:
                 return val
-            # Remove prefix symbols
-            val = re.sub(r"^[≤≥~≈]\s*", "", val)
-            # Remove CJK characters and common non-numeric text
-            val = re.sub(r"[一-鿿]", "", val)
-            # Remove everything except digits, dot, dash (for ranges), and %
-            val = re.sub(r"[^0-9.\-%]", "", val)
-            # Clean up leading/trailing non-numeric chars
+            val = re.sub(r"^[≤≥~≈]\s*", "", val)        # prefix symbols
+            val = re.sub(r"[一-鿿]", "", val)             # CJK characters
+            val = re.sub(r"[^0-9.\-%]", "", val)          # keep digits, dot, dash, %
             val = re.sub(r"^[^0-9.]+", "", val)
             val = re.sub(r"[^0-9.%]+$", "", val)
             return val.strip()
 
-        def _validate_numeric(val: str) -> bool:
-            """Check if cleaned value contains at least one digit."""
+        def _ok(val: str) -> bool:
             return bool(val) and bool(re.search(r"[0-9]", val))
 
-        cleaned_entry = _clean(entry)
-        cleaned_stop = _clean(stop)
-        cleaned_size = _clean(size)
-
-        self.summaries[ticker] = {
-            "company": company or ticker,
+        ce, cs, csz = _clean(entry), _clean(stop), _clean(size)
+        return {
             "rating": rating,
-            "entry": cleaned_entry if _validate_numeric(cleaned_entry) else "—",
-            "stop": cleaned_stop if _validate_numeric(cleaned_stop) else "—",
-            "size": cleaned_size if _validate_numeric(cleaned_size) else "—",
+            "entry": ce if _ok(ce) else "—",
+            "stop": cs if _ok(cs) else "—",
+            "size": csz if _ok(csz) else "—",
         }
+
+    def _extract_summary_from_report(self, ticker: str, report_path: Path) -> None:
+        """Parse an on-disk ``complete_report.md`` into a batch-summary entry.
+
+        Used when a ticker is skipped because its report already exists.  We
+        extract the company name, the Portfolio Manager's decision, and the
+        Trader's proposal from the saved markdown, then route them through
+        :meth:`_parse_summary_fields` so the final table shows the same data
+        as if the analysis had just run.
+        """
+        import re
+
+        # Company name — try the directory name first, then resolve_ticker
+        company = ""
+        ticker_dir = report_path.parent
+        if ticker_dir.name != ticker:
+            # Directory is named like "比亚迪_002594.SZ" or "002594.SZ"
+            company = ticker_dir.name.split("_")[0] if "_" in ticker_dir.name else ""
+            if company == ticker_dir.name:
+                company = ""
+        if not company:
+            try:
+                from tradingagents.ticker_resolver import resolve_ticker
+                resolved = resolve_ticker(ticker)
+                company = resolved.get("company_name", "")
+            except Exception:
+                pass
+
+        # Read the report; skip if it is empty or unreadable.
+        try:
+            text = report_path.read_text(encoding="utf-8")
+        except Exception:
+            self.summaries[ticker] = {"company": company or ticker, "rating": "—", "entry": "—", "stop": "—", "size": "—"}
+            return
+
+        if not text:
+            self.summaries[ticker] = {"company": company or ticker, "rating": "—", "entry": "—", "stop": "—", "size": "—"}
+            return
+
+        # Extract the Portfolio Manager section (the authoritative rating source).
+        decision = ""
+        pm_match = re.search(
+            r"(?:^|\n)(?:#{1,2}\s*V\.\s*Portfolio Manager Decision|###\s*Decision)[\s\S]*?"
+            r"(?=(?:\n#{1,2}\s*|$))",
+            text,
+        )
+        if pm_match:
+            decision = pm_match.group(0).strip()
+
+        # Extract the Trader section (fallback for entry/stop/size).
+        trader = ""
+        trader_match = re.search(
+            r"(?:^|\n)(?:#{1,2}\s*III\.\s*Trading Team Plan|###\s*Trader)[\s\S]*?"
+            r"(?=(?:\n#{1,2}\s*|$))",
+            text,
+        )
+        if trader_match:
+            trader = trader_match.group(0).strip()
+
+        fields = self._parse_summary_fields(decision, trader)
+        self.summaries[ticker] = {"company": company or ticker, **fields}
 
     def run(self) -> None:
         """Run the full batch."""
@@ -459,10 +540,15 @@ class BatchRunner:
             )
 
             for idx, ticker in enumerate(self.tickers):
-                if self._is_already_completed(ticker):
+                existing_report = self._find_existing_report(ticker)
+                if existing_report is not None:
                     self.completed_tickers.add(ticker)
                     self.dashboard.mark_skipped(ticker)
                     self.dashboard.add_message("Skip", f"⏭ {ticker} — report already exists, skipping")
+                    # Backfill the summary from the existing report so the final
+                    # table shows its rating / levels instead of a blank row.
+                    with self._lock:
+                        self._extract_summary_from_report(ticker, existing_report)
                     self.dashboard.update_progress(
                         ticker,
                         len(self.completed_tickers) - len(self.failures),
