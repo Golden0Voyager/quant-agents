@@ -571,22 +571,6 @@ def save_report_to_disk(final_state, ticker: str, save_path: Path):
     header = f"# {_titles['header']}: {ticker}\n\n{_titles['generated']}: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\nAnalysis Date: {trade_date}\n\n"
     (save_path / "complete_report.md").write_text(header + "\n\n".join(sections), encoding="utf-8")
 
-    # Merge per-subfolder markdown files into flat merged docs
-    for subdir in sorted(save_path.iterdir()):
-        if not subdir.is_dir():
-            continue
-        md_files = sorted([f for f in subdir.iterdir() if f.suffix.lower() == ".md"])
-        if not md_files:
-            continue
-        parts = []
-        for md_file in md_files:
-            title = _file_titles.get(md_file.stem, md_file.stem)
-            parts.append(f"# {title}\n\n{md_file.read_text(encoding='utf-8')}")
-        merged_content = "\n\n---\n\n".join(parts)
-        stems = "_".join(f.stem for f in md_files)
-        merged_name = f"{subdir.name}_{stems}.md"
-        (save_path / merged_name).write_text(merged_content, encoding="utf-8")
-
     return save_path / "complete_report.md"
 
 
@@ -746,30 +730,23 @@ def run_translation_pipeline(save_path: Path, config: dict) -> None:
         )
         return
 
-    files_to_translate = []
-    for pattern in ["2_research_*.md", "3_trading_*.md", "4_risk_*.md"]:
-        files_to_translate.extend(sorted(save_path.glob(pattern)))
     complete_report = save_path / "complete_report.md"
-    if complete_report.exists():
-        files_to_translate.append(complete_report)
-
-    if not files_to_translate:
+    if not complete_report.exists():
         return
 
-    console.print("[cyan]Translating reports to Chinese...[/cyan]")
-    for file_path in files_to_translate:
-        try:
-            content = file_path.read_text(encoding="utf-8")
-            chunks = _split_translation_chunks(content)
-            chunk_info = f" ({len(chunks)} chunks)" if len(chunks) > 1 else ""
-            translated = _translate_content(llm, content)
-            output_path = file_path.with_suffix("").with_name(file_path.stem + "_CN.md")
-            output_path.write_text(translated, encoding="utf-8")
-            console.print(f"  [green]✓[/green] [dim]{output_path.name}{chunk_info}[/dim]")
-        except Exception as e:
-            console.print(
-                f"[yellow]Warning: Failed to translate {file_path.name}: {e}[/yellow]"
-            )
+    console.print("[cyan]Translating complete report to Chinese...[/cyan]")
+    try:
+        content = complete_report.read_text(encoding="utf-8")
+        chunks = _split_translation_chunks(content)
+        chunk_info = f" ({len(chunks)} chunks)" if len(chunks) > 1 else ""
+        translated = _translate_content(llm, content)
+        output_path = complete_report.with_suffix("").with_name(complete_report.stem + "_CN.md")
+        output_path.write_text(translated, encoding="utf-8")
+        console.print(f"  [green]✓[/green] [dim]{output_path.name}{chunk_info}[/dim]")
+    except Exception as e:
+        console.print(
+            f"[yellow]Warning: Failed to translate complete report: {e}[/yellow]"
+        )
 
 
 def display_complete_report(final_state):
