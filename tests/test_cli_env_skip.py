@@ -59,11 +59,13 @@ class TestCliSkipsPromptsFromEnv(unittest.TestCase):
              mock.patch.object(m, "get_analysis_date", return_value="2026-05-29"), \
              mock.patch.object(m, "select_analysts", return_value=[]), \
              mock.patch.object(m, "select_research_depth", return_value=1), \
+             mock.patch("questionary.confirm") as mock_confirm, \
              mock.patch.object(m, "ensure_api_key") as ensure_key, \
              mock.patch.object(m, "select_llm_provider") as prompt_provider, \
              mock.patch.object(m, "ask_output_language") as prompt_lang, \
              mock.patch.object(m, "select_shallow_thinking_agent") as prompt_quick, \
              mock.patch.object(m, "select_deep_thinking_agent") as prompt_deep:
+            mock_confirm.return_value.ask.return_value = True
             sel = m.get_user_selections()
 
         # None of the LLM selection prompts should have been shown.
