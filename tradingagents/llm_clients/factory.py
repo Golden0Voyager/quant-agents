@@ -10,6 +10,7 @@ _OPENAI_COMPATIBLE = (
     "minimax", "minimax-cn",
     "ollama", "openrouter",
     "sensenova", "mimo", "kimi",
+    "agnes", "modelscope", "nvidia",
 )
 
 
