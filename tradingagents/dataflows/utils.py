@@ -7,10 +7,12 @@ from typing import Annotated
 
 SavePathType = Annotated[str, "File path to save data. If None, data is not saved."]
 
-# Tickers can contain letters, digits, dot, dash, underscore, and caret
-# (for index symbols like ^GSPC). Anything else is rejected so the value
-# never escapes a containing directory when interpolated into a path.
-_TICKER_PATH_RE = re.compile(r"^[A-Za-z0-9._\-\^]+$")
+# Tickers can contain letters, digits, dot, dash, underscore, caret
+# (index symbols like ^GSPC), equals (futures like GC=F), and plus
+# (forex/CFD symbols like XAUUSD+). None of these enable directory
+# traversal, so the value never escapes a containing directory when
+# interpolated into a path. Anything else is rejected.
+_TICKER_PATH_RE = re.compile(r"^[A-Za-z0-9._\-\^=+]+$")
 
 # Patterns to extract a clean ticker from LLM-hallucinated text
 # (e.g. "极速查询到的证券代码为 601899.SS")

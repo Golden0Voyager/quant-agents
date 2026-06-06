@@ -76,6 +76,7 @@ from .smartmoney_vendor import (
     get_sector_fund_flow as get_smartmoney_sector_fund_flow,
     get_shareholder_count as get_smartmoney_shareholder_count,
 )
+from .symbol_utils import NoMarketDataError
 
 # Configuration and routing logic
 from .config import get_config
@@ -324,8 +325,10 @@ def route_to_vendor(method: str, *args, **kwargs):
         if vendor not in fallback_vendors:
             fallback_vendors.append(vendor)
 
+    last_no_data: NoMarketDataError | None = None
+    first_error: Exception | None = None
+
     # Track whether we are serving an A-share ticker for targeted logging
-    symbol = args[0] if args else kwargs.get("symbol") or kwargs.get("ticker")
     is_ashare = isinstance(symbol, str) and is_a_share_ticker(symbol)
 
     for vendor in fallback_vendors:
@@ -347,6 +350,11 @@ def route_to_vendor(method: str, *args, **kwargs):
                     method,
                 )
             return result
+        except AlphaVantageRateLimitError:
+            continue  # Rate limits: try the next vendor
+        except NoMarketDataError as e:
+            last_no_data = e  # No data here; another vendor may have it
+            continue
         except Exception as exc:
             # For A-share tickers, elevate AkShare failure from debug -> warning
             if is_ashare and vendor == "akshare":
@@ -367,7 +375,33 @@ def route_to_vendor(method: str, *args, **kwargs):
                     type(exc).__name__,
                     exc,
                 )
+            # A fallback vendor failing for an incidental reason (e.g. no API
+            # key configured) must not crash the call when another vendor
+            # already determined the symbol simply has no data. Remember the
+            # first error so a genuine primary-vendor failure still surfaces.
+            if first_error is None:
+                first_error = exc
             continue  # Try next vendor in fallback chain
+
+    # If any vendor reported "no data", the symbol is genuinely unavailable.
+    # Return one explicit, instructive sentinel rather than a vendor-specific
+    # empty string, so the agent reports "unavailable" instead of inventing a
+    # value. This takes precedence over incidental fallback errors.
+    if last_no_data is not None:
+        sym = last_no_data.symbol
+        canonical = last_no_data.canonical
+        resolved = "" if canonical == sym else f" (resolved to '{canonical}')"
+        return (
+            f"NO_DATA_AVAILABLE: No market data found for '{sym}'{resolved} from "
+            f"any configured vendor. The symbol may be invalid, delisted, or not "
+            f"covered by Yahoo Finance / Alpha Vantage. Do not estimate or "
+            f"fabricate values — report that data is unavailable for this symbol."
+        )
+
+    # No vendor returned data and none reported clean "no data" — surface the
+    # first real error (e.g. the primary vendor's network failure).
+    if first_error is not None:
+        raise first_error
 
     logger.error("No available vendor for method='%s' symbol='%s'", method, symbol)
     raise RuntimeError(f"No available vendor for '{method}'")

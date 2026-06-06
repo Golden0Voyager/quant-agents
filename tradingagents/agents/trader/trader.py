@@ -7,7 +7,10 @@ import functools
 from langchain_core.messages import AIMessage
 
 from tradingagents.agents.schemas import TraderProposal, render_trader_proposal
-from tradingagents.agents.utils.agent_utils import build_instrument_context
+from tradingagents.agents.utils.agent_utils import (
+    get_instrument_context_from_state,
+    get_language_instruction,
+)
 from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
@@ -18,9 +21,9 @@ def create_trader(llm):
     structured_llm = bind_structured(llm, TraderProposal, "Trader")
 
     def trader_node(state, name):
-        ticker = state["company_of_interest"]
-        company_name = state.get("company_name", "")
-        instrument_context = build_instrument_context(ticker, company_name)
+        company_name = state["company_of_interest"]
+        ticker = company_name
+        instrument_context = get_instrument_context_from_state(state)
         investment_plan = state["investment_plan"]
 
         holdings_context = state.get("holdings_context", {})
@@ -48,6 +51,7 @@ def create_trader(llm):
                     "You MUST include concrete entry price, stop-loss price, and position sizing "
                     "guidance in your response. Do not omit these fields even if the research plan "
                     "does not explicitly state them—derive them from the technical and fundamental data."
+                    + get_language_instruction()
                 ),
             },
             {

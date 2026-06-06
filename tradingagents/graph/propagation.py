@@ -19,16 +19,25 @@ class Propagator:
         self,
         company_name: str,
         trade_date: str,
+        asset_type: str = "stock",
         past_context: str = "",
-        company_name_str: str = "",
+        instrument_context: str = "",
         holdings_context: dict | None = None,
         transactions_context: list | None = None,
     ) -> Dict[str, Any]:
-        """Create the initial state for the agent graph."""
+        """Create the initial state for the agent graph.
+
+        ``instrument_context`` is the deterministic ticker-identity string
+        resolved once at run start (see
+        ``TradingAgentsGraph.resolve_instrument_context``). When empty, agents
+        fall back to ticker-only context via
+        ``get_instrument_context_from_state``.
+        """
         return {
-            "messages": [("human", company_name_str or company_name)],
+            "messages": [("human", company_name)],
             "company_of_interest": company_name,
-            "company_name": company_name_str,
+            "asset_type": asset_type,
+            "instrument_context": instrument_context,
             "trade_date": str(trade_date),
             "past_context": past_context,
             "holdings_context": holdings_context or {},

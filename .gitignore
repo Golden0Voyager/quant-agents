@@ -218,6 +218,9 @@ __marimo__/
 # Cache
 **/data_cache/
 
+# Enterprise env file (secrets)
+.env.enterprise
+
 # Generated reports
 reports/
 
