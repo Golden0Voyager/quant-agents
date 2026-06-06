@@ -15,7 +15,7 @@ Multi-agent LLM trading framework on LangGraph. Simulates a trading firm: analys
 uv run tradingagents                        # Interactive CLI
 python -m cli.main batch my-list            # Batch run (Rich TUI)
 python -m cli.main batch my-list --output-dir ./reports
-uv run pytest -m unit                       # Unit tests
+uv run pytest -m unit                       # Unit tests (432 total)
 uv run pytest -m integration                # Needs API keys
 ```
 
@@ -27,12 +27,14 @@ uv run pytest -m integration                # Needs API keys
 
 ### Graph Pipeline (StateGraph in `graph/setup.py`)
 
-1. **Analysts** (parallel, each has tool loop + Msg Clear node): Market (indicators + OHLCV), Social Media (sentiment), News (global + insider), Fundamentals (financials)
+1. **Analysts** (parallel, each has tool loop + Msg Clear node): Market (indicators + OHLCV), Sentiment (StockTwits + Reddit), News (global + insider), Fundamentals (financials)
 2. **Research Team** — Bull vs Bear debate (`max_debate_rounds`)
 3. **Research Manager** — Structured `ResearchPlan` (rating + rationale + actions)
 4. **Trader** — Structured `TraderProposal` (action + entry/stop/sizing)
 5. **Risk Management** — Aggressive / Neutral / Conservative debate (`max_risk_discuss_rounds`)
 6. **Portfolio Manager** — Structured `PortfolioDecision` (Buy/Overweight/Hold/Underweight/Sell)
+
+Analyst execution timing via `tradingagents/graph/analyst_execution.py`.
 
 ### Dual-LLM
 
@@ -43,13 +45,15 @@ uv run pytest -m integration                # Needs API keys
 
 Routing via `interface.py` → yfinance / alpha_vantage / akshare (A-share Eastmoney).
 A-share: `akshare_vendor.py` + `akshare_common.py` (`format_money_cn`, `to_akshare_symbol`, `no_proxy`).
+Market data validation via `market_data_validator.py` (grounding numerical claims).
 
 ### LLM Clients (`tradingagents/llm_clients/`)
 
 - `factory.py` — Lazy-import routing
-- `openai_client.py` — OpenAI-compatible (OpenAI, xAI, DeepSeek, Qwen, GLM, OpenRouter, Ollama, SenseNova)
+- `openai_client.py` — OpenAI-compatible (OpenAI, xAI, DeepSeek, Qwen, GLM, OpenRouter, Ollama, SenseNova, Agnes AI, ModelScope, NVIDIA NIM, MiniMax)
   - `NormalizedChatOpenAI` — Responses API normalization
   - `DeepSeekChatOpenAI` — `reasoning_content` sidecar cache keyed by `message.id`
+  - `MiniMaxChatOpenAI` — `reasoning_content` via `reasoning_split`
 - Provider-specific: `anthropic_client.py`, `google_client.py`, `azure_client.py`
 
 ### Structured Output (`tradingagents/agents/schemas.py`)
@@ -81,8 +85,12 @@ Audit: `python scripts/report_auditor.py reports/batch_YYYYMMDD_HHMMSS`
 
 - `ChatPromptTemplate` strips `additional_kwargs` (including `reasoning_content`). DeepSeek sidecar cache keys on `message.id` to survive template recreation.
 - `deepseek-reasoner` does not support `tool_choice`; `with_structured_output` raises `NotImplementedError` → falls back to free text.
+- MiniMax M2.x uses `reasoning_split` for `reasoning_content` extraction (not sidecar pattern).
+- `TRADINGAGENTS_*` env vars (e.g. `TRADINGAGENTS_DEFAULT_LLM`) override `DEFAULT_CONFIG`.
+- `OLLAMA_BASE_URL` env var for remote Ollama endpoints.
 - All file I/O uses `encoding="utf-8"`.
 - Env: `.env` (copied from `.env.example`) + optional `.env.enterprise`.
+- New providers: `AGNES_API_KEY`, `MODELSCOPE_API_KEY`, `NVIDIA_API_KEY` in `.env`.
 
 ## Agent skills
 
