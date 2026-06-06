@@ -19,15 +19,15 @@ def test_dashboard_update_progress():
 
 def test_dashboard_agent_status():
     bd = BatchDashboard(total=3, profile_name="test")
-    bd.set_agent_status("Market Analyst", "completed")
-    bd.set_agent_status("Trader", "in_progress")
+    bd.update_agent_status("Market Analyst", "completed")
+    bd.update_agent_status("Trader", "in_progress")
     assert bd.agent_status["Market Analyst"] == "completed"
     assert bd.agent_status["Trader"] == "in_progress"
 
 
 def test_dashboard_reset_for_next_stock():
     bd = BatchDashboard(total=3, profile_name="test")
-    bd.set_agent_status("Market Analyst", "completed")
+    bd.update_agent_status("Market Analyst", "completed")
     bd.reset_for_next_stock()
     assert bd.agent_status == {}
     assert bd.current_report is None
