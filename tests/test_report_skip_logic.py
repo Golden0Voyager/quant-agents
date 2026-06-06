@@ -229,7 +229,8 @@ class TestPropagateSkipsWhenStateLogExists:
                 config=config,
                 debug=False,
             )
-            final_state, signal = graph.propagate("AAPL", "2026-05-19")
+            with patch.object(graph, "_resolve_pending_entries"):
+                final_state, signal = graph.propagate("AAPL", "2026-05-19")
 
         assert final_state["final_trade_decision"] == "Cached decision: Hold"
         assert signal is not None
