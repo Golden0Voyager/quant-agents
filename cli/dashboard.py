@@ -162,11 +162,10 @@ class AnalysisDashboard:
             self._tool_call_active.pop(target, None)
 
     def update_agent_status(self, agent: str, status: str) -> None:
-        if agent in self.agent_status:
-            self.agent_status[agent] = status
-            self.current_agent = agent
-            if status != "in_progress":
-                self._tool_call_active.pop(agent, None)
+        self.agent_status[agent] = status
+        self.current_agent = agent
+        if status != "in_progress":
+            self._tool_call_active.pop(agent, None)
 
     def update_report_section(self, section_name: str, content: str) -> None:
         if section_name in self.report_sections:
