@@ -192,6 +192,43 @@ MODEL_OPTIONS: ProviderModeOptions = {
             ("Custom model ID", "custom"),
         ],
     },
+    # Agnes AI: free tier with 256K context, tool calling, thinking mode.
+    "agnes": {
+        "quick": [
+            ("Agnes-2.0-Flash - Fast, 256K ctx, tool calling", "agnes-2.0-flash"),
+            ("Custom model ID", "custom"),
+        ],
+        "deep": [
+            ("Agnes-2.0-Flash - Fast, 256K ctx, tool calling", "agnes-2.0-flash"),
+            ("Custom model ID", "custom"),
+        ],
+    },
+    # ModelScope: Chinese model hub, daily 2000 free requests.
+    "modelscope": {
+        "quick": [
+            ("DeepSeek-V4-Flash - Latest V4, 1M ctx", "deepseek-ai/DeepSeek-V4-Flash"),
+            ("Qwen3.5-397B-A17B - Alibaba MoE flagship", "Qwen/Qwen3.5-397B-A17B"),
+            ("Custom model ID", "custom"),
+        ],
+        "deep": [
+            ("DeepSeek-V4-Flash - Latest V4, 1M ctx", "deepseek-ai/DeepSeek-V4-Flash"),
+            ("GLM-5.1 - Zhipu AI latest", "ZhipuAI/GLM-5.1"),
+            ("Custom model ID", "custom"),
+        ],
+    },
+    # NVIDIA NIM: optimized on H200/B200, 1000 free credits.
+    "nvidia": {
+        "quick": [
+            ("DeepSeek-V4-Pro - Optimized on B200", "deepseek-ai/deepseek-v4-pro"),
+            ("Gemma-4-31B-IT - Google latest", "google/gemma-4-31b-it"),
+            ("Custom model ID", "custom"),
+        ],
+        "deep": [
+            ("DeepSeek-V4-Pro - Optimized on B200", "deepseek-ai/deepseek-v4-pro"),
+            ("Llama-3.2-90B-Vision - Multimodal", "meta/llama-3.2-90b-vision-instruct"),
+            ("Custom model ID", "custom"),
+        ],
+    },
     # OpenRouter: fetched dynamically. Azure: any deployed model name.
     # Ollama display labels intentionally omit a "local" marker — the
     # endpoint is now configurable via OLLAMA_BASE_URL, so the same labels
