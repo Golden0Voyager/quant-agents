@@ -167,16 +167,12 @@ def to_yuan(value: Any, source_unit: str) -> Optional[float]:
 
 
 def format_money_cn(value_yuan: Optional[float]) -> str:
-    """Format yuan as a Chinese-friendly string with auto-scaled unit.
-
-    Appends the English equivalent in parentheses to prevent LLM
-    unit misinterpretation (e.g. 亿元 being read as billion).
-    """
+    """Format yuan as a Chinese-friendly string with auto-scaled unit."""
     if value_yuan is None:
         return "N/A"
     abs_v = abs(value_yuan)
     if abs_v >= 100_000_000:
-        return f"{value_yuan / 100_000_000:.2f}亿元 (≈{value_yuan / 1_000_000_000:.2f} billion CNY)"
+        return f"{value_yuan / 100_000_000:.2f}亿"
     if abs_v >= 10_000:
-        return f"{value_yuan / 10_000:.2f}万元 (≈{value_yuan / 1_000_000:.2f} million CNY)"
-    return f"{value_yuan:.2f}元"
+        return f"{value_yuan / 10_000:.2f}万"
+    return f"{value_yuan:.2f}"
