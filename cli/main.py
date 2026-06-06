@@ -1846,6 +1846,7 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
 def run_batch_analysis(tickers: list[str], profile_config: dict, checkpoint: bool = False, output_dir: Optional[Path] = None, watchlist_name: Optional[str] = None, holdings: dict | None = None, workers: int = 1):
     """Run unattended batch analysis for multiple tickers."""
     date_stamp = __import__("datetime").datetime.now().strftime("%Y%m%d")
+    timestamp = __import__("datetime").datetime.now().strftime("%Y%m%d_%H%M%S")
     if output_dir is None:
         suffix = watchlist_name if watchlist_name else "custom"
         output_dir = Path.cwd() / "reports" / f"{date_stamp}_batch_{suffix}"
