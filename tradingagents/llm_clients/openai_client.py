@@ -203,6 +203,9 @@ _PROVIDER_BASE_URL = {
     "sensenova":  "https://token.sensenova.cn/v1",
     "mimo":       "https://token-plan-cn.xiaomimimo.com/v1",
     "kimi":       "https://api.kimi.com/coding/v1",
+    "agnes":      "https://apihub.agnes-ai.com/v1",
+    "modelscope": "https://api-inference.modelscope.cn/v1",
+    "nvidia":     "https://integrate.api.nvidia.com/v1",
 
 }
 
