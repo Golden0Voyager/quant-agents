@@ -14,6 +14,7 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -246,26 +247,43 @@ class TestBackwardCompatibility:
 @pytest.mark.integration
 class TestPortfolioSyncIntegration:
     def test_sync_from_gsheet(self):
-        """Requires gws CLI auth and a valid sheet ID."""
+        """Sync from a mocked Google Sheet response."""
         from tradingagents.portfolio import PortfolioSyncService
 
-        # Use the user's sheet for integration test
         sheet_id = "1g8EqjG8dVVVmH9Tq7Wq8UkXP72T7hoXZVP1cvqZz9g4"
         sync = PortfolioSyncService(sheet_id=sheet_id, worksheet="total")
-        portfolio = sync.sync()
 
-        assert len(portfolio.holdings) > 0
+        mock_rows = [
+            ["代码", "资产名称", "持仓成本", "持仓数量", "现价", "投入本金 (元)", "盈亏率", "仓位占比", "网格策略"],
+            ["600519", "贵州茅台", "1500.00", "100", "1600.00", "150000.00", "6.67%", "50.00%", ""],
+            ["002241", "歌尔股份", "28.41", "4500", "25.37", "127845.00", "-10.70%", "9.59%", "网格宽度: +3%/-3%"],
+            ["合计", "", "", "", "", "", "", "", ""],
+        ]
+
+        with patch.object(
+            sync, "_fetch_from_gsheet", return_value=mock_rows
+        ):
+            portfolio = sync.sync()
+
+        assert len(portfolio.holdings) == 2
         assert portfolio.metadata.source_type == "google_sheet"
-        assert portfolio.summary["total_holdings"] > 0
+        assert portfolio.summary["total_holdings"] == 2
 
         # Verify A-share suffix normalization
-        for ticker in portfolio.holdings:
-            if ticker.startswith(("6", "0", "3")) and "." not in ticker:
-                pytest.fail(f"Ticker {ticker} missing exchange suffix")
+        assert "600519.SS" in portfolio.holdings
+        assert "002241.SZ" in portfolio.holdings
 
         # Verify numeric parsing (no commas left)
-        for h in portfolio.holdings.values():
-            assert isinstance(h.shares, float)
-            assert h.shares > 0
-            assert isinstance(h.avg_cost, float)
-            assert h.avg_cost >= 0
+        h1 = portfolio.holdings["600519.SS"]
+        assert isinstance(h1.shares, float)
+        assert h1.shares == 100.0
+        assert isinstance(h1.avg_cost, float)
+        assert h1.avg_cost == 1500.0
+        assert h1.market_price == 1600.0
+        assert h1.pnl_pct == 0.0667
+        assert h1.weight == 0.5
+
+        h2 = portfolio.holdings["002241.SZ"]
+        assert h2.shares == 4500.0
+        assert h2.avg_cost == 28.41
+        assert h2.grid_strategy == "网格宽度: +3%/-3%"
