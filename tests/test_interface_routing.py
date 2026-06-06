@@ -80,8 +80,8 @@ class TestRouteToVendor:
         assert result == "YFINANCE_RESULT"
         fake_yf.assert_called_once_with("600519.SS", "rsi", "2026-05-14", 30)
 
-    def test_all_vendors_fail_raises_runtime_error(self):
-        """When every vendor raises, route_to_vendor should raise RuntimeError."""
+    def test_all_vendors_fail_raises_first_error(self):
+        """When every vendor raises, route_to_vendor should raise the first error."""
         from tradingagents.dataflows import interface
 
         def ak_raises(*a, **kw):
@@ -96,9 +96,9 @@ class TestRouteToVendor:
         with patch.dict(
             interface.VENDOR_METHODS["get_indicators"],
             {"akshare": ak_raises, "yfinance": yf_raises, "alpha_vantage": av_raises},
-            clear=False,
+            clear=True,
         ):
-            with pytest.raises(RuntimeError, match="No available vendor"):
+            with pytest.raises(ConnectionError, match="akshare down"):
                 interface.route_to_vendor(
                     "get_indicators", "600519.SS", "rsi", "2026-05-14", 30
                 )
