@@ -2,6 +2,10 @@
   <img src="assets/TauricResearch.png" style="width: 60%; height: auto;">
 </p>
 
+<p align="center">
+  <img src="docs/assets/cover.png" alt="Trading-Agents-A-Share 双 LLM 管线封面" style="width: 100%; height: auto;">
+</p>
+
 # Trading-Agents-A-Share
 
 ## A 股多 Agent 交易决策框架 · A-Share Multi-Agent Trading Framework
@@ -40,6 +44,10 @@
 ---
 
 ## 架构
+
+<p align="center">
+  <img src="docs/assets/section_12.png" alt="多 Agent 决策架构总览" style="width: 100%; height: auto;">
+</p>
 
 ```
                    ┌────────────────────────┐
@@ -157,6 +165,16 @@ tradingagents analyze --watchlist my-list --workers 3
 | `300750.SZ` | 宁德时代 | — | — | — | — |
 
 **重要说明**：LLM 框架非保证收益工具。回测表现受模型、温度、时间范围、数据质量、采样随机性影响。结果仅供多 Agent 分析研究，不构成投资建议。详见 TradingAgents 原始 README 的 Reproducibility 章节。
+
+---
+
+### 双 LLM 设计
+
+<p align="center">
+  <img src="docs/assets/section_20.png" alt="Deep Think vs Quick Think Path" style="width: 100%; height: auto;">
+</p>
+
+**双 LLM 路径**：Deep Think（Research Manager / Trader / Portfolio Manager）走深度推理；Quick Think（6 个 Analyst + 5 个辩论角色）走并行工具调用。`Trading-Agents-A-Share` 在此基础上把 LLM factory 拓展到 9 家国内国际 provider + 2 个 A 股特殊 reasoning client（`DeepSeekChatOpenAI` / `MiniMaxChatOpenAI`）。
 
 ---
 
