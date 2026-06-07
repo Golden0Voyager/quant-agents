@@ -44,6 +44,15 @@ class BatchRunner:
         self.completed_tickers: set[str] = set()
         self.failures: dict[str, str] = {}
         self.summaries: dict[str, dict] = {}
+        # Batch-wide token / cost rollup, populated by _accumulate_stats().
+        # Per-ticker snapshot lives under ["per_ticker"][ticker] so the
+        # summary table can show a per-row Tokens / Cost breakdown.
+        self.batch_stats: dict = {
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "cost_by_model": {},
+            "per_ticker": {},
+        }
         self.dashboard = BatchDashboard(total=len(tickers), profile_name=profile_config.get("name", "default"))
         # Set by run() once the Live context owns these — _refresh_display() reads
         # them. When unset (e.g. tests calling _run_single directly), refresh is a no-op.
@@ -315,6 +324,7 @@ class BatchRunner:
             # Extract summary (lock-protected for concurrent batch mode)
             with self._lock:
                 self._extract_summary(ticker, final_state)
+                self._accumulate_stats(ticker, stats_handler)
 
             # Clear checkpoint on successful completion to avoid stale state.
             if config.get("checkpoint_enabled"):
@@ -503,6 +513,53 @@ class BatchRunner:
             "size": csz if _ok(csz) else "—",
         }
 
+    def _accumulate_stats(self, ticker: str, stats_handler) -> None:
+        """Roll the per-ticker StatsCallbackHandler snapshot into the batch totals.
+
+        Skips silently when the handler is missing or returns no token info
+        (e.g. a dry-run or a test that didn't wire callbacks). Per-model cost
+        is summed across the batch; per-ticker snapshot is preserved so
+        ``generate_summary`` can render a per-row Tokens / Cost column.
+
+        Defensive against non-dict stats payloads (e.g. test mocks that
+        return a bare ``MagicMock`` from ``get_stats()``): if any value is
+        not a number we treat the whole payload as empty and move on,
+        rather than crashing the batch.
+        """
+        if stats_handler is None or not hasattr(stats_handler, "get_stats"):
+            return
+        try:
+            stats = stats_handler.get_stats()
+            if not isinstance(stats, dict):
+                return
+        except Exception:
+            return
+        in_tokens = stats.get("tokens_in", 0)
+        out_tokens = stats.get("tokens_out", 0)
+        cost_by_model = stats.get("cost_by_model")
+        if not isinstance(in_tokens, (int, float)) or isinstance(in_tokens, bool):
+            in_tokens = 0
+        if not isinstance(out_tokens, (int, float)) or isinstance(out_tokens, bool):
+            out_tokens = 0
+        if not isinstance(cost_by_model, dict):
+            cost_by_model = {}
+        with self._lock:
+            self.batch_stats["tokens_in"] += in_tokens
+            self.batch_stats["tokens_out"] += out_tokens
+            for model, cost in cost_by_model.items():
+                try:
+                    self.batch_stats["cost_by_model"][model] = (
+                        self.batch_stats["cost_by_model"].get(model, 0.0) + float(cost)
+                    )
+                except (TypeError, ValueError):
+                    continue
+            self.batch_stats["per_ticker"][ticker] = {
+                "tokens_in": in_tokens,
+                "tokens_out": out_tokens,
+                "cost": stats.get("cost") if isinstance(stats.get("cost"), (int, float)) else None,
+                "cost_by_model": dict(cost_by_model),
+            }
+
     def _extract_summary_from_report(self, ticker: str, report_path: Path) -> None:
         """Parse an on-disk ``complete_report.md`` into a batch-summary entry.
 
@@ -611,6 +668,7 @@ class BatchRunner:
                         batch_total=self.dashboard.total,
                         batch_failed=len(self.failures),
                         profile_name=self.dashboard.profile_name,
+                        stats_handler=self._batch_stats_adapter(),
                     )
                     continue
 
@@ -626,6 +684,7 @@ class BatchRunner:
                     batch_total=self.dashboard.total,
                     batch_failed=len(self.failures),
                     profile_name=self.dashboard.profile_name,
+                    stats_handler=self._batch_stats_adapter(),
                 )
 
                 try:
@@ -649,6 +708,7 @@ class BatchRunner:
                     batch_completed=self.dashboard.completed,
                     batch_total=self.dashboard.total,
                     batch_failed=self.dashboard.failed,
+                    stats_handler=self._batch_stats_adapter(),
                     profile_name=self.dashboard.profile_name,
                 )
 
@@ -659,17 +719,27 @@ class BatchRunner:
 
     def generate_summary(self) -> Path:
         """Generate batch_summary.md and batch_summary.json. Returns path to markdown."""
+        has_stats = bool(self.batch_stats.get("per_ticker"))
         lines = ["# Batch Analysis Report\n"]
-        lines.append("| Ticker | Company | Rating | Entry | Stop | Size | Status | Details |")
-        lines.append("|--------|---------|--------|-------|------|------|--------|---------|")
+        if has_stats:
+            lines.append("| Ticker | Company | Rating | Entry | Stop | Size | Tokens | Cost | Status | Details |")
+            lines.append("|--------|---------|--------|-------|------|------|--------|------|--------|---------|")
+        else:
+            lines.append("| Ticker | Company | Rating | Entry | Stop | Size | Status | Details |")
+            lines.append("|--------|---------|--------|-------|------|------|--------|---------|")
 
         all_tickers = sorted(
             set(self.tickers) | set(self.summaries.keys()) | set(self.failures.keys())
         )
         json_rows = []
         for ticker in all_tickers:
+            per_ticker_stats = self.batch_stats["per_ticker"].get(ticker, {})
+            tokens_cell, cost_cell = self._format_token_cost_cells(per_ticker_stats)
             if ticker in self.failures:
-                lines.append(f"| {ticker} | — | — | — | — | — | ❌ | — |")
+                if has_stats:
+                    lines.append(f"| {ticker} | — | — | — | — | — | — | — | ❌ | — |")
+                else:
+                    lines.append(f"| {ticker} | — | — | — | — | — | ❌ | — |")
                 json_rows.append({
                     "ticker": ticker,
                     "company": None,
@@ -677,17 +747,28 @@ class BatchRunner:
                     "entry": None,
                     "stop": None,
                     "size": None,
+                    "tokens_in": None,
+                    "tokens_out": None,
+                    "cost": None,
                     "status": "failed",
                     "error": self.failures[ticker],
                 })
             else:
                 s = self.summaries.get(ticker, {})
                 dir_name = self._build_ticker_dir_name(ticker, s.get("company", ""))
-                lines.append(
-                    f"| {ticker} | {s.get('company', ticker)} | {s.get('rating', '—')} | "
-                    f"{s.get('entry', '—')} | {s.get('stop', '—')} | {s.get('size', '—')} | ✅ | "
-                    f"[Report](./{dir_name}/complete_report.md) |"
-                )
+                if has_stats:
+                    lines.append(
+                        f"| {ticker} | {s.get('company', ticker)} | {s.get('rating', '—')} | "
+                        f"{s.get('entry', '—')} | {s.get('stop', '—')} | {s.get('size', '—')} | "
+                        f"{tokens_cell} | {cost_cell} | ✅ | "
+                        f"[Report](./{dir_name}/complete_report.md) |"
+                    )
+                else:
+                    lines.append(
+                        f"| {ticker} | {s.get('company', ticker)} | {s.get('rating', '—')} | "
+                        f"{s.get('entry', '—')} | {s.get('stop', '—')} | {s.get('size', '—')} | ✅ | "
+                        f"[Report](./{dir_name}/complete_report.md) |"
+                    )
                 json_rows.append({
                     "ticker": ticker,
                     "company": s.get("company", ticker),
@@ -695,6 +776,9 @@ class BatchRunner:
                     "entry": s.get("entry"),
                     "stop": s.get("stop"),
                     "size": s.get("size"),
+                    "tokens_in": per_ticker_stats.get("tokens_in"),
+                    "tokens_out": per_ticker_stats.get("tokens_out"),
+                    "cost": per_ticker_stats.get("cost"),
                     "status": "success",
                     "error": None,
                 })
@@ -705,6 +789,25 @@ class BatchRunner:
             for ticker, error in sorted(self.failures.items()):
                 lines.append(f"- **{ticker}**: {error}")
 
+        # Footer with batch-wide token / cost rollup
+        if has_stats:
+            lines.append("\n## Batch Cost\n")
+            tin = self.batch_stats["tokens_in"]
+            tout = self.batch_stats["tokens_out"]
+            tin_str = f"{tin / 1000:.1f}k" if tin >= 1000 else str(tin)
+            tout_str = f"{tout / 1000:.1f}k" if tout >= 1000 else str(tout)
+            lines.append(f"- **Total tokens**: {tin_str}↑ {tout_str}↓")
+            cost_by_model = self.batch_stats["cost_by_model"]
+            if cost_by_model:
+                total_cost = sum(cost_by_model.values())
+                lines.append(f"- **Total cost**: ${total_cost:.4f}")
+                # By-model breakdown sorted by cost desc
+                lines.append("- **By model**:")
+                for model, cost in sorted(cost_by_model.items(), key=lambda kv: -kv[1]):
+                    lines.append(f"  - {model}: ${cost:.4f}")
+            else:
+                lines.append("- **Total cost**: — (no priced models in this batch)")
+
         self.output_dir.mkdir(parents=True, exist_ok=True)
         md_path = self.output_dir / "batch_summary.md"
         md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -714,3 +817,49 @@ class BatchRunner:
         json_path.write_text(json.dumps(json_rows, ensure_ascii=False, indent=2), encoding="utf-8")
 
         return md_path
+
+    def _batch_stats_adapter(self):
+        """Adapt ``self.batch_stats`` to the StatsCallbackHandler-shaped object
+        that ``update_dashboard_display`` expects. Lets the cross-ticker
+        footer reflect the running batch total (tokens / cost / by-model
+        breakdown) without per-ticker numbers, which the in-ticker chunk
+        refresh already shows.
+
+        The adapter reads ``self.batch_stats`` lazily on every
+        ``get_stats()`` call so it always reflects the latest accumulated
+        numbers — a previous version snapshotted at construction time and
+        froze the totals for the adapter's lifetime, which left the
+        footer permanently showing zeros.
+        """
+        outer = self
+
+        class _Adapter:
+            def get_stats(inner_self) -> dict:
+                snapshot = outer.batch_stats
+                cost_by_model = dict(snapshot.get("cost_by_model") or {})
+                total_cost = sum(cost_by_model.values()) if cost_by_model else None
+                return {
+                    "llm_calls": 0,
+                    "tool_calls": 0,
+                    "tokens_in": snapshot.get("tokens_in", 0),
+                    "tokens_out": snapshot.get("tokens_out", 0),
+                    "cost": total_cost,
+                    "cost_by_model": cost_by_model,
+                    "tokens_by_model": {},
+                }
+        return _Adapter()
+
+    @staticmethod
+    def _format_token_cost_cells(stats: dict) -> tuple[str, str]:
+        """Render Tokens / Cost cells for one ticker row, or '—' when unknown."""
+        in_tokens = stats.get("tokens_in") or 0
+        out_tokens = stats.get("tokens_out") or 0
+        if in_tokens or out_tokens:
+            tin = f"{in_tokens / 1000:.1f}k" if in_tokens >= 1000 else str(in_tokens)
+            tout = f"{out_tokens / 1000:.1f}k" if out_tokens >= 1000 else str(out_tokens)
+            tokens_cell = f"{tin}↑ {tout}↓"
+        else:
+            tokens_cell = "—"
+        cost = stats.get("cost")
+        cost_cell = f"${cost:.4f}" if cost is not None else "—"
+        return tokens_cell, cost_cell
