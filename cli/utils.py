@@ -84,15 +84,29 @@ def detect_asset_type(ticker: str) -> AssetType:
 
 
 def filter_analysts_for_asset_type(
-    analysts: List[AnalystType], asset_type: AssetType
+    analysts: List[AnalystType], asset_type: AssetType, ticker: Optional[str] = None
 ) -> List[AnalystType]:
-    if asset_type != AssetType.CRYPTO:
-        return analysts
-    return [
-        analyst
-        for analyst in analysts
-        if analyst != AnalystType.FUNDAMENTALS
-    ]
+    """Drop analysts that don't apply to this asset type or market.
+
+    A-share tickers (``.SS``/``.SZ``/``.BJ``/``.HK``) default to skipping
+    Sentiment Analyst because StockTwits/Reddit coverage for A-shares is
+    effectively zero. Callers that explicitly want Sentiment on an A-share
+    can ignore this helper or pass a non-A-share ticker.
+
+    Crypto drops Fundamentals (no on-chain fundamentals to analyze).
+    US/other stocks keep all analysts.
+    """
+    if asset_type == AssetType.CRYPTO:
+        analysts = [a for a in analysts if a != AnalystType.FUNDAMENTALS]
+    if ticker and _is_ashare_ticker(ticker):
+        analysts = [a for a in analysts if a != AnalystType.SOCIAL]
+    return analysts
+
+
+def _is_ashare_ticker(ticker: str) -> bool:
+    """A-share / HK tickers carry exchange suffixes StockTwits/Reddit don't cover."""
+    upper = ticker.strip().upper()
+    return upper.endswith((".SS", ".SZ", ".BJ", ".HK"))
 
 
 def get_analysis_date() -> str:
@@ -128,11 +142,19 @@ def get_analysis_date() -> str:
     return date.strip()
 
 
-def select_analysts(asset_type: AssetType = AssetType.STOCK) -> List[AnalystType]:
-    """Select analysts using an interactive checkbox."""
+def select_analysts(
+    asset_type: AssetType = AssetType.STOCK, ticker: Optional[str] = None
+) -> List[AnalystType]:
+    """Select analysts using an interactive checkbox.
+
+    Pass ``ticker`` to drop analysts that don't apply to the market (e.g.
+    Sentiment for A-share tickers where StockTwits/Reddit coverage is
+    effectively zero).
+    """
     available_analysts = filter_analysts_for_asset_type(
         [value for _, value in ANALYST_ORDER],
         asset_type,
+        ticker=ticker,
     )
     choices = questionary.checkbox(
         "Select Your [Analysts Team]:",

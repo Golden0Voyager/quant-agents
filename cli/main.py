@@ -636,7 +636,10 @@ def get_user_selections(preselected_tickers: list[str] | None = None):
             "Step 4: Analysts Team", "Select your LLM analyst agents for the analysis"
         )
     )
-    selected_analysts = select_analysts(asset_type)
+    selected_analysts = select_analysts(
+        asset_type,
+        ticker=selected_ticker if isinstance(selected_ticker, str) else None,
+    )
     console.print(
         f"[green]Selected analysts:[/green] {', '.join(analyst.value for analyst in selected_analysts)}"
     )

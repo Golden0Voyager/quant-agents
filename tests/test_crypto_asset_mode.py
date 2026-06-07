@@ -52,5 +52,45 @@ class CryptoAssetModeTests(unittest.TestCase):
         self.assertEqual(state["asset_type"], AssetType.CRYPTO.value)
 
 
+class AshareSentimentFilterTests(unittest.TestCase):
+    """A-share tickers default to skipping Sentiment Analyst (StockTwits/Reddit don't cover them)."""
+
+    def test_filters_out_sentiment_for_ashare_sse(self):
+        analysts = [
+            AnalystType.MARKET,
+            AnalystType.SOCIAL,
+            AnalystType.NEWS,
+            AnalystType.FUNDAMENTALS,
+        ]
+        self.assertEqual(
+            filter_analysts_for_asset_type(analysts, AssetType.STOCK, ticker="600729.SS"),
+            [AnalystType.MARKET, AnalystType.NEWS, AnalystType.FUNDAMENTALS],
+        )
+
+    def test_filters_out_sentiment_for_ashare_szse(self):
+        analysts = [
+            AnalystType.MARKET,
+            AnalystType.SOCIAL,
+            AnalystType.NEWS,
+            AnalystType.FUNDAMENTALS,
+        ]
+        self.assertEqual(
+            filter_analysts_for_asset_type(analysts, AssetType.STOCK, ticker="300348.SZ"),
+            [AnalystType.MARKET, AnalystType.NEWS, AnalystType.FUNDAMENTALS],
+        )
+
+    def test_keeps_sentiment_for_us_stock(self):
+        analysts = [
+            AnalystType.MARKET,
+            AnalystType.SOCIAL,
+            AnalystType.NEWS,
+            AnalystType.FUNDAMENTALS,
+        ]
+        self.assertEqual(
+            filter_analysts_for_asset_type(analysts, AssetType.STOCK, ticker="AAPL"),
+            analysts,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
