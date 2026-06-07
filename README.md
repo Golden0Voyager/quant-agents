@@ -37,7 +37,7 @@
 | **决策输出** | Trader 结构化输出建仓点 / 止损点 / 仓位比例（`TraderProposal` schema） |
 | **持久化** | 决策日志（`~/.tradingagents/memory/`）+ LangGraph checkpoint resume（崩溃自动续跑） |
 | **报告** | 中文报告输出 + 公司名消毒（防 LLM 幻觉国企 / 股票代码） |
-| **LLM** | 国内 4 家（Qwen / GLM / DeepSeek / SenseNova）+ 国际 5 家（OpenAI / Anthropic / Google / xAI / OpenRouter） |
+| **LLM** | 国内 4 家（Qwen / GLM / DeepSeek / SenseNova）+ 国际 6 家（OpenAI / Anthropic / Google / xAI / OpenRouter / **Agnes AI 免费档**）+ 本地 Ollama |
 | **工具** | 中文 Rich TUI dashboard + 批量并发（默认 3 workers）+ watchlist / profile 持久化 |
 | **测试** | 432 unit tests 全通（`uv run pytest -m unit`） |
 
