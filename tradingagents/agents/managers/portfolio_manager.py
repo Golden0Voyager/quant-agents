@@ -10,6 +10,9 @@ back gracefully to free-text generation.
 
 from __future__ import annotations
 
+import logging
+import re
+
 from tradingagents.agents.schemas import PortfolioDecision, render_pm_decision
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
@@ -19,6 +22,29 @@ from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
+from tradingagents.dataflows.market_data_validator import build_verified_market_snapshot
+
+logger = logging.getLogger(__name__)
+
+
+def _extract_snapshot_close(snapshot: str | None) -> float | None:
+    """Parse the latest verified Close price out of the snapshot markdown table.
+
+    The snapshot produced by ``build_verified_market_snapshot`` renders the
+    latest OHLCV row in a markdown table; the Close row uses ``| Close | <n> |``.
+    Returned as a float so the caller can compare against the Trader's quoted
+    entry / stop and reject obvious miscalibrations. Returns ``None`` when the
+    snapshot is unavailable or the table is missing.
+    """
+    if not snapshot:
+        return None
+    match = re.search(r"\|\s*Close\s*\|\s*([0-9]+(?:\.[0-9]+)?)\s*\|", snapshot)
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
 
 
 def create_portfolio_manager(llm):
@@ -31,6 +57,8 @@ def create_portfolio_manager(llm):
         risk_debate_state = state["risk_debate_state"]
         research_plan = state["investment_plan"]
         trader_plan = state["trader_investment_plan"]
+        ticker = state["company_of_interest"]
+        trade_date = state.get("trade_date", "")
 
         past_context = state.get("past_context", "")
         lessons_line = (
@@ -56,6 +84,24 @@ def create_portfolio_manager(llm):
             if holdings_prompt:
                 holdings_line = f"\n**Current Position:**\n{holdings_prompt}\n"
 
+        # Re-verify the snapshot in the PM node so the final decision can
+        # reject any entry / stop that the LLM may have invented upstream.
+        # We fall back gracefully when the snapshot is unavailable.
+        try:
+            snapshot = build_verified_market_snapshot(ticker, trade_date)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "PM could not refresh verified market snapshot for %s on %s: %s",
+                ticker, trade_date, exc,
+            )
+            snapshot = None
+        verified_close = _extract_snapshot_close(snapshot)
+        snapshot_block = snapshot if snapshot else (
+            "Verified market data is unavailable for this ticker on the "
+            f"requested date ({trade_date}). Treat any Trader-quoted entry / "
+            "stop as suspect and prefer leaving them null."
+        )
+
         prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
 
 {instrument_context}
@@ -78,9 +124,17 @@ def create_portfolio_manager(llm):
 
 ---
 
+**Verified Market Snapshot** (source of truth for any price level):
+
+{snapshot_block}
+
+---
+
 **Decision Requirements:**
 - Extract the entry price, stop-loss, and position sizing from the Trader's transaction proposal above and populate the corresponding fields in your decision.
+- The Trader is required to quote entry and stop-loss from the snapshot below. If the Trader's quoted value differs from the snapshot's latest Close by more than ~25% in either direction, OR the snapshot is unavailable, leave entry_price and stop_loss as null rather than copying the suspect number. Do not estimate, extrapolate, or recall a price from training data, gross-margin ratios, or any other fundamental number.
 - If the Trader's proposal lacks any of these values, leave that field empty rather than estimating or inventing a number.
+- Position sizing may be a string (e.g. ``5% of portfolio``, ``1,000 shares``) and is not bound by the snapshot.
 - Ground every conclusion in specific evidence from the analysts.{get_language_instruction()}"""
 
         final_trade_decision = invoke_structured_or_freetext(

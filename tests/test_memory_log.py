@@ -705,6 +705,60 @@ class TestPortfolioManagerInjection:
         pm_node(state)
         assert "Lessons from prior decisions" not in captured["prompt"]
 
+    def test_pm_prompt_includes_verified_snapshot(self, monkeypatch):
+        """Regression for #bug-2026-06-06-price-hallucination: the PM is now
+        fed the same verified snapshot the Trader sees, and the decision
+        requirements explicitly tell it to reject any entry / stop the
+        Trader quoted that differs from the snapshot by more than ~25%."""
+        captured = {}
+        llm = _structured_pm_llm(captured)
+        pm_node = create_portfolio_manager(llm)
+        state = _make_pm_state()
+        state["trade_date"] = "2026-06-06"
+
+        fake_snapshot = (
+            "## Verified market data snapshot for NVDA\n\n"
+            "### Latest verified OHLCV row\n\n"
+            "| Field | Value |\n|---|---:|\n"
+            "| Open | 188.10 |\n| High | 191.50 |\n| Low | 187.20 |\n"
+            "| Close | 189.50 |\n| Volume | 250000000 |\n"
+        )
+        monkeypatch.setattr(
+            "tradingagents.agents.managers.portfolio_manager.build_verified_market_snapshot",
+            lambda symbol, curr_date: fake_snapshot,
+        )
+        pm_node(state)
+        prompt = captured["prompt"]
+        # Snapshot is injected as a source of truth for price levels.
+        assert "Verified Market Snapshot" in prompt
+        assert "Latest verified OHLCV row" in prompt
+        # The PM is explicitly told to reject suspect numbers that differ
+        # from the snapshot's close by more than ~25%.
+        assert "differs from the snapshot" in prompt
+        assert "leave entry_price and stop_loss as null" in prompt
+
+    def test_pm_prompt_handles_unavailable_snapshot(self, monkeypatch):
+        """When the snapshot vendor fails inside the PM, the prompt must
+        still render a stub block that tells the PM to treat any
+        Trader-quoted number as suspect — not silently let it through."""
+        captured = {}
+        llm = _structured_pm_llm(captured)
+        pm_node = create_portfolio_manager(llm)
+        state = _make_pm_state()
+        state["trade_date"] = "2026-06-06"
+
+        def _raise(symbol, curr_date):
+            raise RuntimeError("vendor offline")
+
+        monkeypatch.setattr(
+            "tradingagents.agents.managers.portfolio_manager.build_verified_market_snapshot",
+            _raise,
+        )
+        pm_node(state)
+        prompt = captured["prompt"]
+        assert "Verified market data is unavailable" in prompt
+        assert "Trader-quoted entry / stop as suspect" in prompt
+
     def test_pm_returns_rendered_markdown_with_rating(self):
         """The structured PortfolioDecision is rendered to markdown that
         downstream consumers (memory log, signal processor, CLI display)

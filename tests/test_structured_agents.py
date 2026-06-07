@@ -164,6 +164,70 @@ class TestTraderAgent:
         result = trader(_make_trader_state())
         assert result["trader_investment_plan"] == plain_response
 
+    def test_prompt_quotes_verified_snapshot(self, monkeypatch):
+        """Regression for #bug-2026-06-06-price-hallucination: the Trader used to
+        be told ``You MUST include concrete entry price … even if the research
+        plan does not explicitly state them``, which drove the LLM to invent
+        numbers (e.g. quoting TCL科技 as 12.5 when the verified close was 4.89)
+        whenever the upstream Market Analyst could not pull a quote. The new
+        prompt injects ``build_verified_market_snapshot`` and demands the price
+        be quoted from it, or set to null if the snapshot is unavailable."""
+        captured = {}
+        llm = _structured_trader_llm(captured)
+        trader = create_trader(llm)
+        # _make_trader_state does not set trade_date; default to today's date so
+        # the snapshot path produces content.
+        from datetime import date
+        state = _make_trader_state()
+        state["trade_date"] = date(2026, 6, 6).isoformat()
+        monkeypatch.setattr(
+            "tradingagents.agents.trader.trader.build_verified_market_snapshot",
+            lambda symbol, curr_date: f"FAKE_SNAPSHOT for {symbol} on {curr_date}",
+        )
+        trader(state)
+        # Trader forwards a list of message dicts to structured_llm.invoke.
+        # Flatten the captured messages into a single string for assertions.
+        prompt = " ".join(
+            msg["content"] for msg in captured["prompt"]
+            if isinstance(msg, dict) and "content" in msg
+        )
+        # The prompt must carry the snapshot the LLM is told to quote from.
+        assert "FAKE_SNAPSHOT for NVDA on 2026-06-06" in prompt
+        # The prompt must instruct the LLM to quote price from the snapshot
+        # or set it null — never invent a number.
+        assert "from the Verified Market Snapshot" in prompt
+        assert (
+            "set entry_price and stop_loss to null rather than guessing" in prompt
+            or "set entry_price and stop_loss to null" in prompt
+        )
+        # The old ``You MUST include concrete entry price`` clause is gone.
+        assert "You MUST include concrete entry price" not in prompt
+
+    def test_prompt_handles_unavailable_snapshot(self, monkeypatch):
+        """When the snapshot vendor raises (e.g. unknown ticker, offline cache),
+        the Trader prompt must still be rendered with a stub block that tells
+        the LLM to leave entry/stop as null instead of guessing."""
+        captured = {}
+        llm = _structured_trader_llm(captured)
+        trader = create_trader(llm)
+        state = _make_trader_state()
+        state["trade_date"] = "2026-06-06"
+
+        def _raise(symbol, curr_date):
+            raise RuntimeError("vendor offline")
+
+        monkeypatch.setattr(
+            "tradingagents.agents.trader.trader.build_verified_market_snapshot",
+            _raise,
+        )
+        trader(state)
+        prompt = " ".join(
+            msg["content"] for msg in captured["prompt"]
+            if isinstance(msg, dict) and "content" in msg
+        )
+        assert "Verified market data is unavailable" in prompt
+        assert "set entry_price and stop_loss to null" in prompt
+
 
 # ---------------------------------------------------------------------------
 # Research Manager agent: structured happy path + fallback
