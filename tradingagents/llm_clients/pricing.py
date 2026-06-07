@@ -182,8 +182,17 @@ PRICING: Dict[str, Dict[str, Price]] = {
     # rate so cost tracking is consistent across providers when the user
     # routes the same model through SenseNova. Update only if SenseNova
     # changes their per-model rate.
+    #
+    # SenseNova 6.7 Flash-Lite is **free during the public-beta Token
+    # Plan** (1,500 calls / 5h, ¥0/month — verified 2026-06 against
+    # https://www.sensetime.com/cn/news-detail/51170639). SenseTime
+    # has not published a post-beta rate card yet, so we record $0
+    # here and revisit when the paid tier launches. If the user sees
+    # billing for this model in the dashboard after the beta ends,
+    # swap in the real rate from platform.sensenova.cn and update
+    # the test in tests/test_pricing_catalog.py.
     "sensenova": {
-        "sensenova-6.7-flash-lite": (0.10, 0.30),
+        "sensenova-6.7-flash-lite": (0.00, 0.00),
         "deepseek-v4-flash":        (0.14, 0.28),
     },
     # ModelScope (Alibaba inference hub). The free tier (2k req/day)

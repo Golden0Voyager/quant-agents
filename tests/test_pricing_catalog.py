@@ -78,10 +78,14 @@ def test_every_catalog_model_has_a_price(provider: str, model: str):
     )
     in_rate, out_rate = price
     assert in_rate >= 0 and out_rate >= 0
-    assert (in_rate, out_rate) != (0.0, 0.0) or provider in ("agnes", "ollama"), (
+    assert (in_rate, out_rate) != (0.0, 0.0) or provider in (
+        "agnes", "ollama", "sensenova",
+    ), (
         f"Model {model!r} under {provider!r} is priced at $0/$0 — only "
-        f"Agnes AI and Ollama should be free. If the model is genuinely "
-        f"free, document the free tier in the catalog comment."
+        f"Agnes AI, Ollama, and SenseNova (during the public-beta Token "
+        f"Plan) should be free. If the model is genuinely free, document "
+        f"the free tier in the catalog comment and add the provider to "
+        f"this whitelist."
     )
 
 
@@ -97,6 +101,14 @@ def test_ollama_is_free():
     """Ollama runs locally, so API cost is zero regardless of model size."""
     for model in ("qwen3:latest", "gpt-oss:latest", "glm-4.7-flash:latest"):
         assert get_price("ollama", model) == (0.00, 0.00)
+
+
+def test_sensenova_flash_lite_is_free_during_beta():
+    """SenseNova 6.7 Flash-Lite is in the public-beta Token Plan
+    (¥0/month, 1,500 calls/5h, verified 2026-06). When SenseTime
+    publishes the post-beta rate, this test is the single place
+    to update alongside the PRICING dict entry."""
+    assert get_price("sensenova", "sensenova-6.7-flash-lite") == (0.00, 0.00)
 
 
 def test_deepseek_pricing_matches_published_rates():
