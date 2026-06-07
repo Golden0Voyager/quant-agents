@@ -241,3 +241,6 @@ audit_reports/
 
 # macOS
 .DS_Store
+
+# Per-test scratch caches (analyst fetches, e.g. yfinance CSV dumps)
+tests/_tmp_cache/

@@ -568,6 +568,22 @@ def render_footer(
         if stats.get("cost") is not None:
             stats_parts.append(f"Cost: ${stats['cost']:.4f}")
 
+        # Per-model cost breakdown — when the run mixed providers or
+        # quick/deep models with different rates, the rolled-up total
+        # above hides which model is driving the spend. The breakdown
+        # is bounded to the two largest entries to keep the footer line
+        # readable; the full map is still in stats["cost_by_model"] for
+        # callers that want the long form.
+        cost_by_model = stats.get("cost_by_model") or {}
+        if len(cost_by_model) > 1:
+            top = sorted(
+                cost_by_model.items(), key=lambda kv: kv[1], reverse=True,
+            )[:2]
+            breakdown = "  ".join(
+                f"{model}: ${cost:.3f}" for model, cost in top
+            )
+            stats_parts.append(f"By model: {breakdown}")
+
     stats_parts.append(f"Reports: {reports_completed}/{reports_total}")
 
     if start_time:
