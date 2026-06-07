@@ -396,8 +396,25 @@ class BatchRunner:
             )
             return m.group(1).strip() if m else ""
 
-        def _find(names: str) -> str:
-            """Prefer the PM decision, fall back to the Trader's proposal."""
+        def _find(names: str, prefer_flexible: bool = False) -> str:
+            """Prefer the PM decision, fall back to the Trader's proposal.
+
+            When ``prefer_flexible`` is True (used for the ``Size`` column),
+            the free-text finder is tried first so trailing natural language
+            such as ``5% of portfolio`` is preserved alongside the percentage.
+            Strict numeric is still a fallback so ``5%``-only recommendations
+            resolve the same way as before.
+            """
+            if prefer_flexible:
+                for text in (decision, trader):
+                    val = _find_flexible(text, names)
+                    if val:
+                        return val
+                for text in (decision, trader):
+                    val = _find_strict_numeric(text, names)
+                    if val:
+                        return val
+                return ""
             for text in (decision, trader):
                 val = _find_strict_numeric(text, names)
                 if val:
@@ -432,16 +449,47 @@ class BatchRunner:
 
         entry = _find(r"Entry Price|Entry|entry_price|入场价|买入价|目标价")
         stop = _find(r"Stop Loss|Stop|stop_loss|止损价|止损线|止损")
-        size = _find(r"Position Sizing|Size|position_size|position_sizing|仓位上限|仓位|持仓比例|仓位占比")
+        size = _find(
+            r"Position Sizing|Size|position_size|position_sizing|仓位上限|仓位|持仓比例|仓位占比",
+            prefer_flexible=True,
+        )
 
         def _clean(val: str) -> str:
+            """Normalize an extracted summary field for display in the batch table.
+
+            The portfolio manager often packs multiple recommendations into a
+            single field, e.g. ``加仓1000股（约22%现有仓位），总仓位控制在10%以内``;
+            the trader pairs a number-of-shares with a target-weight range. The
+            previous implementation stripped every CJK character and kept only
+            digits, dots, dashes and percent signs, which collapsed the latter
+            case into ``100022%10%`` — a meaningless digit soup. This version
+            instead preserves the primary recommendation in readable form:
+
+            1. Drop parenthetical annotations (e.g. ``（约22%现有仓位）``).
+            2. Truncate at the first parallel-delimiter so secondary advice
+               like ``保留2,700股`` or ``单只个股不超过25%`` does not bleed
+               into the table cell.
+            3. Collapse whitespace.
+
+            Returns the trimmed prefix, which the caller renders directly.
+            """
             if not val:
                 return val
-            val = re.sub(r"^[≤≥~≈]\s*", "", val)        # prefix symbols
-            val = re.sub(r"[一-鿿]", "", val)             # CJK characters
-            val = re.sub(r"[^0-9.\-%]", "", val)          # keep digits, dot, dash, %
-            val = re.sub(r"^[^0-9.]+", "", val)
-            val = re.sub(r"[^0-9.%]+$", "", val)
+            val = val.strip()
+            # Remove parenthetical annotations, Chinese 「（...）」 and ASCII 「(...)」
+            val = re.sub(r"（[^）]*）", "", val)
+            val = re.sub(r"\([^)]*\)", "", val)
+            # Truncate at the first parallel separator or conjunction.
+            # The lookarounds ensure the comma sits between non-digit
+            # characters, so numeric thousands-separators like
+            # ``1,800`` are preserved.
+            val = re.split(
+                r"(?<=\D)[，,。；;|](?=\D)|(?<=\D)保留|目标仓位|目标|此外|同时|但需|需控制|分批",
+                val,
+                maxsplit=1,
+            )[0]
+            # Collapse runs of whitespace (incl. newlines / non-breaking spaces).
+            val = re.sub(r"\s+", " ", val)
             return val.strip()
 
         def _ok(val: str) -> bool:

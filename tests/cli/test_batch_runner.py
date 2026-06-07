@@ -193,3 +193,51 @@ def test_parallel_run_with_workers_1_uses_sequential_path(tmp_path):
     with patch.object(runner, "_run_single") as mock_run:
         runner.run()
         mock_run.assert_called_once_with("AAPL")
+
+
+# --- size field normalization: regression for batch_summary table squashing ---
+
+@pytest.mark.parametrize("raw,expected", [
+    # Single-clause recommendations (English / concise Chinese) must survive intact.
+    ("5% of portfolio", "5% of portfolio"),
+    ("10-12% of portfolio", "10-12% of portfolio"),
+    ("5% of portfolio (initial 10-15%, target 15-20%)", "5% of portfolio"),
+    ("3%-5%", "3%-5%"),
+    ("减持现有仓位的20-30%", "减持现有仓位的20-30%"),
+    ("不超过总资金的 5%", "不超过总资金的 5%"),
+    ("总组合市值的3%-5%", "总组合市值的3%-5%"),
+    # Multi-clause recommendations must drop secondary advice at the first delimiter.
+    ("减持1,800股，保留2,700股（约60%仓位）", "减持1,800股"),
+    ("卖出150股(当前300股的50%)，保留150股核心头寸", "卖出150股"),
+    ("加仓1000股（约22%现有仓位），总仓位控制在10%以内", "加仓1000股"),
+    ("加仓300股（占总计划仓位30%，与现有900股合并后总仓位1200股）", "加仓300股"),
+    # Regression: previously the entries below collapsed into "100022%10%"-style digit soup.
+    ("总仓位15%，现有700股基础上分批加仓至1200股（而非激进派建议的1500股），单只个股不超过组合总仓位25%", "总仓位15%"),
+])
+def test_parse_summary_size_preserves_readable_text(raw, expected):
+    """Regression for #bug-2026-06-06-size-squash: portfolio size fields with multiple
+    recommendations were squashed into a digit soup (e.g. ``100022%10%``) by the
+    previous CJK-stripping cleaner. The new cleaner drops parenthetical annotations
+    and truncates at the first parallel-delimiter, so the table cell stays readable.
+    """
+    result = BatchRunner._parse_summary_fields(
+        decision=f"**Rating**: Overweight\n**Size**: {raw}\n",
+        trader="",
+    )
+    assert result["size"] == expected, f"input: {raw!r}\n  got: {result['size']!r}"
+
+
+def test_parse_summary_size_preserves_numeric_for_entry_stop():
+    """Numeric entry/stop fields must not be touched by the size-preserving cleaner."""
+    result = BatchRunner._parse_summary_fields(
+        decision=(
+            "**Rating**: Overweight\n"
+            "**Entry**: 27.2\n"
+            "**Stop**: 26.5\n"
+            "**Size**: 5% of portfolio\n"
+        ),
+        trader="",
+    )
+    assert result["entry"] == "27.2"
+    assert result["stop"] == "26.5"
+    assert result["size"] == "5% of portfolio"
