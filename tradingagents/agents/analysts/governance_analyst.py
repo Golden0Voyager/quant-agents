@@ -23,6 +23,11 @@ def create_governance_analyst(llm):
             state["company_of_interest"], state.get("company_name", "")
         )
 
+        # NOTE: 9 tools is the largest analyst tool-set in the framework.
+        # Each extra tool increases tool_choice latency and LLM reasoning
+        # cost. If latency becomes an issue, consider trimming to the 5-6
+        # most impactful tools (e.g. insider_transactions, company_announcements,
+        # institutional_holdings, margin_trading, pledge_ratio).
         tools = [
             get_company_announcements,
             get_insider_transactions,

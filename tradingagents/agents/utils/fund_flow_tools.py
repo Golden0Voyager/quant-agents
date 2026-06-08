@@ -53,14 +53,19 @@ def get_margin_trading(
 
 @tool
 def get_sector_fund_flow(
-    sector_name: Annotated[str, "Sector or industry name, e.g. 白酒, 银行, 新能源"],
+    sector_name: Annotated[
+        str,
+        "Sector or industry name in Chinese, e.g. 白酒, 银行, 新能源. "
+        "This is NOT a ticker symbol — pass the Chinese industry name "
+        "exactly as it appears on Eastmoney (akshare) or in the local DB.",
+    ],
 ) -> str:
     """
     Retrieve sector-level fund flow data (板块资金流向).
     Shows main-force, super-large, large, medium and small-order net inflow by industry.
     Uses the configured technical_indicators vendor (smartmoney_db local cache or akshare for A-shares).
     Args:
-        sector_name (str): Sector or industry name in Chinese
+        sector_name (str): Sector or industry name in Chinese (NOT a ticker)
     Returns:
         str: A formatted report of sector fund flow data
     """

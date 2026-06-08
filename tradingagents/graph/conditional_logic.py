@@ -4,20 +4,28 @@ from tradingagents.agents.utils.agent_states import AgentState
 
 
 class ConditionalLogic:
-    """Handles conditional logic for determining graph flow."""
+    """Handles conditional logic for determining graph flow.
+
+    NOTE: The per-analyst ``should_continue_*`` methods return hard-coded
+    node-name strings. If you rename a node in ``AnalystNodeSpec``, you
+    must update the matching method here. A future refactor could generate
+    these methods dynamically from the spec table, but the explicit
+    per-method form makes stack-traces and static analysis easier to read.
+    """
 
     def __init__(self, max_debate_rounds=1, max_risk_discuss_rounds=1):
         """Initialize with configuration parameters."""
         self.max_debate_rounds = max_debate_rounds
         self.max_risk_discuss_rounds = max_risk_discuss_rounds
 
+    @staticmethod
+    def _continue_tool_or_clear(state: AgentState, tool_node: str, clear_node: str) -> str:
+        """Common helper: return ``tool_node`` if the last message has tool_calls, else ``clear_node``."""
+        last_message = state["messages"][-1]
+        return tool_node if last_message.tool_calls else clear_node
+
     def should_continue_market(self, state: AgentState):
-        """Determine if market analysis should continue."""
-        messages = state["messages"]
-        last_message = messages[-1]
-        if last_message.tool_calls:
-            return "tools_market"
-        return "Msg Clear Market"
+        return self._continue_tool_or_clear(state, "tools_market", "Msg Clear Market")
 
     def should_continue_social(self, state: AgentState):
         """Determine if sentiment-analyst tool round should continue.
@@ -27,43 +35,19 @@ class ConditionalLogic:
         back-compat); the returned ``clear_node`` label uses the v0.2.5
         rename so it matches the node registered by the execution plan.
         """
-        messages = state["messages"]
-        last_message = messages[-1]
-        if last_message.tool_calls:
-            return "tools_social"
-        return "Msg Clear Sentiment"
+        return self._continue_tool_or_clear(state, "tools_social", "Msg Clear Sentiment")
 
     def should_continue_news(self, state: AgentState):
-        """Determine if news analysis should continue."""
-        messages = state["messages"]
-        last_message = messages[-1]
-        if last_message.tool_calls:
-            return "tools_news"
-        return "Msg Clear News"
+        return self._continue_tool_or_clear(state, "tools_news", "Msg Clear News")
 
     def should_continue_fundamentals(self, state: AgentState):
-        """Determine if fundamentals analysis should continue."""
-        messages = state["messages"]
-        last_message = messages[-1]
-        if last_message.tool_calls:
-            return "tools_fundamentals"
-        return "Msg Clear Fundamentals"
+        return self._continue_tool_or_clear(state, "tools_fundamentals", "Msg Clear Fundamentals")
 
     def should_continue_governance(self, state: AgentState):
-        """Determine if governance analysis should continue."""
-        messages = state["messages"]
-        last_message = messages[-1]
-        if last_message.tool_calls:
-            return "tools_governance"
-        return "Msg Clear Governance"
+        return self._continue_tool_or_clear(state, "tools_governance", "Msg Clear Governance")
 
     def should_continue_industry(self, state: AgentState):
-        """Determine if industry analysis should continue."""
-        messages = state["messages"]
-        last_message = messages[-1]
-        if last_message.tool_calls:
-            return "tools_industry"
-        return "Msg Clear Industry"
+        return self._continue_tool_or_clear(state, "tools_industry", "Msg Clear Industry")
 
     def should_continue_debate(self, state: AgentState) -> str:
         """Determine if debate should continue."""

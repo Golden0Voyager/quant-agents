@@ -147,22 +147,36 @@ def select_analysts(
 ) -> List[AnalystType]:
     """Select analysts using an interactive checkbox.
 
-    Pass ``ticker`` to drop analysts that don't apply to the market (e.g.
-    Sentiment for A-share tickers where StockTwits/Reddit coverage is
-    effectively zero).
+    Analysts that don't apply to the current market are shown as disabled
+    rows with a skip reason, so the user understands why they are unavailable.
     """
+    all_analysts = [value for _, value in ANALYST_ORDER]
     available_analysts = filter_analysts_for_asset_type(
-        [value for _, value in ANALYST_ORDER],
-        asset_type,
-        ticker=ticker,
+        all_analysts, asset_type, ticker=ticker
     )
-    choices = questionary.checkbox(
+
+    # Build a skip-reason map for disabled items.
+    skip_reasons: Dict[AnalystType, str] = {}
+    if asset_type == AssetType.CRYPTO and AnalystType.FUNDAMENTALS not in available_analysts:
+        skip_reasons[AnalystType.FUNDAMENTALS] = "Crypto: no on-chain fundamentals"
+    if ticker and _is_ashare_ticker(ticker) and AnalystType.SOCIAL not in available_analysts:
+        skip_reasons[AnalystType.SOCIAL] = "A-share: StockTwits/Reddit zero coverage"
+
+    choices = []
+    for display, value in ANALYST_ORDER:
+        if value in available_analysts:
+            choices.append(questionary.Choice(display, value=value))
+        else:
+            reason = skip_reasons.get(value, "Not applicable")
+            choices.append(
+                questionary.Choice(
+                    f"{display}  [{reason}]", value=value, disabled=reason
+                )
+            )
+
+    selected = questionary.checkbox(
         "Select Your [Analysts Team]:",
-        choices=[
-            questionary.Choice(display, value=value)
-            for display, value in ANALYST_ORDER
-            if value in available_analysts
-        ],
+        choices=choices,
         instruction="\n- Press Space to select/unselect analysts\n- Press 'a' to select/unselect all\n- Press Enter when done",
         validate=lambda x: len(x) > 0 or "You must select at least one analyst.",
         style=questionary.Style(
@@ -171,6 +185,7 @@ def select_analysts(
                 ("selected", "fg:green noinherit"),
                 ("highlighted", "noinherit"),
                 ("pointer", "noinherit"),
+                ("disabled", "fg:dark_grey italic"),
             ]
         ),
     ).ask()

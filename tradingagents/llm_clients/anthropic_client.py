@@ -17,7 +17,11 @@ _PASSTHROUGH_KWARGS = (
 # ``claude-{opus,sonnet}-X-Y`` releases inherit effort support via the
 # forward-compat pattern below; future Haiku stays excluded by default.
 _EFFORT_EXACT = {
-    "claude-mythos-preview",  # non-standard preview name; effort-capable
+    # "claude-mythos-preview" is a non-standard preview name that Anthropic
+    # used internally for an effort-capable research checkpoint. It is NOT
+    # a public model ID, but it may appear in enterprise/private-beta
+    # deployments. If Anthropic retires the name, remove this entry.
+    "claude-mythos-preview",
 }
 _EFFORT_PATTERN = re.compile(r"^claude-(opus|sonnet)-\d+-\d+$")
 

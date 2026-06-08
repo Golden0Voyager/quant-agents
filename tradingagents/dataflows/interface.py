@@ -391,11 +391,16 @@ def route_to_vendor(method: str, *args, **kwargs):
         sym = last_no_data.symbol
         canonical = last_no_data.canonical
         resolved = "" if canonical == sym else f" (resolved to '{canonical}')"
+        # Build the routing chain string so the agent (and user) can see
+        # which vendors were attempted and in what order.
+        tried = " → ".join(
+            v for v in fallback_vendors if v in VENDOR_METHODS[method]
+        )
         return (
             f"NO_DATA_AVAILABLE: No market data found for '{sym}'{resolved} from "
-            f"any configured vendor. The symbol may be invalid, delisted, or not "
-            f"covered by Yahoo Finance / Alpha Vantage. Do not estimate or "
-            f"fabricate values — report that data is unavailable for this symbol."
+            f"any configured vendor. Routing chain: {tried}. "
+            f"The symbol may be invalid, delisted, or not covered. "
+            f"Do not estimate or fabricate values — report that data is unavailable."
         )
 
     # No vendor returned data and none reported clean "no data" — surface the

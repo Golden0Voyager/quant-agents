@@ -71,11 +71,10 @@ def load_ohlcv(symbol: str, curr_date: str, lookback_years: int = 5) -> pd.DataF
     On subsequent calls the cache is reused. Rows after curr_date are
     filtered out so backtests never see future prices.
     """
-    # Resolve broker/forex symbols (XAUUSD+ -> GC=F) to Yahoo's convention,
-    # then reject values that would escape the cache directory when
-    # interpolated into the cache filename (e.g. ``../../tmp/x``).
-    canonical = normalize_symbol(symbol)
-    safe_symbol = safe_ticker_component(canonical)
+    # Caller is responsible for normalising the symbol before passing it
+    # here (e.g. via normalize_symbol in y_finance.py or interface.py).
+    # We only sanitise the filename component so cache paths stay safe.
+    safe_symbol = safe_ticker_component(symbol)
 
     config = get_config()
     curr_date_dt = pd.to_datetime(curr_date)
@@ -103,7 +102,7 @@ def load_ohlcv(symbol: str, curr_date: str, lookback_years: int = 5) -> pd.DataF
 
     if data is None:
         downloaded = yf_retry(lambda: yf.download(
-            canonical,
+            symbol,
             start=start_str,
             end=end_str,
             multi_level_index=False,
@@ -114,7 +113,7 @@ def load_ohlcv(symbol: str, curr_date: str, lookback_years: int = 5) -> pd.DataF
         # Only cache real data — never persist an empty frame.
         if downloaded.empty or "Close" not in downloaded.columns:
             raise NoMarketDataError(
-                symbol, canonical, "Yahoo Finance returned no rows"
+                symbol, symbol, "Yahoo Finance returned no rows"
             )
         downloaded.to_csv(data_file, index=False, encoding="utf-8")
         data = downloaded

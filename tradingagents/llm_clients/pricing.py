@@ -299,12 +299,13 @@ def _load_litellm_overlay() -> Dict[str, Price]:
         except (OSError, json.JSONDecodeError):
             pass  # corrupt cache — fall through to network
 
-    # 2) Fetch from GitHub. Timeout is short (5s) so a slow network
+    # 2) Fetch from GitHub. Timeout defaults to 5s so a slow network
     #    can't block the dashboard; the user gets a stale cache rather
-    #    than a hang.
+    #    than a hang. Override via LITELLM_FETCH_TIMEOUT_SECONDS env var.
     try:
         import httpx
-        response = httpx.get(_LITELLM_URL, timeout=5.0)
+        timeout = float(os.environ.get("LITELLM_FETCH_TIMEOUT_SECONDS", "5.0"))
+        response = httpx.get(_LITELLM_URL, timeout=timeout)
         response.raise_for_status()
         data = response.json()
     except Exception:
@@ -323,9 +324,9 @@ def _load_litellm_overlay() -> Dict[str, Price]:
     #    with a non-trivial number of models, and (b) the fetched
     #    payload not to have shrunk dramatically vs the previous cache
     #    (a corrupted / truncated download often shows up as a 90%
-    #    size drop). If the existing cache is small (e.g. first-ever
-    #    fetch failed mid-way and left a 5-model file behind), we
-    #    don't compare against it.
+    #    size drop). We use an absolute threshold (≥ 500 models drop)
+    #    so a legitimate upstream cleanup that removes 30% of stale
+    #    models does not trip the check.
     if not isinstance(data, dict):
         return {}
     if cache_path.exists():
@@ -336,10 +337,11 @@ def _load_litellm_overlay() -> Dict[str, Price]:
             backup_count = 0
     else:
         backup_count = 0
-    if backup_count >= 50 and len(data) < backup_count * 0.5:
-        # Existing cache is healthy (≥ 50 models) and the fresh fetch
-        # shrank by >50% — most likely a bad payload, not a real
-        # upstream cleanup.
+    if backup_count >= 1000 and len(data) < backup_count - 500:
+        # Existing cache is healthy (≥ 1000 models) and the fresh fetch
+        # dropped by >500 entries — most likely a bad payload, not a
+        # real upstream cleanup. A legitimate shrink of 200-300 models
+        # (e.g. quarterly deprecation sweep) does not trip this check.
         return {}
 
     # 4) Persist + parse.
