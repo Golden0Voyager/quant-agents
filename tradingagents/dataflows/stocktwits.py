@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -27,9 +27,14 @@ _API = "https://api.stocktwits.com/api/2/streams/symbol/{ticker}.json"
 _UA = "tradingagents/0.2 (+https://github.com/TauricResearch/TradingAgents)"
 
 
-def fetch_stocktwits_messages(ticker: str, limit: int = 30, timeout: float = 10.0) -> str:
+def fetch_stocktwits_messages(
+    ticker: str, limit: int = 30, timeout: float = 10.0, days_back: int = 7,
+) -> str:
     """Fetch recent StockTwits messages for ``ticker`` and return them as a
     formatted plaintext block ready for prompt injection.
+
+    ``days_back`` filters out messages older than N days (default 7) to
+    prevent stale sentiment from influencing backdated analyses.
 
     Returns a placeholder string when the endpoint is unreachable, the
     symbol has no messages, or the response shape is unexpected — the
@@ -47,6 +52,22 @@ def fetch_stocktwits_messages(ticker: str, limit: int = 30, timeout: float = 10.
     messages = data.get("messages", []) if isinstance(data, dict) else []
     if not messages:
         return f"<no StockTwits messages found for ${ticker.upper()}>"
+
+    # Filter out messages older than days_back
+    if days_back is not None and days_back > 0:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
+        filtered = []
+        for m in messages:
+            created_str = m.get("created_at", "")
+            try:
+                # StockTwits timestamps are ISO 8601, e.g. 2024-01-15T10:30:00Z
+                created_dt = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+                if created_dt >= cutoff:
+                    filtered.append(m)
+            except Exception:
+                # If parsing fails, keep the message (fail-open)
+                filtered.append(m)
+        messages = filtered
 
     lines = []
     bullish = bearish = unlabeled = 0

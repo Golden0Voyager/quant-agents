@@ -53,21 +53,9 @@ class GraphSetup:
             "social": lambda: create_sentiment_analyst(self.quick_thinking_llm),
             "news": lambda: create_news_analyst(self.quick_thinking_llm),
             "fundamentals": lambda: create_fundamentals_analyst(self.quick_thinking_llm),
+            "governance": lambda: create_governance_analyst(self.quick_thinking_llm),
+            "industry": lambda: create_industry_analyst(self.quick_thinking_llm),
         }
-
-        if "governance" in selected_analysts:
-            analyst_nodes["governance"] = create_governance_analyst(
-                self.quick_thinking_llm
-            )
-            delete_nodes["governance"] = create_msg_delete()
-            tool_nodes["governance"] = self.tool_nodes["governance"]
-
-        if "industry" in selected_analysts:
-            analyst_nodes["industry"] = create_industry_analyst(
-                self.quick_thinking_llm
-            )
-            delete_nodes["industry"] = create_msg_delete()
-            tool_nodes["industry"] = self.tool_nodes["industry"]
 
         # Create researcher and manager nodes
         bull_researcher_node = create_bull_researcher(self.quick_thinking_llm)

@@ -64,11 +64,11 @@ def _clean_dataframe(data: pd.DataFrame) -> pd.DataFrame:
     return data
 
 
-def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
+def load_ohlcv(symbol: str, curr_date: str, lookback_years: int = 5) -> pd.DataFrame:
     """Fetch OHLCV data with caching, filtered to prevent look-ahead bias.
 
-    Downloads 15 years of data up to today and caches per symbol. On
-    subsequent calls the cache is reused. Rows after curr_date are
+    Downloads ``lookback_years`` of data up to today and caches per symbol.
+    On subsequent calls the cache is reused. Rows after curr_date are
     filtered out so backtests never see future prices.
     """
     # Resolve broker/forex symbols (XAUUSD+ -> GC=F) to Yahoo's convention,
@@ -82,7 +82,7 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
 
     # Cache uses a fixed window (15y to today) so one file per symbol
     today_date = pd.Timestamp.today()
-    start_date = today_date - pd.DateOffset(years=5)
+    start_date = today_date - pd.DateOffset(years=lookback_years)
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = today_date.strftime("%Y-%m-%d")
 

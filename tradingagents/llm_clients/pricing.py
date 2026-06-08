@@ -246,6 +246,11 @@ def get_price_for_model(model: str) -> Optional[Price]:
     overlay = _load_litellm_overlay()
     if model in overlay:
         return overlay[model]
+    # Iterate PRICING in insertion order (Python 3.7+ dict preserves order).
+    # When a model ID exists in multiple providers (e.g. deepseek-v4-flash
+    # under both "deepseek" and "sensenova"), the first provider wins.
+    # The insertion order is the source of truth and is pinned by
+    # test_get_price_for_model_uses_first_match_for_ambiguous_models.
     for provider_models in PRICING.values():
         if model in provider_models:
             return provider_models[model]

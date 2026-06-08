@@ -8,6 +8,9 @@ ID trips a single, easy-to-localize test failure.
 
 If you add a new provider, mirror the pattern here: factory entry,
 base URL, env var, model catalog, client construction.
+
+ModelScope and NVIDIA NIM were added in the v0.3 provider expansion;
+this module covers them alongside Agnes AI.
 """
 
 from __future__ import annotations
@@ -146,3 +149,99 @@ def test_get_llm_raises_when_agnes_api_key_missing():
         client = create_llm_client(provider="agnes", model="agnes-2.0-flash")
         with pytest.raises(ValueError, match="AGNES_API_KEY"):
             client.get_llm()
+
+
+# ============================================================================
+# ModelScope
+# ============================================================================
+
+
+EXPECTED_MODELSCOPE_URL = "https://api-inference.modelscope.cn/v1"
+
+
+def test_factory_recognises_modelscope():
+    assert "modelscope" in _OPENAI_COMPATIBLE
+
+
+def test_modelscope_base_url_in_provider_dict():
+    assert _PROVIDER_BASE_URL["modelscope"] == EXPECTED_MODELSCOPE_URL
+
+
+def test_modelscope_api_key_env_name():
+    assert get_api_key_env("modelscope") == "MODELSCOPE_API_KEY"
+
+
+def test_modelscope_quick_model_options_listed():
+    options = get_model_options("modelscope", "quick")
+    values = [value for _, value in options]
+    assert "deepseek-ai/DeepSeek-V4-Flash" in values
+    assert "custom" in values
+
+
+def test_modelscope_deep_model_options_listed():
+    options = get_model_options("modelscope", "deep")
+    values = [value for _, value in options]
+    assert "deepseek-ai/DeepSeek-V4-Flash" in values
+
+
+def test_create_modelscope_client_returns_openai_client():
+    from tradingagents.llm_clients import openai_client as oc_mod
+    with patch.dict(os.environ, {"MODELSCOPE_API_KEY": "sk-modelscope-test"}):
+        client = create_llm_client(
+            provider="modelscope", model="deepseek-ai/DeepSeek-V4-Flash"
+        )
+        assert isinstance(client, OpenAIClient)
+        assert client.provider == "modelscope"
+        with patch.object(oc_mod, "NormalizedChatOpenAI", autospec=True) as mock_cls:
+            mock_cls.return_value = object()
+            client.get_llm()
+    assert mock_cls.call_args.kwargs["base_url"] == EXPECTED_MODELSCOPE_URL
+    assert mock_cls.call_args.kwargs["api_key"] == "sk-modelscope-test"
+
+
+# ============================================================================
+# NVIDIA NIM
+# ============================================================================
+
+
+EXPECTED_NVIDIA_URL = "https://integrate.api.nvidia.com/v1"
+
+
+def test_factory_recognises_nvidia():
+    assert "nvidia" in _OPENAI_COMPATIBLE
+
+
+def test_nvidia_base_url_in_provider_dict():
+    assert _PROVIDER_BASE_URL["nvidia"] == EXPECTED_NVIDIA_URL
+
+
+def test_nvidia_api_key_env_name():
+    assert get_api_key_env("nvidia") == "NVIDIA_API_KEY"
+
+
+def test_nvidia_quick_model_options_listed():
+    options = get_model_options("nvidia", "quick")
+    values = [value for _, value in options]
+    assert "deepseek-ai/deepseek-v4-pro" in values
+    assert "custom" in values
+
+
+def test_nvidia_deep_model_options_listed():
+    options = get_model_options("nvidia", "deep")
+    values = [value for _, value in options]
+    assert "deepseek-ai/deepseek-v4-pro" in values
+
+
+def test_create_nvidia_client_returns_openai_client():
+    from tradingagents.llm_clients import openai_client as oc_mod
+    with patch.dict(os.environ, {"NVIDIA_API_KEY": "sk-nvidia-test"}):
+        client = create_llm_client(
+            provider="nvidia", model="deepseek-ai/deepseek-v4-pro"
+        )
+        assert isinstance(client, OpenAIClient)
+        assert client.provider == "nvidia"
+        with patch.object(oc_mod, "NormalizedChatOpenAI", autospec=True) as mock_cls:
+            mock_cls.return_value = object()
+            client.get_llm()
+    assert mock_cls.call_args.kwargs["base_url"] == EXPECTED_NVIDIA_URL
+    assert mock_cls.call_args.kwargs["api_key"] == "sk-nvidia-test"

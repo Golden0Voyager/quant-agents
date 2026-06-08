@@ -754,9 +754,81 @@ def get_macro_indicators(
 # ---------------------------------------------------------------------------
 
 
+def _nearest_trade_date() -> str:
+    """Return the most recent trading date as YYYYMMDD."""
+    df = _safe_call(ak.tool_trade_date_hist_sina)
+    if df is None or df.empty:
+        # Fallback to today
+        return datetime.now().strftime("%Y%m%d")
+    # The column is named 'trade_date' in recent akshare builds
+    date_col = "trade_date" if "trade_date" in df.columns else df.columns[0]
+    # Filter to dates <= today and pick the latest
+    today = datetime.now().strftime("%Y-%m-%d")
+    valid = df[df[date_col] <= today]
+    if valid.empty:
+        return datetime.now().strftime("%Y%m%d")
+    latest = valid[date_col].max()
+    # May already be YYYYMMDD or YYYY-MM-DD
+    return latest.replace("-", "")
+
+
 def get_margin_trading(symbol: str) -> str:
-    """Fetch A-share margin-trading data via akshare."""
-    raise RuntimeError("Margin trading via akshare not yet implemented")
+    """Fetch A-share margin-trading (融资融券) data via akshare.
+
+    Uses SSE/SZSE daily margin-trading detail tables and filters to the
+    requested stock. Falls back with a guided error when the symbol is
+    not a margin-trading eligible A-share or when no data is available.
+    """
+    code = to_akshare_symbol(symbol, "bare")
+    exchange = to_akshare_symbol(symbol, "prefix")
+    date_str = _nearest_trade_date()
+
+    with _akshare_task_context(f"📈 {symbol} 融资融券"), no_proxy():
+        if exchange == "sh":
+            df = _safe_call(ak.stock_margin_detail_sse, date=date_str)
+            if df is None or df.empty:
+                return f"No margin-trading data for SSE on {date_str} via akshare."
+            stock_col = "标的证券代码"
+        elif exchange == "sz":
+            df = _safe_call(ak.stock_margin_detail_szse, date=date_str)
+            if df is None or df.empty:
+                return f"No margin-trading data for SZSE on {date_str} via akshare."
+            stock_col = "证券代码"
+        else:
+            return (
+                f"Margin-trading data for {symbol} ({exchange}) is not available "
+                f"via akshare. Only SSE (sh) and SZSE (sz) A-shares are supported. "
+                f"Consider enabling smartmoney_db for local cached data."
+            )
+
+        row = df[df[stock_col] == code]
+        if row.empty:
+            return (
+                f"No margin-trading data found for {symbol} on {date_str} via akshare. "
+                f"The symbol may not be a margin-trading eligible stock, or data is "
+                f"temporarily unavailable. Consider enabling smartmoney_db for local "
+                f"cached data."
+            )
+
+    r = row.iloc[0].to_dict()
+    # Normalise column names across SSE / SZSE
+    def _get(*keys):
+        for k in keys:
+            if k in r and r[k] is not None:
+                return r[k]
+        return "N/A"
+
+    lines = [
+        f"## {symbol.upper()} Margin Trading (融资融券) (source: akshare / SSE·SZSE)",
+        f"Date: {date_str}",
+        "",
+        f"- 融资余额: {_get('融资余额', '融资余额')}",
+        f"- 融资买入额: {_get('融资买入额', '融资买入额')}",
+        f"- 融券余量: {_get('融券余量', '融券余量')}",
+        f"- 融券余额: {_get('融券余额', '融券余额')}",
+        f"- 融资融券余额: {_get('融资融券余额', '融资融券余额')}",
+    ]
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -765,8 +837,54 @@ def get_margin_trading(symbol: str) -> str:
 
 
 def get_dragon_tiger(symbol: str) -> str:
-    """Fetch A-share dragon-tiger-board data via akshare."""
-    raise RuntimeError("Dragon tiger via akshare not yet implemented")
+    """Fetch A-share dragon-tiger-board (龙虎榜) data via akshare.
+
+    Uses the Eastmoney per-stock LHB detail API.  Data is available for
+    individual stocks only on days when the stock appeared on the LHB
+    (usually limit-up or limit-down days).
+    """
+    code = to_akshare_symbol(symbol, "bare")
+    date_str = _nearest_trade_date()
+
+    with _akshare_task_context(f"🔥 {symbol} 龙虎榜"), no_proxy():
+        # Try both buy and sell flags
+        buy_df = _safe_call(
+            ak.stock_lhb_stock_detail_em, symbol=code, date=date_str, flag="买入"
+        )
+        sell_df = _safe_call(
+            ak.stock_lhb_stock_detail_em, symbol=code, date=date_str, flag="卖出"
+        )
+
+    buy_rows = [] if buy_df is None or buy_df.empty else buy_df.to_dict("records")
+    sell_rows = [] if sell_df is None or sell_df.empty else sell_df.to_dict("records")
+
+    if not buy_rows and not sell_rows:
+        return (
+            f"No dragon-tiger-board data for {symbol} on {date_str} via akshare. "
+            f"The stock may not have appeared on the LHB on this trading day."
+        )
+
+    lines = [
+        f"## {symbol.upper()} Dragon Tiger Board (龙虎榜) (source: akshare / Eastmoney)",
+        f"Date: {date_str}",
+        "",
+    ]
+
+    if buy_rows:
+        lines.append(f"### Buy-side 买入 ({len(buy_rows)} entries)")
+        for r in buy_rows:
+            lines.append(f"- {r.get('营业部名称', 'N/A')}: "
+                         f"{r.get('买入金额', 'N/A')} (净额 {r.get('净额', 'N/A')})")
+        lines.append("")
+
+    if sell_rows:
+        lines.append(f"### Sell-side 卖出 ({len(sell_rows)} entries)")
+        for r in sell_rows:
+            lines.append(f"- {r.get('营业部名称', 'N/A')}: "
+                         f"{r.get('卖出金额', 'N/A')} (净额 {r.get('净额', 'N/A')})")
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -775,8 +893,19 @@ def get_dragon_tiger(symbol: str) -> str:
 
 
 def get_block_trade(symbol: str) -> str:
-    """Fetch A-share block-trade data via akshare."""
-    raise RuntimeError("Block trade via akshare not yet implemented")
+    """Fetch A-share block-trade (大宗交易) data via akshare.
+
+    AkShare does not expose a dedicated individual-stock block-trade API.
+    This function falls back with a guided message so the agent can request
+    smartmoney_db instead.
+    """
+    return (
+        f"No block-trade (大宗交易) data for {symbol} via akshare. "
+        f"AkShare's public API does not expose a per-stock block-trade endpoint. "
+        f"Consider enabling smartmoney_db (quant_core.db) for local cached "
+        f"block-trade data, or use get_insider_transactions as a proxy for "
+        f"large off-market activity."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -785,8 +914,34 @@ def get_block_trade(symbol: str) -> str:
 
 
 def get_sector_fund_flow(sector_name: str) -> str:
-    """Fetch A-share sector fund-flow data via akshare."""
-    raise RuntimeError("Sector fund flow via akshare not yet implemented")
+    """Fetch A-share sector fund-flow (板块资金流向) via akshare.
+
+    Uses the Eastmoney sector fund-flow history API for the requested
+    industry name (e.g. 白酒, 银行, 新能源).
+    """
+    with _akshare_task_context(f"🌊 {sector_name} 板块资金流"), no_proxy():
+        df = _safe_call(ak.stock_sector_fund_flow_hist, symbol=sector_name)
+
+    if df is None or df.empty:
+        return (
+            f"No sector fund-flow data for '{sector_name}' via akshare. "
+            f"The sector name may not match Eastmoney's taxonomy."
+        )
+
+    lines = [
+        f"## {sector_name} Sector Fund Flow (板块资金流向) (source: akshare / Eastmoney)",
+        f"Total records: {len(df)}",
+        "",
+    ]
+    for _, r in df.iterrows():
+        lines.append(f"**Date**: {r.get('日期', 'N/A')}")
+        lines.append(f"- 主力净流入: {r.get('主力净流入', 'N/A')}")
+        lines.append(f"- 小单净流入: {r.get('小单净流入', 'N/A')}")
+        lines.append(f"- 中单净流入: {r.get('中单净流入', 'N/A')}")
+        lines.append(f"- 大单净流入: {r.get('大单净流入', 'N/A')}")
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -795,8 +950,34 @@ def get_sector_fund_flow(sector_name: str) -> str:
 
 
 def get_shareholder_count(symbol: str) -> str:
-    """Fetch A-share shareholder-count data via akshare."""
-    raise RuntimeError("Shareholder count via akshare not yet implemented")
+    """Fetch A-share shareholder-count (股东户数) via akshare.
+
+    Uses the Eastmoney per-stock shareholder-count detail API.
+    """
+    code = to_akshare_symbol(symbol, "bare")
+
+    with _akshare_task_context(f"👥 {symbol} 股东户数"), no_proxy():
+        df = _safe_call(ak.stock_zh_a_gdhs_detail_em, symbol=code)
+
+    if df is None or df.empty:
+        return (
+            f"No shareholder-count data for {symbol} via akshare. "
+            f"The symbol may be unlisted or the endpoint may be temporarily unavailable."
+        )
+
+    lines = [
+        f"## {symbol.upper()} Shareholder Count (股东户数) (source: akshare / Eastmoney)",
+        f"Total records: {len(df)}",
+        "",
+    ]
+    for _, r in df.iterrows():
+        lines.append(f"**Date**: {r.get('股东户数统计截止日', 'N/A')}")
+        lines.append(f"- 股东户数: {r.get('股东户数', 'N/A')}")
+        lines.append(f"- 户均持股市值: {r.get('户均持股市值', 'N/A')}")
+        lines.append(f"- 户均持股数量: {r.get('户均持股数量', 'N/A')}")
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------

@@ -97,6 +97,10 @@ _BY_ID: dict[str, ModelCapabilities] = {
     "deepseek-reasoner": _DEEPSEEK_THINKING,
     "deepseek-v4-flash": _DEEPSEEK_THINKING,
     "deepseek-v4-pro": _DEEPSEEK_THINKING,
+    # ModelScope / NVIDIA NIM — hosted DeepSeek models with the same
+    # tool-calling behaviour as the upstream API (no tool_choice support).
+    "deepseek-ai/DeepSeek-V4-Flash": _DEEPSEEK_THINKING,
+    "deepseek-ai/deepseek-v4-pro": _DEEPSEEK_THINKING,
     # MiniMax — full official model lineup per
     # platform.minimax.io/docs/api-reference/text-openai-api
     "MiniMax-M2.7": _MINIMAX_THINKING,

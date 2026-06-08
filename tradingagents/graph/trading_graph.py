@@ -53,6 +53,11 @@ from .setup import GraphSetup
 from .propagation import Propagator
 from .reflection import Reflector
 from .signal_processing import SignalProcessor
+from .analyst_execution import (
+    AnalystWallTimeTracker,
+    AnalystExecutionPlan,
+    build_analyst_execution_plan,
+)
 
 
 class TradingAgentsGraph:
@@ -138,6 +143,7 @@ class TradingAgentsGraph:
         self.log_states_dict = {}  # date to full state dict
 
         # Set up the graph: keep the workflow for recompilation with a checkpointer.
+        self.selected_analysts = selected_analysts
         self.workflow = self.graph_setup.setup_graph(selected_analysts)
         self.graph = self.workflow.compile()
         self._checkpointer_ctx = None
@@ -248,7 +254,7 @@ class TradingAgentsGraph:
 
     def _fetch_returns(
         self, ticker: str, trade_date: str, holding_days: int = 5,
-        benchmark: str = "SPY",
+        benchmark: str = "SPY", asset_type: str = "stock",
     ) -> Tuple[Optional[float], Optional[float], Optional[int]]:
         """Fetch raw and alpha return for ticker over holding_days from trade_date.
 
@@ -261,6 +267,9 @@ class TradingAgentsGraph:
             start = datetime.strptime(trade_date, "%Y-%m-%d")
             end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays
             end_str = end.strftime("%Y-%m-%d")
+
+            if asset_type == "crypto":
+                return self._fetch_crypto_returns(ticker, trade_date, end_str, holding_days, benchmark)
 
             stock = yf.Ticker(ticker).history(start=trade_date, end=end_str)
             bench = yf.Ticker(benchmark).history(start=trade_date, end=end_str)
@@ -286,7 +295,67 @@ class TradingAgentsGraph:
             )
             return None, None, None
 
-    def _resolve_pending_entries(self, ticker: str) -> None:
+    def _fetch_crypto_returns(
+        self, ticker: str, start_date: str, end_date: str,
+        holding_days: int, benchmark: str,
+    ) -> Tuple[Optional[float], Optional[float], Optional[int]]:
+        """Fetch crypto returns via CoinGecko public API (no key required)."""
+        import urllib.request
+        import urllib.parse
+        import json
+
+        # Map common ticker symbols to CoinGecko coin IDs
+        coin_map = {
+            "BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana",
+            "BNB": "binancecoin", "XRP": "ripple", "ADA": "cardano",
+            "DOGE": "dogecoin", "DOT": "polkadot", "AVAX": "avalanche-2",
+        }
+        coin_id = coin_map.get(ticker.upper().replace("-USD", "").replace("USDT", ""), ticker.lower())
+
+        try:
+            # CoinGecko /coins/{id}/market_chart/range?vs_currency=usd&from={unix}&to={unix}
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+            start_unix = int(start_dt.timestamp())
+            end_unix = int(end_dt.timestamp())
+            url = (
+                f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart/range"
+                f"?vs_currency=usd&from={start_unix}&to={end_unix}"
+            )
+            with urllib.request.urlopen(url, timeout=15) as resp:
+                data = json.loads(resp.read())
+            prices = data.get("prices", [])
+            if len(prices) < 2:
+                return None, None, None
+            start_price = prices[0][1]
+            end_price = prices[-1][1]
+            raw = (end_price - start_price) / start_price
+            # For crypto benchmark, compare against BTC or ETH if available
+            if benchmark.upper() in coin_map:
+                bench_id = coin_map[benchmark.upper()]
+                bench_url = (
+                    f"https://api.coingecko.com/api/v3/coins/{bench_id}/market_chart/range"
+                    f"?vs_currency=usd&from={start_unix}&to={end_unix}"
+                )
+                with urllib.request.urlopen(bench_url, timeout=15) as resp:
+                    bench_data = json.loads(resp.read())
+                bench_prices = bench_data.get("prices", [])
+                if len(bench_prices) >= 2:
+                    bench_start = bench_prices[0][1]
+                    bench_end = bench_prices[-1][1]
+                    bench_ret = (bench_end - bench_start) / bench_start
+                    alpha = raw - bench_ret
+                    return raw, alpha, holding_days
+            # No benchmark available — alpha is None
+            return raw, None, holding_days
+        except Exception as e:
+            logger.warning(
+                "Could not resolve crypto outcome for %s on %s (will retry next run): %s",
+                ticker, start_date, e,
+            )
+            return None, None, None
+
+    def _resolve_pending_entries(self, ticker: str, asset_type: str = "stock") -> None:
         """Resolve pending log entries for ticker at the start of a new run.
 
         Fetches returns for each same-ticker pending entry, generates reflections,
@@ -304,7 +373,7 @@ class TradingAgentsGraph:
         updates = []
         for entry in pending:
             raw, alpha, days = self._fetch_returns(
-                ticker, entry["date"], benchmark=benchmark,
+                ticker, entry["date"], benchmark=benchmark, asset_type=asset_type,
             )
             if raw is None:
                 continue  # price not available yet — try again next run
@@ -356,7 +425,7 @@ class TradingAgentsGraph:
         self.ticker = ticker
 
         # Resolve any pending memory-log entries for this ticker before the pipeline runs.
-        self._resolve_pending_entries(ticker)
+        self._resolve_pending_entries(ticker, asset_type=asset_type)
 
         # If checkpointing is enabled, check whether a completed state log already
         # exists on disk.  When it does, we can return the cached result directly
@@ -436,6 +505,11 @@ class TradingAgentsGraph:
         t_stream_start = _time.perf_counter()
         t_prev = t_stream_start
         stream_args = {**args, "stream_mode": "updates"}
+
+        # Wall-time tracker for per-analyst elapsed times.
+        plan = build_analyst_execution_plan(self.selected_analysts)
+        tracker = AnalystWallTimeTracker(plan)
+
         for chunk in self.graph.stream(init_agent_state, **stream_args):
             t_now = _time.perf_counter()
             # Each chunk is {node_name: state_update_dict}
@@ -447,12 +521,20 @@ class TradingAgentsGraph:
                 # Merge update into full state
                 if isinstance(state_update, dict):
                     merged_state.update(state_update)
+                    # Sync wall-time tracker per analyst
+                    for spec in plan.specs:
+                        if node_name == spec.agent_node:
+                            tracker.mark_started(spec.key, started_at=t_now)
+                        if state_update.get(spec.report_key):
+                            tracker.mark_completed(spec.key, completed_at=t_now)
             t_prev = t_now
             if self.debug and merged_state.get("messages"):
                 merged_state["messages"][-1].pretty_print()
 
         final_state = merged_state
         self.node_timings = timings
+        self.analyst_wall_times = tracker.get_wall_times()
+        self.analyst_wall_time_summary = tracker.format_summary()
         self.total_stream_time = round(_time.perf_counter() - t_stream_start, 2)
 
         # Store current state for reflection.
