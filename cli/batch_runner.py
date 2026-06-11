@@ -59,7 +59,7 @@ class BatchRunner:
         self._layout = None
         self._start_time: Optional[float] = None
         # Protect shared mutable state across worker threads
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def _refresh_display(self, stats_handler=None) -> None:
         """Push current dashboard state into the Live-managed layout.
