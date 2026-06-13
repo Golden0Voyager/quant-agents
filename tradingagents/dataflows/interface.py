@@ -1,6 +1,5 @@
 import logging
-
-logger = logging.getLogger(__name__)
+from typing import Annotated
 
 # Import from vendor-specific modules
 from .akshare_common import is_a_share_ticker
@@ -191,6 +190,8 @@ from .y_finance import (
     get_YFin_data_online,
 )
 from .yfinance_news import get_global_news_yfinance, get_news_yfinance
+
+logger = logging.getLogger(__name__)
 
 # Tools organized by category
 TOOLS_CATEGORIES = {
@@ -429,12 +430,23 @@ def route_to_vendor(method: str, *args, **kwargs):
         else:
             primary_vendors = ["akshare"] + [v for v in primary_vendors if v != "akshare"]
 
-    # Build fallback chain: primary vendors first, then remaining available vendors
     all_available_vendors = list(VENDOR_METHODS[method].keys())
-    fallback_vendors = primary_vendors.copy()
-    for vendor in all_available_vendors:
-        if vendor not in fallback_vendors:
-            fallback_vendors.append(vendor)
+
+    # The configured vendor list IS the chain: we do NOT silently fall back to
+    # vendors the user did not choose (#988/#289) — that returned data from an
+    # unexpected source and caused cross-vendor inconsistencies. For multi-vendor
+    # fallback, list them in order, e.g. data_vendors="yfinance,alpha_vantage".
+    # The "default" sentinel (no explicit config) uses all available vendors.
+    explicit = [v for v in primary_vendors if v and v != "default"]
+    if explicit:
+        vendor_chain = [v for v in explicit if v in VENDOR_METHODS[method]]
+        if not vendor_chain:
+            raise ValueError(
+                f"Configured vendor(s) {explicit} not available for '{method}'. "
+                f"Available: {all_available_vendors}."
+            )
+    else:
+        vendor_chain = all_available_vendors
 
     last_no_data: NoMarketDataError | None = None
     first_error: Exception | None = None
@@ -442,10 +454,7 @@ def route_to_vendor(method: str, *args, **kwargs):
     # Track whether we are serving an A-share ticker for targeted logging
     is_ashare = isinstance(symbol, str) and is_a_share_ticker(symbol)
 
-    for vendor in fallback_vendors:
-        if vendor not in VENDOR_METHODS[method]:
-            continue
-
+    for vendor in vendor_chain:
         vendor_impl = VENDOR_METHODS[method][vendor]
         impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
 
@@ -462,9 +471,10 @@ def route_to_vendor(method: str, *args, **kwargs):
                 )
             return result
         except AlphaVantageRateLimitError:
-            continue  # Rate limits: try the next vendor
+            logger.warning("Vendor %r rate-limited for %s; trying next vendor.", vendor, method)
+            continue
         except NoMarketDataError as e:
-            last_no_data = e  # No data here; another vendor may have it
+            last_no_data = e  # No data here; another configured vendor may have it
             continue
         except Exception as exc:
             # For A-share tickers, elevate AkShare failure from debug -> warning
@@ -478,18 +488,9 @@ def route_to_vendor(method: str, *args, **kwargs):
                     exc,
                 )
             else:
-                logger.debug(
-                    "Vendor '%s' failed for method='%s' symbol='%s': %s(%s)",
-                    vendor,
-                    method,
-                    symbol,
-                    type(exc).__name__,
-                    exc,
-                )
-            # A fallback vendor failing for an incidental reason (e.g. no API
-            # key configured) must not crash the call when another vendor
-            # already determined the symbol simply has no data. Remember the
-            # first error so a genuine primary-vendor failure still surfaces.
+                # Don't let one vendor's failure crash the call when another can
+                # serve it, but never swallow silently (#989).
+                logger.warning("Vendor %r failed for %s: %s", vendor, method, exc)
             if first_error is None:
                 first_error = exc
             continue  # Try next vendor in fallback chain
@@ -499,6 +500,13 @@ def route_to_vendor(method: str, *args, **kwargs):
     # empty string, so the agent reports "unavailable" instead of inventing a
     # value. This takes precedence over incidental fallback errors.
     if last_no_data is not None:
+        if first_error is not None:
+            # A vendor also hit a real error; surface it in logs so the no-data
+            # verdict can't hide a broken primary (network/auth/etc.).
+            logger.warning(
+                "Returning NO_DATA for %s, but a vendor errored earlier: %s",
+                method, first_error,
+            )
         sym = last_no_data.symbol
         canonical = last_no_data.canonical
         detail = last_no_data.detail
@@ -507,7 +515,7 @@ def route_to_vendor(method: str, *args, **kwargs):
         # Build the routing chain string so the agent (and user) can see
         # which vendors were attempted and in what order.
         tried = " → ".join(
-            v for v in fallback_vendors if v in VENDOR_METHODS[method]
+            v for v in vendor_chain if v in VENDOR_METHODS[method]
         )
         return (
             f"NO_DATA_AVAILABLE: No market data found for '{sym}'{resolved} from "
