@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
@@ -120,7 +121,7 @@ class DeepSeekChatOpenAI(NormalizedChatOpenAI):
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
         outgoing = payload.get("messages", [])
         for message_dict, message in zip(outgoing, _input_to_messages(input_), strict=False):
-            if message_dict.get("role") != "assistant":
+            if not isinstance(message, AIMessage):
                 continue
             if "reasoning_content" in message_dict:
                 continue
@@ -304,6 +305,22 @@ def _resolve_provider_base_url(provider: str) -> str | None:
     return _PROVIDER_BASE_URL.get(provider)
 
 
+def _is_native_openai_base_url(base_url: str | None) -> bool:
+    """True when ``base_url`` is unset or points at api.openai.com.
+
+    The Responses API (/v1/responses) only exists on native OpenAI. A custom
+    base_url on the ``openai`` provider (a proxy, gateway, or local server)
+    speaks only Chat Completions, so the Responses API must stay off there even
+    though the provider spec enables it (#1024).
+    """
+    if not base_url:
+        return True
+    if "://" not in base_url:
+        base_url = "https://" + base_url
+    host = urlparse(base_url).hostname or ""
+    return host == "api.openai.com" or host.endswith(".openai.com")
+
+
 class OpenAIClient(BaseLLMClient):
     """Client for OpenAI, Ollama, OpenRouter, and xAI providers.
 
@@ -340,6 +357,7 @@ class OpenAIClient(BaseLLMClient):
         if self.provider in _PROVIDER_BASE_URL:
             llm_kwargs["base_url"] = self.base_url or _resolve_provider_base_url(self.provider)
             api_key_env = get_api_key_env(self.provider)
+<<<<<<< HEAD
             if api_key_env:
                 api_key = os.environ.get(api_key_env)
                 if api_key:
@@ -352,6 +370,25 @@ class OpenAIClient(BaseLLMClient):
                     )
             else:
                 llm_kwargs["api_key"] = "ollama"
+=======
+            api_key = os.environ.get(api_key_env) if api_key_env else None
+            if api_key:
+                llm_kwargs["api_key"] = api_key
+            elif spec.key_optional:
+                llm_kwargs["api_key"] = spec.placeholder_key
+            elif api_key_env:
+                raise ValueError(
+                    f"API key for provider '{self.provider}' is not set. "
+                    f"Please set the {api_key_env} environment variable "
+                    f"(e.g. add {api_key_env}=your_key to your .env file)."
+                )
+
+            # The Responses API only exists on native OpenAI; if the user points
+            # the openai provider at a custom base_url (proxy/gateway/local), it
+            # only speaks Chat Completions, so keep Responses off there (#1024).
+            if spec.use_responses_api and _is_native_openai_base_url(base_url):
+                llm_kwargs["use_responses_api"] = True
+>>>>>>> 3cddf1e (fix(llm): use the OpenAI Responses API only for native endpoints)
         elif self.base_url:
             llm_kwargs["base_url"] = self.base_url
 
