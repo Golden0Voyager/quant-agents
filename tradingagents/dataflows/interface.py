@@ -103,6 +103,7 @@ from .alpha_vantage import (
     get_stock as get_alpha_vantage_stock,
 )
 from .alpha_vantage_common import AlphaVantageRateLimitError
+from .fred import get_macro_data as get_fred_macro_data
 
 # Configuration and routing logic
 from .config import get_config
@@ -248,11 +249,18 @@ TOOLS_CATEGORIES = {
         "tools": [
             "get_research_reports",
         ]
+    },
+    "macro_data": {
+        "description": "Macroeconomic indicators (rates, inflation, labor, growth)",
+        "tools": [
+            "get_macro_indicators",
+        ]
     }
 }
 
 VENDOR_LIST = [
     "yfinance",
+    "fred",
     "alpha_vantage",
     "akshare",
     "smartmoney_db",
@@ -379,6 +387,10 @@ VENDOR_METHODS = {
     # research_opinion (v2.2)
     "get_research_reports": {
         "akshare": get_akshare_research_reports,
+    },
+    # macro_data
+    "get_macro_indicators": {
+        "fred": get_fred_macro_data,
     },
 }
 

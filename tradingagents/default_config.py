@@ -120,6 +120,8 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "technical_indicators": "smartmoney_db,akshare,yfinance",
         "fundamental_data": "smartmoney_db,akshare,yfinance",
         "news_data": "akshare,yfinance",  # news not stored locally
+        "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)
+    }
     },
     # Tool-level configuration (takes precedence over category-level)
     "tool_vendors": {

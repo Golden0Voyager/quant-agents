@@ -29,6 +29,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_industry_valuation,
     get_insider_transactions,
     get_institutional_holdings,
+    get_macro_indicators,
     get_news,
     get_northbound_hold,
     get_restricted_release,
@@ -207,6 +208,7 @@ class TradingAgentsGraph:
                     get_global_news,
                     get_insider_transactions,
                     get_company_announcements,
+                    get_macro_indicators,
                 ]
             ),
             "governance": ToolNode(
