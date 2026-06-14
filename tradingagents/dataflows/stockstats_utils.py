@@ -74,8 +74,10 @@ def _coerce_ohlcv_dates(data: pd.DataFrame) -> pd.Series:
     """Return parsed dates from an OHLCV frame, whether Date is a column or the index."""
     if "Date" in data.columns:
         return pd.to_datetime(data["Date"], errors="coerce").dropna()
+    # yfinance keeps the dates in the index (a DatetimeIndex, sometimes unnamed).
     if isinstance(data.index, pd.DatetimeIndex):
         return pd.Series(pd.to_datetime(data.index, errors="coerce")).dropna()
+    # Fallback: expose the index and look for any date-like column.
     df = data.reset_index()
     for col in ("Date", "Datetime", "date", "index"):
         if col in df.columns:
@@ -93,6 +95,15 @@ def _assert_ohlcv_not_stale(
     *,
     max_stale_days: int = MAX_OHLCV_STALE_DAYS,
 ) -> None:
+    """Reject OHLCV whose latest row is far older than curr_date.
+
+    Raises NoMarketDataError (with a stale-specific detail) so the router treats
+    it like any other "no usable data from this vendor" — try the next vendor,
+    then emit one clear unavailable signal. Empty frames are left to the
+    caller's existing no-data handling; this guards only the dangerous case of
+    present-but-stale rows (a vendor returning a year-old frame that would
+    otherwise feed wrong prices to the agent, #1021).
+    """
     if data is None or data.empty:
         return
     requested = pd.to_datetime(curr_date, errors="coerce")
