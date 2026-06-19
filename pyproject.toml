@@ -53,3 +53,23 @@ markers = [
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest-cov>=5.0",
+    "ruff>=0.5.0",
+    "mypy>=1.10.0",
+]
+
+[tool.coverage.run]
+source = ["tradingagents", "cli"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+
+[tool.ruff]
+extend = "~/.config/ruff/ruff.toml"
+
+[tool.mypy]
+ignore_missing_imports = true
