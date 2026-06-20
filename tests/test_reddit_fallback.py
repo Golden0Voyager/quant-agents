@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+import json
+import unittest
+from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 
 import pytest
