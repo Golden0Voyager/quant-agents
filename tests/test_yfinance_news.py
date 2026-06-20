@@ -1,8 +1,13 @@
 """Tests for tradingagents.dataflows.yfinance_news."""
 
+import time
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
+
+
+def _epoch(date_str: str) -> int:
+    return int(time.mktime(datetime.strptime(date_str, "%Y-%m-%d").timetuple()))
 
 import pytest
 
@@ -47,13 +52,17 @@ def _flat_article(
     summary="Flat summary",
     publisher="Flat Publisher",
     link="https://example.com/flat",
+    provider_publish_time=None,
 ):
-    return {
+    article = {
         "title": title,
         "summary": summary,
         "publisher": publisher,
         "link": link,
     }
+    if provider_publish_time is not None:
+        article["providerPublishTime"] = provider_publish_time
+    return article
 
 
 @pytest.mark.unit
@@ -211,7 +220,7 @@ class GetNewsYFinanceTests(unittest.TestCase):
         self.assertNotIn("Outside Range", result)
         self.assertIn("Inside Range", result)
 
-    def test_articles_without_date_are_included(self):
+    def test_undated_articles_excluded_in_historical_window(self):
         mock_news = [
             _nested_article(title="No Date", pub_date=""),
             {"content": {"title": "No PubDate Field"}},
@@ -232,8 +241,9 @@ class GetNewsYFinanceTests(unittest.TestCase):
                 ):
                     result = get_news_yfinance(self.ticker, self.start, self.end)
 
-        self.assertIn("No Date", result)
-        self.assertIn("No PubDate Field", result)
+        self.assertNotIn("No Date", result)
+        self.assertNotIn("No PubDate Field", result)
+        self.assertIn("No news found", result)
 
     def test_all_articles_filtered_out_returns_message(self):
         mock_news = [
@@ -358,6 +368,7 @@ class GetNewsYFinanceTests(unittest.TestCase):
                 title="Flat News",
                 summary="Flat summary",
                 link="https://flat.example.com",
+                provider_publish_time=_epoch("2025-06-15"),
             ),
         ]
         with patch(
@@ -507,6 +518,7 @@ class GetGlobalNewsYFinanceTests(unittest.TestCase):
                 title="Flat Global",
                 publisher="Bloomberg",
                 link="https://bloomberg.com/article",
+                provider_publish_time=_epoch("2025-06-18"),
             ),
         ]
         mock_search = MagicMock()

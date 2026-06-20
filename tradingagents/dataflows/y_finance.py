@@ -5,7 +5,13 @@ import pandas as pd
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
 
-from .stockstats_utils import StockstatsUtils, filter_financials_by_date, load_ohlcv, yf_retry
+from .stockstats_utils import (
+    StockstatsUtils,
+    _assert_ohlcv_not_stale,
+    filter_financials_by_date,
+    load_ohlcv,
+    yf_retry,
+)
 from .symbol_utils import NoMarketDataError, normalize_symbol
 
 
@@ -35,6 +41,10 @@ def get_YFin_data_online(
             raise NoMarketDataError(
                 symbol, canonical, f"no rows between {start_date} and {end_date}"
             )
+
+        # Reject a stale frame (latest row far older than end_date) rather than
+        # feeding year-old prices into the report (#1021).
+        _assert_ohlcv_not_stale(data, end_date, symbol, canonical)
 
         # Remove timezone info from index for cleaner output
         if data.index.tz is not None:

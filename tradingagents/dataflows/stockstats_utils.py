@@ -9,10 +9,15 @@ from stockstats import wrap
 from yfinance.exceptions import YFRateLimitError
 
 from .config import get_config
-from .symbol_utils import NoMarketDataError
+from .symbol_utils import NoMarketDataError, normalize_symbol
 from .utils import safe_ticker_component
 
 logger = logging.getLogger(__name__)
+
+# A vendor's latest OHLCV row this many calendar days before the requested date
+# is treated as stale. Generous enough to span long holiday weekends, tight
+# enough to catch the year-old frames yfinance occasionally returns (#1021).
+MAX_OHLCV_STALE_DAYS = 10
 
 
 def yf_retry(func, max_retries=3, base_delay=2.0):
@@ -65,6 +70,51 @@ def _clean_dataframe(data: pd.DataFrame) -> pd.DataFrame:
     return data
 
 
+def _coerce_ohlcv_dates(data: pd.DataFrame) -> pd.Series:
+    """Return parsed dates from an OHLCV frame, whether Date is a column or the index."""
+    if "Date" in data.columns:
+        return pd.to_datetime(data["Date"], errors="coerce").dropna()
+    if isinstance(data.index, pd.DatetimeIndex):
+        return pd.Series(pd.to_datetime(data.index, errors="coerce")).dropna()
+    df = data.reset_index()
+    for col in ("Date", "Datetime", "date", "index"):
+        if col in df.columns:
+            parsed = pd.to_datetime(df[col], errors="coerce").dropna()
+            if not parsed.empty:
+                return parsed
+    return pd.Series(dtype="datetime64[ns]")
+
+
+def _assert_ohlcv_not_stale(
+    data: pd.DataFrame,
+    curr_date: str,
+    symbol: str,
+    canonical: str | None = None,
+    *,
+    max_stale_days: int = MAX_OHLCV_STALE_DAYS,
+) -> None:
+    if data is None or data.empty:
+        return
+    requested = pd.to_datetime(curr_date, errors="coerce")
+    if pd.isna(requested):
+        return
+    requested = requested.normalize()
+    dates = _coerce_ohlcv_dates(data)
+    if dates.empty:
+        return
+    latest = dates.max().normalize()
+    if hasattr(latest, "tz") and latest.tz is not None:
+        latest = latest.tz_localize(None)
+    stale_days = (requested - latest).days
+    if stale_days > max_stale_days:
+        raise NoMarketDataError(
+            symbol,
+            canonical,
+            f"latest row is {latest.date()}, {stale_days} days before the "
+            f"requested {requested.date()} (stale) — refusing to use it",
+        )
+
+
 def load_ohlcv(symbol: str, curr_date: str, lookback_years: int = 5) -> pd.DataFrame:
     """Fetch OHLCV data with caching, filtered to prevent look-ahead bias.
 
@@ -72,10 +122,8 @@ def load_ohlcv(symbol: str, curr_date: str, lookback_years: int = 5) -> pd.DataF
     On subsequent calls the cache is reused. Rows after curr_date are
     filtered out so backtests never see future prices.
     """
-    # Caller is responsible for normalising the symbol before passing it
-    # here (e.g. via normalize_symbol in y_finance.py or interface.py).
-    # We only sanitise the filename component so cache paths stay safe.
-    safe_symbol = safe_ticker_component(symbol)
+    canonical = normalize_symbol(symbol)
+    safe_symbol = safe_ticker_component(canonical)
 
     config = get_config()
     curr_date_dt = pd.to_datetime(curr_date)
@@ -106,7 +154,7 @@ def load_ohlcv(symbol: str, curr_date: str, lookback_years: int = 5) -> pd.DataF
 
     if data is None:
         downloaded = yf_retry(lambda: yf.download(
-            symbol,
+            canonical,
             start=start_str,
             end=end_str,
             multi_level_index=False,
@@ -117,7 +165,7 @@ def load_ohlcv(symbol: str, curr_date: str, lookback_years: int = 5) -> pd.DataF
         # Only cache real data — never persist an empty frame.
         if downloaded.empty or "Close" not in downloaded.columns:
             raise NoMarketDataError(
-                symbol, symbol, "Yahoo Finance returned no rows"
+                symbol, canonical, "Yahoo Finance returned no rows"
             )
         downloaded.to_csv(data_file, index=False, encoding="utf-8")
         data = downloaded
@@ -126,6 +174,10 @@ def load_ohlcv(symbol: str, curr_date: str, lookback_years: int = 5) -> pd.DataF
 
     # Filter to curr_date to prevent look-ahead bias in backtesting
     data = data[data["Date"] <= curr_date_dt]
+
+    # Reject a stale frame (latest row far older than curr_date) rather than
+    # feeding year-old prices into indicators (#1021).
+    _assert_ohlcv_not_stale(data, curr_date, symbol, canonical)
 
     return data
 
