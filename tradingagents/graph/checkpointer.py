@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator
 
 from langgraph.checkpoint.base import get_serializable_checkpoint_metadata
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -32,7 +32,7 @@ class FixedSqliteSaver(SqliteSaver):
 
     def put(self, config, checkpoint, metadata, new_versions):
         import json
-        from langgraph.checkpoint.base import ChannelVersions
+
 
         thread_id = config["configurable"]["thread_id"]
         checkpoint_ns = config["configurable"]["checkpoint_ns"]

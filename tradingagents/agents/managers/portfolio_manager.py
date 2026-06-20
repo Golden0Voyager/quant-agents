@@ -71,7 +71,7 @@ def create_portfolio_manager(llm):
         transactions_context = state.get("transactions_context", [])
         holdings_line = ""
         if holdings_context:
-            from tradingagents.portfolio import Portfolio, Holding, Transaction, build_pm_prompt
+            from tradingagents.portfolio import Holding, Portfolio, Transaction, build_pm_prompt
             portfolio = Portfolio(
                 holdings={
                     t: Holding.from_dict(d, ticker=t) for t, d in holdings_context.items()
@@ -95,7 +95,7 @@ def create_portfolio_manager(llm):
                 ticker, trade_date, exc,
             )
             snapshot = None
-        verified_close = _extract_snapshot_close(snapshot)
+        _extract_snapshot_close(snapshot)
         snapshot_block = snapshot if snapshot else (
             "Verified market data is unavailable for this ticker on the "
             f"requested date ({trade_date}). Treat any Trader-quoted entry / "

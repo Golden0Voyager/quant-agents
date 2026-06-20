@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from tradingagents.portfolio.models import Holding, Portfolio, PortfolioMetadata
@@ -96,7 +96,7 @@ class PortfolioSyncService:
         total_pnl_pct = total_pnl / total_invested if total_invested else 0.0
 
         metadata = PortfolioMetadata(
-            updated_at=datetime.now(timezone.utc).isoformat(),
+            updated_at=datetime.now(UTC).isoformat(),
             source_type="google_sheet",
             source_sheet_id=self.sheet_id,
             source_worksheet=self.worksheet,
@@ -152,7 +152,7 @@ class PortfolioSyncService:
                 if field in ("ticker", "shares", "avg_cost"):
                     raise ValueError(
                         f"Required column '{header_name}' not found in headers: {headers}"
-                    )
+                    ) from None
                 logger.debug("Optional column '%s' (%s) not found, skipping", header_name, field)
         return indices
 

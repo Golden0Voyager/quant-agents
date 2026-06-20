@@ -10,8 +10,9 @@ import logging
 import math
 import os
 import time
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import Any, Callable, Generator, Optional, TypeVar
+from typing import Any, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -96,8 +97,9 @@ def no_proxy() -> Generator[None, None, None]:
     IPv6 endpoint (2408:870c::/32) frequently drops connections with
     ``RemoteDisconnected`` while IPv4 works reliably.
     """
-    import requests.utils as _ru  # local import to avoid startup side-effects
     import socket
+
+    import requests.utils as _ru  # local import to avoid startup side-effects
 
     keys = (
         "http_proxy",
@@ -138,7 +140,7 @@ _UNIT_FACTORS = {
 }
 
 
-def safe_float(value: Any) -> Optional[float]:
+def safe_float(value: Any) -> float | None:
     """Best-effort float coercion; returns None on failure or NaN/Inf."""
     if value is None:
         return None
@@ -151,7 +153,7 @@ def safe_float(value: Any) -> Optional[float]:
     return f
 
 
-def to_yuan(value: Any, source_unit: str) -> Optional[float]:
+def to_yuan(value: Any, source_unit: str) -> float | None:
     """Normalize a monetary value to yuan (元).
 
     source_unit ∈ {"yuan", "wan", "yi"}. This is the single point where the
@@ -166,7 +168,7 @@ def to_yuan(value: Any, source_unit: str) -> Optional[float]:
     return v * _UNIT_FACTORS[source_unit]
 
 
-def format_money_cn(value_yuan: Optional[float]) -> str:
+def format_money_cn(value_yuan: float | None) -> str:
     """Format yuan as a Chinese-friendly string with auto-scaled unit."""
     if value_yuan is None:
         return "N/A"

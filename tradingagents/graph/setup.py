@@ -1,6 +1,7 @@
 # TradingAgents/graph/setup.py
 
-from typing import Any, Dict
+from typing import Any
+
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
@@ -18,7 +19,7 @@ class GraphSetup:
         self,
         quick_thinking_llm: Any,
         deep_thinking_llm: Any,
-        tool_nodes: Dict[str, ToolNode],
+        tool_nodes: dict[str, ToolNode],
         conditional_logic: ConditionalLogic,
         analyst_concurrency_limit: int = 1,
     ):
@@ -30,7 +31,7 @@ class GraphSetup:
         self.analyst_concurrency_limit = analyst_concurrency_limit
 
     def setup_graph(
-        self, selected_analysts=["market", "social", "news", "fundamentals"]
+        self, selected_analysts=None
     ):
         """Set up and compile the agent workflow graph.
 
@@ -43,6 +44,8 @@ class GraphSetup:
                 - "governance": Governance analyst
                 - "industry": Industry analyst
         """
+        if selected_analysts is None:
+            selected_analysts = ["market", "social", "news", "fundamentals"]
         plan = build_analyst_execution_plan(
             selected_analysts,
             concurrency_limit=self.analyst_concurrency_limit,

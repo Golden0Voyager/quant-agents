@@ -8,14 +8,12 @@ from __future__ import annotations
 
 import datetime
 from collections import deque
-from typing import Optional
 
 from rich import box
 from rich.console import Console
 from rich.layout import Layout
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.rule import Rule
 from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
@@ -94,11 +92,11 @@ class AnalysisDashboard:
         self.messages: deque = deque(maxlen=max_length)
         self.tool_calls: deque = deque(maxlen=max_length)
         self.agent_status: dict[str, str] = {}
-        self.report_sections: dict[str, Optional[str]] = {}
+        self.report_sections: dict[str, str | None] = {}
         self.selected_analysts: list[str] = []
-        self.current_report: Optional[str] = None
-        self.final_report: Optional[str] = None
-        self.current_agent: Optional[str] = None
+        self.current_report: str | None = None
+        self.final_report: str | None = None
+        self.current_agent: str | None = None
         self.current_stage: str = "Analysts"
         self.stage_progress: float = 0.0
         self.overall_progress: float = 0.0
@@ -156,7 +154,7 @@ class AnalysisDashboard:
         if self.current_agent:
             self._tool_call_active[self.current_agent] = True
 
-    def finish_tool_call(self, agent: Optional[str] = None) -> None:
+    def finish_tool_call(self, agent: str | None = None) -> None:
         target = agent or self.current_agent
         if target:
             self._tool_call_active.pop(target, None)
@@ -356,7 +354,7 @@ def render_header(
     batch_completed: int = 0,
     batch_total: int = 0,
     batch_failed: int = 0,
-    profile_name: Optional[str] = None,
+    profile_name: str | None = None,
 ) -> None:
     parts = []
     if profile_name:
@@ -435,7 +433,7 @@ def render_progress_panel(layout: Layout, dashboard: AnalysisDashboard) -> None:
         table.add_row("─" * 20, "─" * 20, "─" * 20, style="dim")
 
     # Combine stage bar + table in one panel
-    combined = Text.assemble(
+    Text.assemble(
         Text(stage_text + "\n\n", style="bold"),
     )
     # Use a group or nested table approach
@@ -542,7 +540,7 @@ def render_footer(
     layout: Layout,
     dashboard: AnalysisDashboard,
     stats_handler=None,
-    start_time: Optional[float] = None,
+    start_time: float | None = None,
 ) -> None:
     agents_completed = sum(
         1 for s in dashboard.agent_status.values() if s == "completed"
@@ -602,11 +600,11 @@ def update_dashboard_display(
     dashboard: AnalysisDashboard,
     ticker: str = "",
     stats_handler=None,
-    start_time: Optional[float] = None,
+    start_time: float | None = None,
     batch_completed: int = 0,
     batch_total: int = 0,
     batch_failed: int = 0,
-    profile_name: Optional[str] = None,
+    profile_name: str | None = None,
 ) -> None:
     """统一渲染入口，batch 与单股模式共用。"""
     render_header(
@@ -707,9 +705,8 @@ def _update_analyst_statuses(dashboard: AnalysisDashboard, chunk: dict) -> None:
         else:
             dashboard.update_agent_status(agent_name, "pending")
 
-    if not found_active and selected:
-        if dashboard.agent_status.get("Bull Researcher") == "pending":
-            dashboard.update_agent_status("Bull Researcher", "in_progress")
+    if not found_active and selected and dashboard.agent_status.get("Bull Researcher") == "pending":
+        dashboard.update_agent_status("Bull Researcher", "in_progress")
 
 
 def process_stream_chunk(
@@ -717,7 +714,7 @@ def process_stream_chunk(
     chunk: dict,
     max_debate_rounds: int = 1,
     max_risk_rounds: int = 1,
-    processed_ids: Optional[set] = None,
+    processed_ids: set | None = None,
 ) -> set:
     """处理单个 graph stream chunk，更新 dashboard 所有状态。
 
@@ -785,16 +782,15 @@ def process_stream_chunk(
                     f"### {agent_name} Analysis\n{hist}",
                 )
         judge = risk.get("judge_decision", "").strip()
-        if judge:
-            if dashboard.agent_status.get("Portfolio Manager") != "completed":
-                dashboard.update_agent_status("Portfolio Manager", "in_progress")
-                dashboard.update_report_section(
-                    "final_trade_decision", f"### Portfolio Manager Decision\n{judge}"
-                )
-                dashboard.update_agent_status("Aggressive Analyst", "completed")
-                dashboard.update_agent_status("Conservative Analyst", "completed")
-                dashboard.update_agent_status("Neutral Analyst", "completed")
-                dashboard.update_agent_status("Portfolio Manager", "completed")
+        if judge and dashboard.agent_status.get("Portfolio Manager") != "completed":
+            dashboard.update_agent_status("Portfolio Manager", "in_progress")
+            dashboard.update_report_section(
+                "final_trade_decision", f"### Portfolio Manager Decision\n{judge}"
+            )
+            dashboard.update_agent_status("Aggressive Analyst", "completed")
+            dashboard.update_agent_status("Conservative Analyst", "completed")
+            dashboard.update_agent_status("Neutral Analyst", "completed")
+            dashboard.update_agent_status("Portfolio Manager", "completed")
 
     # 6. Stage tracking
     dashboard.update_stage_from_chunk(chunk, max_debate_rounds, max_risk_rounds)

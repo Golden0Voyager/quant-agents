@@ -1,12 +1,12 @@
 # TradingAgents/graph/trading_graph.py
 
+import json
 import logging
 import os
 import time as _time
-from pathlib import Path
-import json
 from datetime import datetime, timedelta
-from typing import Dict, Any, Tuple, List, Optional
+from pathlib import Path
+from typing import Any
 
 import yfinance as yf
 
@@ -14,50 +14,43 @@ logger = logging.getLogger(__name__)
 
 from langgraph.prebuilt import ToolNode
 
-from tradingagents.llm_clients import create_llm_client
-
 from tradingagents.agents import *
-from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.agents.utils.memory import TradingMemoryLog
-from tradingagents.dataflows.utils import safe_ticker_component
-from tradingagents.agents.utils.agent_states import (
-    AgentState,
-    InvestDebateState,
-    RiskDebateState,
-)
-from tradingagents.dataflows.config import set_config
 
 # Import the new abstract tool methods from agent_utils
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
-    resolve_instrument_identity,
-    get_stock_data,
-    get_indicators,
-    get_fundamentals,
     get_balance_sheet,
     get_cashflow,
-    get_income_statement,
-    get_news,
-    get_insider_transactions,
-    get_global_news,
     get_company_announcements,
-    get_restricted_release,
-    get_institutional_holdings,
-    get_northbound_hold,
+    get_fundamentals,
+    get_global_news,
+    get_income_statement,
+    get_indicators,
     get_industry_valuation,
+    get_insider_transactions,
+    get_institutional_holdings,
+    get_news,
+    get_northbound_hold,
+    get_restricted_release,
+    get_stock_data,
+    resolve_instrument_identity,
 )
+from tradingagents.agents.utils.memory import TradingMemoryLog
+from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.utils import safe_ticker_component
+from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.llm_clients import create_llm_client
 
-from .checkpointer import checkpoint_step, clear_checkpoint, get_checkpointer, thread_id
-from .conditional_logic import ConditionalLogic
-from .setup import GraphSetup
-from .propagation import Propagator
-from .reflection import Reflector
-from .signal_processing import SignalProcessor
 from .analyst_execution import (
     AnalystWallTimeTracker,
-    AnalystExecutionPlan,
     build_analyst_execution_plan,
 )
+from .checkpointer import checkpoint_step, clear_checkpoint, get_checkpointer, thread_id
+from .conditional_logic import ConditionalLogic
+from .propagation import Propagator
+from .reflection import Reflector
+from .setup import GraphSetup
+from .signal_processing import SignalProcessor
 
 
 class TradingAgentsGraph:
@@ -65,10 +58,10 @@ class TradingAgentsGraph:
 
     def __init__(
         self,
-        selected_analysts=["market", "social", "news", "fundamentals"],
+        selected_analysts=None,
         debug=False,
-        config: Dict[str, Any] = None,
-        callbacks: Optional[List] = None,
+        config: dict[str, Any] = None,
+        callbacks: list | None = None,
     ):
         """Initialize the trading agents graph and components.
 
@@ -78,6 +71,8 @@ class TradingAgentsGraph:
             config: Configuration dictionary. If None, uses default config
             callbacks: Optional list of callback handlers (e.g., for tracking LLM/tool stats)
         """
+        if selected_analysts is None:
+            selected_analysts = ["market", "social", "news", "fundamentals"]
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
         self.callbacks = callbacks or []
@@ -111,9 +106,9 @@ class TradingAgentsGraph:
 
         self.deep_thinking_llm = deep_client.get_llm()
         self.quick_thinking_llm = quick_client.get_llm()
-        
+
         self.memory_log = TradingMemoryLog(self.config)
-        self.node_timings: List[Dict[str, Any]] = []
+        self.node_timings: list[dict[str, Any]] = []
 
         # Create tool nodes
         self.tool_nodes = self._create_tool_nodes()
@@ -148,7 +143,7 @@ class TradingAgentsGraph:
         self.graph = self.workflow.compile()
         self._checkpointer_ctx = None
 
-    def _get_provider_kwargs(self) -> Dict[str, Any]:
+    def _get_provider_kwargs(self) -> dict[str, Any]:
         """Get provider-specific kwargs for LLM client creation."""
         kwargs = {}
         provider = self.config.get("llm_provider", "").lower()
@@ -177,7 +172,7 @@ class TradingAgentsGraph:
 
         return kwargs
 
-    def _create_tool_nodes(self) -> Dict[str, ToolNode]:
+    def _create_tool_nodes(self) -> dict[str, ToolNode]:
         """Create tool nodes for different data sources using abstract methods."""
         return {
             "market": ToolNode(
@@ -255,7 +250,7 @@ class TradingAgentsGraph:
     def _fetch_returns(
         self, ticker: str, trade_date: str, holding_days: int = 5,
         benchmark: str = "SPY", asset_type: str = "stock",
-    ) -> Tuple[Optional[float], Optional[float], Optional[int]]:
+    ) -> tuple[float | None, float | None, int | None]:
         """Fetch raw and alpha return for ticker over holding_days from trade_date.
 
         ``benchmark`` is the index used as the alpha baseline (resolved by the
@@ -298,11 +293,11 @@ class TradingAgentsGraph:
     def _fetch_crypto_returns(
         self, ticker: str, start_date: str, end_date: str,
         holding_days: int, benchmark: str,
-    ) -> Tuple[Optional[float], Optional[float], Optional[int]]:
+    ) -> tuple[float | None, float | None, int | None]:
         """Fetch crypto returns via CoinGecko public API (no key required)."""
-        import urllib.request
-        import urllib.parse
         import json
+        import urllib.parse
+        import urllib.request
 
         # Map common ticker symbols to CoinGecko coin IDs
         coin_map = {
@@ -421,7 +416,7 @@ class TradingAgentsGraph:
 
         resolved = resolve_ticker(company_name)
         ticker = resolved["ticker"]
-        company_name_str = resolved.get("company_name", "")
+        resolved.get("company_name", "")
         self.ticker = ticker
 
         # Resolve any pending memory-log entries for this ticker before the pipeline runs.
@@ -436,7 +431,7 @@ class TradingAgentsGraph:
             log_path = log_dir / f"full_states_log_{trade_date}.json"
             if log_path.exists() and log_path.stat().st_size > 0:
                 try:
-                    with open(log_path, "r", encoding="utf-8") as f:
+                    with open(log_path, encoding="utf-8") as f:
                         cached_state = json.load(f)
                     if cached_state.get("final_trade_decision"):
                         logger.info(
@@ -501,7 +496,7 @@ class TradingAgentsGraph:
         # Always use stream() for per-node timing collection.
         # Override to "updates" mode so each chunk is {node_name: {changed_fields}}.
         timings = []
-        merged_state: Dict[str, Any] = dict(init_agent_state)
+        merged_state: dict[str, Any] = dict(init_agent_state)
         t_stream_start = _time.perf_counter()
         t_prev = t_stream_start
         stream_args = {**args, "stream_mode": "updates"}

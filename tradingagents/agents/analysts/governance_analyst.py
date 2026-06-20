@@ -1,4 +1,5 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_company_announcements,
@@ -13,7 +14,6 @@ from tradingagents.agents.utils.agent_utils import (
     get_restricted_release,
     sanitize_company_name_in_report,
 )
-from tradingagents.dataflows.config import get_config
 
 
 def create_governance_analyst(llm):

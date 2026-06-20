@@ -1,6 +1,5 @@
 """Batch-specific dashboard that extends the generic AnalysisDashboard."""
 
-from typing import Optional
 
 from cli.dashboard import AnalysisDashboard
 
@@ -20,7 +19,7 @@ class BatchDashboard(AnalysisDashboard):
         self.failed = 0
         self.skipped = 0
         self.skipped_tickers: list[str] = []
-        self.current_ticker: Optional[str] = None
+        self.current_ticker: str | None = None
 
     def update_progress(self, current_ticker: str, completed: int, failed: int) -> None:
         self.current_ticker = current_ticker

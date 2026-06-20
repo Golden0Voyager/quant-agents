@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
-from typing import Any
 
 from tradingagents.portfolio.models import Transaction
 

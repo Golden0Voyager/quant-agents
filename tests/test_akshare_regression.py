@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-
 GROUND_TRUTH_PATH = Path(__file__).parent / "fixtures" / "a_share_ground_truth.json"
 
 

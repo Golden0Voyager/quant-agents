@@ -9,10 +9,8 @@ Covers:
 """
 from __future__ import annotations
 
-import json
 import os
 import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,13 +21,12 @@ from tradingagents.portfolio import (
     Portfolio,
     PortfolioMetadata,
     PortfolioRepository,
-    normalize_ticker,
-    validate_holding,
     build_pm_prompt,
     build_risk_prompt,
     build_trader_prompt,
+    normalize_ticker,
+    validate_holding,
 )
-
 
 # ---------------------------------------------------------------------------
 # Models

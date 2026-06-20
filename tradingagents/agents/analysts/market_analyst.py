@@ -1,14 +1,14 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+
 from tradingagents.agents.utils.agent_utils import (
-    get_instrument_context_from_state,
     get_fund_flow,
     get_indicators,
+    get_instrument_context_from_state,
     get_language_instruction,
     get_sector_fund_flow,
     get_stock_data,
     get_verified_market_snapshot,
 )
-from tradingagents.dataflows.config import get_config
 
 
 def create_market_analyst(llm):

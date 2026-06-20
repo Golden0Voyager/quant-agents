@@ -8,10 +8,9 @@ monetary values pass through akshare_common.format_money_cn() so the unit
 from __future__ import annotations
 
 import logging
-import os
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Annotated, Optional
+from typing import Annotated
 
 import akshare as ak
 import pandas as pd
@@ -19,7 +18,6 @@ import pandas as pd
 from .akshare_common import (
     _akshare_retry,
     format_money_cn,
-    is_a_share_ticker,
     no_proxy,
     safe_float,
     to_akshare_symbol,
@@ -50,7 +48,7 @@ def _patched_get_tqdm(enable: bool = True):
             )
             kwargs.setdefault("leave", False)
             kwargs.setdefault("ncols", 100)
-            super().__init__(iterable, desc=desc, *args, **kwargs)
+            super().__init__(iterable, *args, desc=desc, **kwargs)
 
     return _AkshareTqdm
 
@@ -139,7 +137,7 @@ def _safe_call(func, *args, **kwargs):
         return None
 
 
-def _yjbb_report_date_for(curr_date: Optional[str]) -> str:
+def _yjbb_report_date_for(curr_date: str | None) -> str:
     """Pick the most recently available yjbb report date as YYYYMMDD.
 
     Q1 results land in late April, Q2 in late August, Q3 in late October,
@@ -174,12 +172,12 @@ def get_fundamentals(
 
     lines = [
         f"# Fundamentals for {symbol.upper()} as of {curr_date}",
-        f"# Source: akshare (Eastmoney)",
+        "# Source: akshare (Eastmoney)",
         "",
     ]
 
     if info_df is not None and not info_df.empty:
-        info = dict(zip(info_df["item"], info_df["value"]))
+        info = dict(zip(info_df["item"], info_df["value"], strict=False))
         for label in ("股票简称", "行业", "上市时间", "总股本", "流通股", "总市值", "流通市值"):
             if label in info and info[label] not in (None, ""):
                 v = info[label]
@@ -232,7 +230,7 @@ _BALANCE_FIELDS = [
 def get_balance_sheet(
     symbol: Annotated[str, "A-share ticker"],
     freq: str = "quarterly",
-    curr_date: Optional[str] = None,
+    curr_date: str | None = None,
 ) -> str:
     """Fetch A-share balance sheet (latest report period) via akshare."""
     code = to_akshare_symbol(symbol, "upper_prefix")
@@ -255,7 +253,7 @@ def get_balance_sheet(
 def get_cashflow(
     symbol: Annotated[str, "A-share ticker"],
     freq: str = "quarterly",
-    curr_date: Optional[str] = None,
+    curr_date: str | None = None,
 ) -> str:
     """Fetch A-share cash flow statement (latest report period) via akshare."""
     code = to_akshare_symbol(symbol, "upper_prefix")
@@ -318,7 +316,7 @@ def _format_row_section(row: dict, fields) -> str:
 def get_income_statement(
     symbol: Annotated[str, "A-share ticker"],
     freq: Annotated[str, "annual/quarterly (currently informational)"] = "quarterly",
-    curr_date: Optional[str] = None,
+    curr_date: str | None = None,
 ) -> str:
     """Fetch A-share income statement (latest report period) via akshare."""
     code = to_akshare_symbol(symbol, "upper_prefix")
@@ -644,7 +642,7 @@ def get_industry_valuation(symbol: str) -> str:
     if info_df is None or info_df.empty:
         return f"No individual info data available for {symbol} via akshare."
 
-    info = dict(zip(info_df["item"], info_df["value"]))
+    info = dict(zip(info_df["item"], info_df["value"], strict=False))
     industry = info.get("行业", "")
 
     lines = [

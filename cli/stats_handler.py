@@ -1,15 +1,15 @@
 import os
 import threading
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.outputs import LLMResult
 from langchain_core.messages import AIMessage
+from langchain_core.outputs import LLMResult
 
 from tradingagents.llm_clients.pricing import get_price_for_model
 
 
-def _parse_price(env_var: str) -> Optional[float]:
+def _parse_price(env_var: str) -> float | None:
     """Parse a price from an environment variable.
 
     Returns None when the env var is missing or unparseable, which the
@@ -25,7 +25,7 @@ def _parse_price(env_var: str) -> Optional[float]:
         return None
 
 
-def _extract_model_name(serialized: Any) -> Optional[str]:
+def _extract_model_name(serialized: Any) -> str | None:
     """Pull the model identifier out of a LangChain ``serialized`` dict.
 
     Different chat-model integrations store the model under different
@@ -68,19 +68,19 @@ class StatsCallbackHandler(BaseCallbackHandler):
         # call. LangChain invokes on_chat_model_start right before the
         # HTTP call and on_llm_end when the response comes back, so the
         # model name is fresh in the second call.
-        self._current_model: Optional[str] = None
+        self._current_model: str | None = None
         # Per-model bucketing — the dashboard surfaces this so users
         # can see "OpenAI gpt-5.4 cost $X, DeepSeek deepseek-v4-flash
         # cost $Y" in mixed-provider runs.
-        self.tokens_by_model: Dict[str, List[int]] = {}
-        self.cost_by_model: Dict[str, float] = {}
+        self.tokens_by_model: dict[str, list[int]] = {}
+        self.cost_by_model: dict[str, float] = {}
 
     # ---- model-name capture ------------------------------------------
 
     def on_chat_model_start(
         self,
-        serialized: Dict[str, Any],
-        messages: List[List[Any]],
+        serialized: dict[str, Any],
+        messages: list[list[Any]],
         **kwargs: Any,
     ) -> None:
         """Record the model name being called so on_llm_end can price it."""
@@ -91,8 +91,8 @@ class StatsCallbackHandler(BaseCallbackHandler):
 
     def on_llm_start(
         self,
-        serialized: Dict[str, Any],
-        prompts: List[str],
+        serialized: dict[str, Any],
+        prompts: list[str],
         **kwargs: Any,
     ) -> None:
         """Counter for non-chat LLM invocations (legacy text completions)."""
@@ -141,7 +141,7 @@ class StatsCallbackHandler(BaseCallbackHandler):
 
     def on_tool_start(
         self,
-        serialized: Dict[str, Any],
+        serialized: dict[str, Any],
         input_str: str,
         **kwargs: Any,
     ) -> None:
@@ -153,7 +153,7 @@ class StatsCallbackHandler(BaseCallbackHandler):
 
     def _price_tokens(
         self, model_name: str, in_tokens: int, out_tokens: int,
-    ) -> Optional[float]:
+    ) -> float | None:
         """Return USD cost for one LLM call.
 
         Order: per-model catalog → env-var defaults → None. ``None``
@@ -173,7 +173,7 @@ class StatsCallbackHandler(BaseCallbackHandler):
 
     # ---- public read API --------------------------------------------
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Return current statistics including per-model cost breakdown.
 
         The legacy ``cost`` field is preserved (sum of all per-model

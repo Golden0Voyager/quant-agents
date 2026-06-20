@@ -97,11 +97,10 @@ class TestRouteToVendor:
             interface.VENDOR_METHODS["get_indicators"],
             {"akshare": ak_raises, "yfinance": yf_raises, "alpha_vantage": av_raises},
             clear=True,
-        ):
-            with pytest.raises(ConnectionError, match="akshare down"):
-                interface.route_to_vendor(
-                    "get_indicators", "600519.SS", "rsi", "2026-05-14", 30
-                )
+        ), pytest.raises(ConnectionError, match="akshare down"):
+            interface.route_to_vendor(
+                "get_indicators", "600519.SS", "rsi", "2026-05-14", 30
+            )
 
     def test_get_indicators_intercepts_get_fund_flow(self):
         """get_indicators tool should intercept get_fund_flow and return a clear redirection message."""

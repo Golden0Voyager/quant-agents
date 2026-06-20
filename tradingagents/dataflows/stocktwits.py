@@ -16,8 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -55,7 +54,7 @@ def fetch_stocktwits_messages(
 
     # Filter out messages older than days_back
     if days_back is not None and days_back > 0:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
+        cutoff = datetime.now(UTC) - timedelta(days=days_back)
         filtered = []
         for m in messages:
             created_str = m.get("created_at", "")

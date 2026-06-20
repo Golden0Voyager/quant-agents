@@ -1,9 +1,10 @@
 import pytest
+
 from cli.watchlists import (
-    save_watchlist,
-    load_watchlist,
     list_watchlists,
+    load_watchlist,
     parse_watchlist_content,
+    save_watchlist,
 )
 
 

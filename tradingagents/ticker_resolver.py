@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Dict, Optional
 
 # ---------------------------------------------------------------------------
 # Cache helpers
@@ -23,22 +22,22 @@ _DEFAULT_CACHE_DIR = os.getenv("TRADINGAGENTS_CACHE_DIR", os.path.join(_TRADINGA
 _NAME_MAP_PATH = os.path.join(_DEFAULT_CACHE_DIR, "a_share_name_map.json")
 
 
-_CACHE: Optional[Dict[str, str]] = None
+_CACHE: dict[str, str] | None = None
 
 
-def _load_name_cache() -> Dict[str, str]:
+def _load_name_cache() -> dict[str, str]:
     """Load cached Chinese name -> ticker mapping."""
     global _CACHE
     if _CACHE is not None:
         return _CACHE
     if os.path.exists(_NAME_MAP_PATH):
-        with open(_NAME_MAP_PATH, "r", encoding="utf-8") as f:
+        with open(_NAME_MAP_PATH, encoding="utf-8") as f:
             _CACHE = json.load(f)
         return _CACHE
     return {}
 
 
-def _save_name_cache(data: Dict[str, str]) -> None:
+def _save_name_cache(data: dict[str, str]) -> None:
     """Save Chinese name -> ticker mapping to disk."""
     global _CACHE
     os.makedirs(_DEFAULT_CACHE_DIR, exist_ok=True)
@@ -84,7 +83,7 @@ def _append_a_share_suffix(code: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _build_name_map() -> Dict[str, str]:
+def _build_name_map() -> dict[str, str]:
     """Fetch full A-share name->ticker mapping from akshare."""
     try:
         import akshare as ak
@@ -155,7 +154,7 @@ def _resolve_chinese_name(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _fetch_company_name_from_db(ticker: str) -> Optional[str]:
+def _fetch_company_name_from_db(ticker: str) -> str | None:
     """Query the local quant_core.db for the company name.
 
     The stock_list table stores bare codes (e.g. '002241') without suffixes.
@@ -177,7 +176,7 @@ def _fetch_company_name_from_db(ticker: str) -> Optional[str]:
         return None
 
 
-def _fetch_company_name(ticker: str) -> Optional[str]:
+def _fetch_company_name(ticker: str) -> str | None:
     """Use yfinance to fetch the company's longName.
 
     Returns None on any error so the caller can fall back gracefully.

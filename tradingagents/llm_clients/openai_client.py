@@ -1,5 +1,5 @@
 import os
-from typing import Any, Optional
+from typing import Any
 
 from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
@@ -99,7 +99,7 @@ class DeepSeekChatOpenAI(NormalizedChatOpenAI):
     def _get_request_payload(self, input_, *, stop=None, **kwargs):
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
         outgoing = payload.get("messages", [])
-        for message_dict, message in zip(outgoing, _input_to_messages(input_)):
+        for message_dict, message in zip(outgoing, _input_to_messages(input_), strict=False):
             if message_dict.get("role") != "assistant":
                 continue
             if "reasoning_content" in message_dict:
@@ -130,7 +130,7 @@ class DeepSeekChatOpenAI(NormalizedChatOpenAI):
             )
         )
         for generation, choice in zip(
-            chat_result.generations, response_dict.get("choices", [])
+            chat_result.generations, response_dict.get("choices", []), strict=False
         ):
             reasoning = choice.get("message", {}).get("reasoning_content")
             if reasoning is not None:
@@ -210,7 +210,7 @@ _PROVIDER_BASE_URL = {
 }
 
 
-def _resolve_provider_base_url(provider: str) -> Optional[str]:
+def _resolve_provider_base_url(provider: str) -> str | None:
     """Default base URL for ``provider``, with env-var overrides where defined.
 
     Currently only Ollama supports an env-var override (``OLLAMA_BASE_URL``),
@@ -238,7 +238,7 @@ class OpenAIClient(BaseLLMClient):
     def __init__(
         self,
         model: str,
-        base_url: Optional[str] = None,
+        base_url: str | None = None,
         provider: str = "openai",
         **kwargs,
     ):

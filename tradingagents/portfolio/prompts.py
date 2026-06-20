@@ -5,7 +5,7 @@ that can be injected into specific agents' prompts.
 """
 from __future__ import annotations
 
-from tradingagents.portfolio.models import Holding, Portfolio, Transaction
+from tradingagents.portfolio.models import Portfolio, Transaction
 
 
 def _format_money(value: float | None) -> str:
@@ -32,7 +32,6 @@ def _build_transactions_text(ticker: str, transactions: list[Transaction]) -> st
     lines = ["", "## 近期交易记录", ""]
 
     for t in txs_sorted[:10]:  # Show last 10 transactions
-        sign = "+" if t.shares >= 0 else ""
         fee_str = f"，手续费 {_format_money(t.fee)}" if t.fee else ""
         tag_str = f"（{t.tag}）" if t.tag else ""
         lines.append(

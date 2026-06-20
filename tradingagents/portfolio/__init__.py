@@ -19,15 +19,15 @@ Usage:
 from __future__ import annotations
 
 from tradingagents.portfolio.models import Holding, Portfolio, PortfolioMetadata, Transaction
-from tradingagents.portfolio.repository import PortfolioRepository
-from tradingagents.portfolio.sync import PortfolioSyncService
-from tradingagents.portfolio.transaction_sync import TransactionSyncService
 from tradingagents.portfolio.prompts import (
+    build_market_prompt,
     build_pm_prompt,
     build_risk_prompt,
     build_trader_prompt,
-    build_market_prompt,
 )
+from tradingagents.portfolio.repository import PortfolioRepository
+from tradingagents.portfolio.sync import PortfolioSyncService
+from tradingagents.portfolio.transaction_sync import TransactionSyncService
 from tradingagents.portfolio.validators import normalize_ticker, validate_holding
 
 __all__ = [

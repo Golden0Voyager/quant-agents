@@ -1,6 +1,5 @@
 import os
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict
 
 import questionary
 from dotenv import find_dotenv, set_key
@@ -84,8 +83,8 @@ def detect_asset_type(ticker: str) -> AssetType:
 
 
 def filter_analysts_for_asset_type(
-    analysts: List[AnalystType], asset_type: AssetType, ticker: Optional[str] = None
-) -> List[AnalystType]:
+    analysts: list[AnalystType], asset_type: AssetType, ticker: str | None = None
+) -> list[AnalystType]:
     """Drop analysts that don't apply to this asset type or market.
 
     A-share tickers (``.SS``/``.SZ``/``.BJ``/``.HK``) default to skipping
@@ -143,8 +142,8 @@ def get_analysis_date() -> str:
 
 
 def select_analysts(
-    asset_type: AssetType = AssetType.STOCK, ticker: Optional[str] = None
-) -> List[AnalystType]:
+    asset_type: AssetType = AssetType.STOCK, ticker: str | None = None
+) -> list[AnalystType]:
     """Select analysts using an interactive checkbox.
 
     Analysts that don't apply to the current market are shown as disabled
@@ -156,7 +155,7 @@ def select_analysts(
     )
 
     # Build a skip-reason map for disabled items.
-    skip_reasons: Dict[AnalystType, str] = {}
+    skip_reasons: dict[AnalystType, str] = {}
     if asset_type == AssetType.CRYPTO and AnalystType.FUNDAMENTALS not in available_analysts:
         skip_reasons[AnalystType.FUNDAMENTALS] = "Crypto: no on-chain fundamentals"
     if ticker and _is_ashare_ticker(ticker) and AnalystType.SOCIAL not in available_analysts:
@@ -174,7 +173,7 @@ def select_analysts(
                 )
             )
 
-    selected = questionary.checkbox(
+    questionary.checkbox(
         "Select Your [Analysts Team]:",
         choices=choices,
         instruction="\n- Press Space to select/unselect analysts\n- Press 'a' to select/unselect all\n- Press Enter when done",
@@ -230,7 +229,7 @@ def select_research_depth() -> int:
     return choice
 
 
-def _fetch_openrouter_models() -> List[Tuple[str, str]]:
+def _fetch_openrouter_models() -> list[tuple[str, str]]:
     """Fetch available models from the OpenRouter API."""
     import requests
     try:
@@ -551,7 +550,7 @@ def ask_minimax_region() -> tuple[str, str]:
 
 
 def confirm_ollama_endpoint(url: str) -> None:
-    """Show the resolved Ollama endpoint after provider selection.
+    r"""Show the resolved Ollama endpoint after provider selection.
 
     Surfaces three things the user benefits from seeing before model
     selection: which URL we'll actually hit, where it came from
@@ -580,7 +579,7 @@ def confirm_ollama_endpoint(url: str) -> None:
         )
 
 
-def ensure_api_key(provider: str) -> Optional[str]:
+def ensure_api_key(provider: str) -> str | None:
     """Make sure the API key for `provider` is available in the environment.
 
     If the env var is already set, returns its value untouched. Otherwise

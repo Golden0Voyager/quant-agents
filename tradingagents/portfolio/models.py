@@ -7,9 +7,8 @@ Defines the core data structures for holdings management:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
-from datetime import datetime
-from typing import Any, Optional
+from dataclasses import asdict, dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -20,13 +19,13 @@ class Holding:
     name: str = ""
     shares: float = 0.0
     avg_cost: float = 0.0
-    market_price: Optional[float] = None
-    invested_amount: Optional[float] = None
-    market_value: Optional[float] = None
-    pnl_amount: Optional[float] = None
-    pnl_pct: Optional[float] = None
-    weight: Optional[float] = None
-    grid_strategy: Optional[str] = None
+    market_price: float | None = None
+    invested_amount: float | None = None
+    market_value: float | None = None
+    pnl_amount: float | None = None
+    pnl_pct: float | None = None
+    weight: float | None = None
+    grid_strategy: str | None = None
     notes: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -54,10 +53,10 @@ class PortfolioMetadata:
     """Metadata about the portfolio data source and sync state."""
 
     version: str = "1.0"
-    updated_at: Optional[str] = None
-    source_type: Optional[str] = None
-    source_sheet_id: Optional[str] = None
-    source_worksheet: Optional[str] = None
+    updated_at: str | None = None
+    source_type: str | None = None
+    source_sheet_id: str | None = None
+    source_worksheet: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {k: v for k, v in asdict(self).items() if v is not None}
@@ -79,9 +78,9 @@ class Transaction:
     price: float = 0.0
     action: str = ""  # 买入/卖出/分红
     shares: float = 0.0  # 正数为买入，负数为卖出
-    fee: Optional[float] = None
-    cash_change: Optional[float] = None  # 负数为买入支出，正数为卖出收入
-    tag: Optional[str] = None  # 手动建仓/分批卖出/分红
+    fee: float | None = None
+    cash_change: float | None = None  # 负数为买入支出，正数为卖出收入
+    tag: str | None = None  # 手动建仓/分批卖出/分红
 
     def to_dict(self) -> dict[str, Any]:
         return {k: v for k, v in asdict(self).items() if v is not None and v != ""}
@@ -102,7 +101,7 @@ class Portfolio:
     summary: dict[str, Any] = field(default_factory=dict)
     transactions: list[Transaction] = field(default_factory=list)
 
-    def get_holding(self, ticker: str) -> Optional[Holding]:
+    def get_holding(self, ticker: str) -> Holding | None:
         """Get a specific holding by ticker."""
         return self.holdings.get(ticker)
 

@@ -1,49 +1,43 @@
-from typing import Optional
-import os
+import contextlib
 import datetime
-import typer
-import questionary
-from pathlib import Path
-from functools import wraps
-from rich.console import Console
-from rich.panel import Panel
-from rich.spinner import Spinner
-from rich.live import Live
-from rich.columns import Columns
-from rich.markdown import Markdown
-from rich.layout import Layout
-from rich.text import Text
-from rich.table import Table
-from collections import deque
+import os
 import time
-from rich.tree import Tree
+from collections import deque
+from functools import wraps
+from pathlib import Path
+
+import questionary
+import typer
 from rich import box
 from rich.align import Align
+from rich.console import Console
+from rich.layout import Layout
+from rich.live import Live
+from rich.markdown import Markdown
+from rich.panel import Panel
 from rich.rule import Rule
+from rich.spinner import Spinner
+from rich.table import Table
+from rich.text import Text
 
-from tradingagents.graph.trading_graph import TradingAgentsGraph
+from cli.announcements import display_announcements, fetch_announcements
+from cli.batch_runner import BatchRunner
+from cli.dashboard import (
+    ANALYST_ORDER,
+)
+from cli.profiles import list_profiles, load_profile, save_profile
+from cli.stats_handler import StatsCallbackHandler
+from cli.utils import *
+from cli.utils import ask_workers
+from cli.watchlists import list_watchlists, load_watchlist, save_watchlist
+from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.analyst_execution import (
     AnalystWallTimeTracker,
     build_analyst_execution_plan,
     get_initial_analyst_node,
     sync_analyst_tracker_from_chunk,
 )
-from tradingagents.default_config import DEFAULT_CONFIG
-from cli.models import AnalystType
-from cli.utils import *
-from cli.utils import ask_workers
-from cli.announcements import fetch_announcements, display_announcements
-from cli.stats_handler import StatsCallbackHandler
-from cli.profiles import save_profile, load_profile, list_profiles
-from cli.watchlists import save_watchlist, load_watchlist, list_watchlists
-from cli.batch_runner import BatchRunner
-from cli.dashboard import (
-    ANALYST_ORDER,
-    AnalysisDashboard,
-    create_dashboard_layout,
-    update_dashboard_display,
-    process_stream_chunk,
-)
+from tradingagents.graph.trading_graph import TradingAgentsGraph
 
 console = Console()
 
@@ -481,7 +475,7 @@ def get_user_selections(preselected_tickers: list[str] | None = None):
         preselected_tickers: If provided, skip the ticker input prompt and use these tickers directly.
     """
     # Display ASCII art welcome message
-    with open(Path(__file__).parent / "static" / "welcome.txt", "r", encoding="utf-8") as f:
+    with open(Path(__file__).parent / "static" / "welcome.txt", encoding="utf-8") as f:
         welcome_ascii = f.read()
 
     # Create welcome box content
@@ -591,10 +585,7 @@ def get_user_selections(preselected_tickers: list[str] | None = None):
                 break
             console.print("[yellow]请重新输入股票代码...[/yellow]\n")
 
-    if len(selected_tickers) == 1:
-        selected_ticker = selected_tickers[0]
-    else:
-        selected_ticker = selected_tickers  # list for batch mode
+    selected_ticker = selected_tickers[0] if len(selected_tickers) == 1 else selected_tickers
 
     asset_type = detect_asset_type(selected_ticker if isinstance(selected_ticker, str) else selected_tickers[0])
     # Only announce when it's not the default stock path, to avoid printing
@@ -816,7 +807,6 @@ def _parse_tickers_input(raw: str) -> list[str]:
 
 def ask_mode() -> str:
     """Ask user to choose between batch watchlist scan or custom ticker query."""
-    import questionary
     choice = questionary.select(
         "Select run mode:",
         choices=[
@@ -837,7 +827,6 @@ def ask_mode() -> str:
 
 def select_watchlist_interactive() -> tuple[str, list[str]]:
     """Let user pick a saved watchlist or import from file. Returns (name, tickers)."""
-    import questionary
     existing = list_watchlists()
     choices = []
     for name in existing:
@@ -877,7 +866,6 @@ def select_watchlist_interactive() -> tuple[str, list[str]]:
 
 def select_profile_interactive() -> dict:
     """Let user pick a saved profile or create a new one. Returns profile config dict."""
-    import questionary
     existing = list_profiles()
     if existing:
         choices = []
@@ -1378,8 +1366,6 @@ def update_research_team_status(status):
         message_buffer.update_agent_status(agent, status)
 
 
-# Ordered list of analysts for status transitions
-ANALYST_ORDER = ["market", "social", "news", "fundamentals"]
 ANALYST_AGENT_NAMES = {
     "market": "Market Analyst",
     "social": "Sentiment Analyst",
@@ -1434,9 +1420,8 @@ def update_analyst_statuses(message_buffer, chunk, wall_time_tracker=None):
             message_buffer.update_agent_status(agent_name, "pending")
 
     # When all analysts complete, transition research team to in_progress
-    if not found_active and selected:
-        if message_buffer.agent_status.get("Bull Researcher") == "pending":
-            message_buffer.update_agent_status("Bull Researcher", "in_progress")
+    if not found_active and selected and message_buffer.agent_status.get("Bull Researcher") == "pending":
+        message_buffer.update_agent_status("Bull Researcher", "in_progress")
 
 
 def extract_content_string(content):
@@ -1625,7 +1610,7 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
     # Now start the display layout
     layout = create_layout()
 
-    with Live(layout, refresh_per_second=4) as live:
+    with Live(layout, refresh_per_second=4):
         # Initial display
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
@@ -1774,16 +1759,15 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
                     message_buffer.update_report_section(
                         "final_trade_decision", f"### Neutral Analyst Analysis\n{neu_hist}"
                     )
-                if judge:
-                    if message_buffer.agent_status.get("Portfolio Manager") != "completed":
-                        message_buffer.update_agent_status("Portfolio Manager", "in_progress")
-                        message_buffer.update_report_section(
-                            "final_trade_decision", f"### Portfolio Manager Decision\n{judge}"
-                        )
-                        message_buffer.update_agent_status("Aggressive Analyst", "completed")
-                        message_buffer.update_agent_status("Conservative Analyst", "completed")
-                        message_buffer.update_agent_status("Neutral Analyst", "completed")
-                        message_buffer.update_agent_status("Portfolio Manager", "completed")
+                if judge and message_buffer.agent_status.get("Portfolio Manager") != "completed":
+                    message_buffer.update_agent_status("Portfolio Manager", "in_progress")
+                    message_buffer.update_report_section(
+                        "final_trade_decision", f"### Portfolio Manager Decision\n{judge}"
+                    )
+                    message_buffer.update_agent_status("Aggressive Analyst", "completed")
+                    message_buffer.update_agent_status("Conservative Analyst", "completed")
+                    message_buffer.update_agent_status("Neutral Analyst", "completed")
+                    message_buffer.update_agent_status("Portfolio Manager", "completed")
 
             # Update the display
             update_display(layout, stats_handler=stats_handler, start_time=start_time)
@@ -1795,7 +1779,7 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
         final_state = {}
         for chunk in trace:
             final_state.update(chunk)
-        decision = graph.process_signal(final_state["final_trade_decision"])
+        graph.process_signal(final_state["final_trade_decision"])
 
         # Update all agent statuses to completed
         for agent in message_buffer.agent_status:
@@ -1807,7 +1791,7 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
         message_buffer.add_message("System", analyst_wall_time_tracker.format_summary())
 
         # Update final report sections
-        for section in message_buffer.report_sections.keys():
+        for section in message_buffer.report_sections:
             if section in final_state:
                 message_buffer.update_report_section(section, final_state[section])
 
@@ -1840,13 +1824,11 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
         display_complete_report(final_state)
 
     # Always save to results_dir so future runs can detect and skip
-    try:
+    with contextlib.suppress(Exception):
         save_report_to_disk(final_state, selections["ticker"], results_dir)
-    except Exception:
-        pass
 
 
-def run_batch_analysis(tickers: list[str], profile_config: dict, checkpoint: bool = False, output_dir: Optional[Path] = None, watchlist_name: Optional[str] = None, holdings: dict | None = None, workers: int = 1):
+def run_batch_analysis(tickers: list[str], profile_config: dict, checkpoint: bool = False, output_dir: Path | None = None, watchlist_name: str | None = None, holdings: dict | None = None, workers: int = 1):
     """Run unattended batch analysis for multiple tickers."""
     date_stamp = __import__("datetime").datetime.now().strftime("%Y%m%d")
     timestamp = __import__("datetime").datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1921,27 +1903,27 @@ def analyze(
         "--clear-checkpoints",
         help="Delete all saved checkpoints before running (force fresh start).",
     ),
-    profile: Optional[str] = typer.Option(
+    profile: str | None = typer.Option(
         None,
         "--profile",
         help="Use a saved profile for analysis configuration.",
     ),
-    watchlist: Optional[str] = typer.Option(
+    watchlist: str | None = typer.Option(
         None,
         "--watchlist",
         help="Run batch analysis using a saved watchlist (by name or file path).",
     ),
-    tickers: Optional[str] = typer.Option(
+    tickers: str | None = typer.Option(
         None,
         "--tickers",
         help="Comma-separated tickers for batch analysis (e.g. AAPL,MSFT,GOOGL).",
     ),
-    output_dir: Optional[str] = typer.Option(
+    output_dir: str | None = typer.Option(
         None,
         "--output-dir",
         help="Custom output directory for reports (default: ./reports).",
     ),
-    holdings_sheet: Optional[str] = typer.Option(
+    holdings_sheet: str | None = typer.Option(
         None,
         "--holdings-sheet",
         help="Google Sheet ID to load current holdings for position-aware analysis.",
@@ -1984,7 +1966,7 @@ def analyze(
                 profile_config = prof["config"]
             except Exception as e:
                 console.print(f"[red]Failed to load profile '{profile}': {e}[/red]")
-                raise typer.Exit(1)
+                raise typer.Exit(1) from None
         else:
             profile_config = DEFAULT_CONFIG.copy()
             profile_config["analysts"] = ["market"]
@@ -2084,7 +2066,7 @@ def analyze(
             run_analysis(checkpoint=checkpoint, selections=selections, holdings=holdings)
 
 
-def _do_sync_holdings(sheet_id: Optional[str], worksheet: str):
+def _do_sync_holdings(sheet_id: str | None, worksheet: str):
     """Core sync logic shared by sync-holdings and sh commands."""
     from tradingagents.portfolio import PortfolioRepository, PortfolioSyncService
 
@@ -2143,12 +2125,12 @@ def _do_sync_holdings(sheet_id: Optional[str], worksheet: str):
             )
     except Exception as exc:
         console.print(f"[red]Sync failed: {exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 @app.command(name="sync-holdings")
 def sync_holdings_command(
-    sheet_id: Optional[str] = typer.Option(
+    sheet_id: str | None = typer.Option(
         None,
         "--sheet-id",
         help="Google Sheet ID (defaults to portfolio.sheet_id in config).",
@@ -2165,7 +2147,7 @@ def sync_holdings_command(
 
 @app.command(name="sh")
 def sync_holdings_short_command(
-    sheet_id: Optional[str] = typer.Option(
+    sheet_id: str | None = typer.Option(
         None,
         "--sheet-id",
         help="Google Sheet ID (defaults to portfolio.sheet_id in config).",
@@ -2180,12 +2162,12 @@ def sync_holdings_short_command(
     _do_sync_holdings(sheet_id, worksheet)
 
 
-def _do_sync_transactions(sheet_id: Optional[str], worksheet: str):
+def _do_sync_transactions(sheet_id: str | None, worksheet: str):
     """Core sync logic for transaction history."""
     from tradingagents.portfolio import (
+        Portfolio,
         PortfolioRepository,
         TransactionSyncService,
-        Portfolio,
     )
 
     _sheet_id = sheet_id or DEFAULT_CONFIG.get("portfolio", {}).get("transaction_sheet_id")
@@ -2205,10 +2187,7 @@ def _do_sync_transactions(sheet_id: Optional[str], worksheet: str):
         transactions = sync_service.sync()
 
         repo = PortfolioRepository()
-        if repo.exists():
-            portfolio = repo.load()
-        else:
-            portfolio = Portfolio()
+        portfolio = repo.load() if repo.exists() else Portfolio()
 
         portfolio.transactions = transactions
         repo.save(portfolio)
@@ -2217,12 +2196,12 @@ def _do_sync_transactions(sheet_id: Optional[str], worksheet: str):
         console.print(f"  Local cache: [dim]{repo.path}[/dim]")
     except Exception as exc:
         console.print(f"[red]Sync failed: {exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 @app.command(name="sync-transactions")
 def sync_transactions_command(
-    sheet_id: Optional[str] = typer.Option(
+    sheet_id: str | None = typer.Option(
         None,
         "--sheet-id",
         help="Google Sheet ID for transaction history (defaults to config).",
@@ -2239,7 +2218,7 @@ def sync_transactions_command(
 
 @app.command(name="st")
 def sync_transactions_short_command(
-    sheet_id: Optional[str] = typer.Option(
+    sheet_id: str | None = typer.Option(
         None,
         "--sheet-id",
         help="Google Sheet ID for transaction history (defaults to config).",
@@ -2340,7 +2319,7 @@ def show_holdings_command(
                     console.print(omitted)
     except Exception as exc:
         console.print(f"[red]Failed to load holdings: {exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 def _format_money(value: float) -> str:

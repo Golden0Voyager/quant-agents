@@ -9,8 +9,9 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Any
 
 import akshare as ak
 
@@ -24,7 +25,7 @@ from .akshare_common import (
 logger = logging.getLogger(__name__)
 
 
-def _with_retry(fn: Callable, *, attempts: int = 3, delay_s: float = 2.0) -> Optional[Any]:
+def _with_retry(fn: Callable, *, attempts: int = 3, delay_s: float = 2.0) -> Any | None:
     """Run *fn* up to *attempts* times. Returns the result or None on failure.
 
     Eastmoney/Xueqiu intermittently close the connection (`RemoteDisconnected`)
@@ -44,8 +45,8 @@ def _with_retry(fn: Callable, *, attempts: int = 3, delay_s: float = 2.0) -> Opt
 
 
 def fetch_realtime_snapshot(
-    ticker: str, xq_token: Optional[str] = None
-) -> Optional[dict[str, Any]]:
+    ticker: str, xq_token: str | None = None
+) -> dict[str, Any] | None:
     """Return a canonical snapshot of current price/PE/PB/market_cap.
 
     Returns None when *ticker* is not an A-share or every data source fails.
@@ -76,7 +77,7 @@ def fetch_realtime_snapshot(
                 lambda: ak.stock_individual_spot_xq(symbol=prefixed, token=token)
             )
             if df is not None and not df.empty:
-                d = dict(zip(df["item"], df["value"]))
+                d = dict(zip(df["item"], df["value"], strict=False))
                 # Xueqiu uses 现价/资产净值·总市值/名称 — not 最新/总市值/股票简称.
                 snap["price"] = safe_float(d.get("现价") or d.get("最新"))
                 snap["pe_ttm"] = safe_float(d.get("市盈率(TTM)"))
@@ -91,7 +92,7 @@ def fetch_realtime_snapshot(
 
         info = _with_retry(lambda: ak.stock_individual_info_em(symbol=bare))
         if info is not None and not info.empty:
-            d = dict(zip(info["item"], info["value"]))
+            d = dict(zip(info["item"], info["value"], strict=False))
             if not snap["company_name"]:
                 snap["company_name"] = str(d.get("股票简称", "")).strip()
             if snap["market_cap_yi"] is None:

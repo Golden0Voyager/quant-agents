@@ -61,7 +61,7 @@ def create_trader(llm):
         transactions_context = state.get("transactions_context", [])
         holdings_line = ""
         if holdings_context:
-            from tradingagents.portfolio import Portfolio, Holding, Transaction, build_trader_prompt
+            from tradingagents.portfolio import Holding, Portfolio, Transaction, build_trader_prompt
             portfolio = Portfolio(
                 holdings={t: Holding.from_dict(d, ticker=t) for t, d in holdings_context.items()}
             )

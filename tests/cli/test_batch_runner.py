@@ -1,7 +1,8 @@
-import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
 import pytest
+
 from cli.batch_runner import BatchRunner
 
 pytestmark = pytest.mark.unit

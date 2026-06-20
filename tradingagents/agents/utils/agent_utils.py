@@ -1,53 +1,12 @@
 import functools
 import logging
-from typing import Any, Mapping, Optional
+from collections.abc import Mapping
+from typing import Any
 
 import yfinance as yf
 from langchain_core.messages import HumanMessage, RemoveMessage
 
 # Import tools from separate utility files
-from tradingagents.agents.utils.core_stock_tools import (
-    get_stock_data
-)
-from tradingagents.agents.utils.technical_indicators_tools import (
-    get_indicators
-)
-from tradingagents.agents.utils.fundamental_data_tools import (
-    get_fundamentals,
-    get_balance_sheet,
-    get_cashflow,
-    get_income_statement,
-    get_earnings_estimates,
-    get_shareholder_count,
-    get_dividend_history,
-)
-from tradingagents.agents.utils.news_data_tools import (
-    get_news,
-    get_insider_transactions,
-    get_global_news,
-    get_company_announcements,
-    get_restricted_release,
-    get_institutional_holdings,
-    get_northbound_hold,
-    get_dragon_tiger,
-    get_block_trade,
-    get_pledge_ratio,
-    get_research_reports,
-)
-from tradingagents.agents.utils.fund_flow_tools import (
-    get_fund_flow,
-    get_margin_trading,
-    get_sector_fund_flow,
-)
-from tradingagents.agents.utils.macro_data_tools import (
-    get_macro_indicators,
-)
-from tradingagents.agents.utils.industry_data_tools import (
-    get_industry_valuation,
-)
-from tradingagents.agents.utils.market_data_validation_tools import (
-    get_verified_market_snapshot
-)
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +27,7 @@ def get_language_instruction() -> str:
     return f" Write your entire response in {lang}."
 
 
-def _clean_identity_value(value: Any) -> Optional[str]:
+def _clean_identity_value(value: Any) -> str | None:
     """Return a trimmed string, or None for empty / placeholder-ish values."""
     if not isinstance(value, str):
         return None
@@ -120,7 +79,7 @@ def resolve_instrument_identity(ticker: str) -> dict:
 def build_instrument_context(
     ticker: str,
     asset_type: str = "stock",
-    identity: Optional[Mapping[str, str]] = None,
+    identity: Mapping[str, str] | None = None,
 ) -> str:
     """Describe the exact instrument so agents preserve identity and ticker.
 
@@ -235,4 +194,4 @@ def create_msg_delete():
     return delete_messages
 
 
-        
+

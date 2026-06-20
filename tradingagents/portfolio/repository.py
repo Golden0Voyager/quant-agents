@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from tradingagents.portfolio.models import Portfolio, PortfolioMetadata
+from tradingagents.portfolio.models import Portfolio
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ class PortfolioRepository:
             )
 
         try:
-            with open(self._path, "r", encoding="utf-8") as f:
+            with open(self._path, encoding="utf-8") as f:
                 data = json.load(f)
         except json.JSONDecodeError as exc:
             # Backup corrupted file and raise

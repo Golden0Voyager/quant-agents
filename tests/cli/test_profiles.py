@@ -1,7 +1,6 @@
-import json
 import pytest
-from pathlib import Path
-from cli.profiles import save_profile, load_profile, list_profiles, delete_profile
+
+from cli.profiles import delete_profile, list_profiles, load_profile, save_profile
 
 
 @pytest.fixture(autouse=True)

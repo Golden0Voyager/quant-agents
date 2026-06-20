@@ -1,9 +1,7 @@
-from enum import Enum
-from typing import List, Optional, Dict
-from pydantic import BaseModel
+from enum import StrEnum
 
 
-class AnalystType(str, Enum):
+class AnalystType(StrEnum):
     MARKET = "market"
     # Wire value stays "social" for saved-config and string-keyed-caller
     # back-compat; the user-facing label is "Sentiment Analyst".
@@ -14,6 +12,6 @@ class AnalystType(str, Enum):
     INDUSTRY = "industry"
 
 
-class AssetType(str, Enum):
+class AssetType(StrEnum):
     STOCK = "stock"
     CRYPTO = "crypto"

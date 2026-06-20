@@ -18,33 +18,30 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import patch
 
 import pytest
 
 pytestmark = pytest.mark.unit
 
-from langchain_core.outputs import ChatGeneration, LLMResult
 from langchain_core.messages import AIMessage
+from langchain_core.outputs import ChatGeneration, LLMResult
 
-from tradingagents.llm_clients import pricing
-from tradingagents.llm_clients.model_catalog import MODEL_OPTIONS
-from tradingagents.llm_clients.pricing import (
-    PRICING,
-    _LITELLM_CACHE_PATH,
-    _LITELLM_URL,
-    _load_litellm_overlay,
-    _parse_litellm_payload,
-    get_price,
-    get_price_for_model,
-)
 from cli.stats_handler import (
     StatsCallbackHandler,
     _extract_model_name,
     _parse_price,
 )
-
+from tradingagents.llm_clients import pricing
+from tradingagents.llm_clients.model_catalog import MODEL_OPTIONS
+from tradingagents.llm_clients.pricing import (
+    PRICING,
+    _load_litellm_overlay,
+    _parse_litellm_payload,
+    get_price,
+    get_price_for_model,
+)
 
 # ---- Catalog coverage -----------------------------------------------------
 

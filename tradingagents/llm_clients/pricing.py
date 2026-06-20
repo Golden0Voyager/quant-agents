@@ -33,17 +33,14 @@ DeepSeek off-peak, Alibaba reserved) are not modeled here.
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Tuple
-
-
-Price = Tuple[float, float]
+Price = tuple[float, float]
 
 
 # Local pricing table — see module docstring for the LiteLLM + local
 # merge order. All rates were verified against provider pricing pages
 # in 2026-06; the unit tests in tests/test_pricing_catalog.py pin the
 # values so accidental drift trips a test failure.
-PRICING: Dict[str, Dict[str, Price]] = {
+PRICING: dict[str, dict[str, Price]] = {
     # Agnes AI: free tier (rate-limited but unlimited in duration).
     # https://agnes-ai.com — see also docs/api/Agnes_AI_API_Report.md
     "agnes": {
@@ -214,7 +211,7 @@ PRICING: Dict[str, Dict[str, Price]] = {
 }
 
 
-def get_price(provider: str, model: str) -> Optional[Price]:
+def get_price(provider: str, model: str) -> Price | None:
     """Look up ``(input, output)`` USD/M token rates for a provider/model.
 
     Returns None when the provider is unknown or the model isn't listed
@@ -227,7 +224,7 @@ def get_price(provider: str, model: str) -> Optional[Price]:
     return bucket.get(model)
 
 
-def get_price_for_model(model: str) -> Optional[Price]:
+def get_price_for_model(model: str) -> Price | None:
     """Provider-agnostic lookup by model name.
 
     The LangChain callback handler can only see the model name (it
@@ -271,7 +268,7 @@ _LITELLM_URL = (
 _LITELLM_TTL_SECONDS = 24 * 60 * 60  # 24h
 
 
-def _load_litellm_overlay() -> Dict[str, Price]:
+def _load_litellm_overlay() -> dict[str, Price]:
     """Return a ``{model_name: (input_per_1M, output_per_1M)}`` overlay
     from the LiteLLM community catalog, or an empty dict on any failure.
 
@@ -354,7 +351,7 @@ def _load_litellm_overlay() -> Dict[str, Price]:
     return _parse_litellm_payload(data)
 
 
-def _parse_litellm_payload(data: Dict[str, object]) -> Dict[str, Price]:
+def _parse_litellm_payload(data: dict[str, object]) -> dict[str, Price]:
     """Translate the LiteLLM catalog into a ``{model: (in, out)}`` dict.
 
     LiteLLM uses per-token rates; we multiply by 1e6 so callers can
@@ -365,7 +362,7 @@ def _parse_litellm_payload(data: Dict[str, object]) -> Dict[str, Price]:
     """
     import datetime as _dt
 
-    result: Dict[str, Price] = {}
+    result: dict[str, Price] = {}
     today = _dt.date.today()
     for model_name, entry in data.items():
         if not isinstance(entry, dict):

@@ -23,8 +23,8 @@ import logging
 import re
 import time
 import xml.etree.ElementTree as ET
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Iterable, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -56,7 +56,7 @@ def _search_qs(ticker: str, limit: int) -> str:
     })
 
 
-def _iso_to_timestamp(iso_str: Optional[str]) -> Optional[float]:
+def _iso_to_timestamp(iso_str: str | None) -> float | None:
     """Parse an Atom ``published`` timestamp to a UTC epoch, or None."""
     if not iso_str:
         return None

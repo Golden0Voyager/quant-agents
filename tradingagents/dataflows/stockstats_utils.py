@@ -1,15 +1,16 @@
-import time
 import logging
+import os
+import time
+from typing import Annotated
 
 import pandas as pd
 import yfinance as yf
-from yfinance.exceptions import YFRateLimitError
 from stockstats import wrap
-from typing import Annotated
-import os
+from yfinance.exceptions import YFRateLimitError
+
 from .config import get_config
+from .symbol_utils import NoMarketDataError
 from .utils import safe_ticker_component
-from .symbol_utils import normalize_symbol, NoMarketDataError
 
 logger = logging.getLogger(__name__)
 

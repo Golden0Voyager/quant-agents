@@ -1,7 +1,6 @@
 """End-to-end tests for report-based skip logic and checkpoint pre-checks."""
 
 import json
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest

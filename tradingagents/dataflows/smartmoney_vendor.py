@@ -212,7 +212,7 @@ def get_indicators(
         raise RuntimeError(
             f"Indicator '{indicator}' not available in quant_core.db and "
             f"stockstats could not compute it: {exc}"
-        )
+        ) from exc
 
     tail = stats.tail(look_back_days)
     lines = [
@@ -261,7 +261,7 @@ def get_fundamentals(
     row = df.iloc[0]
     lines = [
         f"# Fundamentals for {symbol.upper()} ({company_name}) as of {curr_date}",
-        f"# Source: quant_core.db (local SQLite)",
+        "# Source: quant_core.db (local SQLite)",
         "",
         f"- 股票简称: {company_name}",
         f"- 行业: {industry}",

@@ -7,18 +7,17 @@ os.environ["TQDM_DISABLE"] = "1"
 import json
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+
+from rich.console import Console
+from rich.live import Live
 
 from cli.batch_dashboard import BatchDashboard
-from cli.dashboard import create_dashboard_layout, update_dashboard_display, process_stream_chunk
+from cli.dashboard import create_dashboard_layout, process_stream_chunk, update_dashboard_display
 from cli.stats_handler import StatsCallbackHandler
-from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
-from rich.live import Live
-from rich.console import Console
+from tradingagents.graph.trading_graph import TradingAgentsGraph
 
 console = Console()
 
@@ -57,7 +56,7 @@ class BatchRunner:
         # Set by run() once the Live context owns these — _refresh_display() reads
         # them. When unset (e.g. tests calling _run_single directly), refresh is a no-op.
         self._layout = None
-        self._start_time: Optional[float] = None
+        self._start_time: float | None = None
         # Protect shared mutable state across worker threads
         self._lock = threading.RLock()
 
@@ -68,7 +67,7 @@ class BatchRunner:
         """
         if self._layout is None or self._start_time is None:
             return
-        elapsed = time.time() - self._start_time
+        time.time() - self._start_time
         update_dashboard_display(
             self._layout,
             self.dashboard,
@@ -135,7 +134,7 @@ class BatchRunner:
         """
         return self._find_existing_report(ticker) is not None
 
-    def _find_existing_report(self, ticker: str) -> Optional[Path]:
+    def _find_existing_report(self, ticker: str) -> Path | None:
         """Locate an existing ``complete_report.md`` for the target date.
 
         Scans the current output directory *and* all historical batch_* folders
@@ -267,9 +266,9 @@ class BatchRunner:
         checkpointer_ctx = None
         if config.get("checkpoint_enabled"):
             from tradingagents.graph.checkpointer import (
-                get_checkpointer,
                 checkpoint_step,
                 clear_checkpoint,
+                get_checkpointer,
                 thread_id,
             )
 
@@ -383,6 +382,7 @@ class BatchRunner:
         source for the numeric entry / stop / size levels the PM often omits.
         """
         import re
+
         from tradingagents.agents.utils.rating import parse_rating
 
         def _find_strict_numeric(text: str, names: str) -> str:
@@ -630,7 +630,7 @@ class BatchRunner:
         self._layout = layout
         self._start_time = start_time
 
-        with Live(layout, refresh_per_second=4) as live:
+        with Live(layout, refresh_per_second=4):
             # Push an initial frame so the user sees something other than empty
             # panels for the few seconds before the first node fires.
             update_dashboard_display(
@@ -644,7 +644,7 @@ class BatchRunner:
                 profile_name=self.dashboard.profile_name,
             )
 
-            for idx, ticker in enumerate(self.tickers):
+            for _idx, ticker in enumerate(self.tickers):
                 existing_report = self._find_existing_report(ticker)
                 if existing_report is not None:
                     self.completed_tickers.add(ticker)

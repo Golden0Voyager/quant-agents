@@ -24,11 +24,10 @@ from tradingagents.llm_clients.api_key_env import get_api_key_env
 from tradingagents.llm_clients.factory import _OPENAI_COMPATIBLE, create_llm_client
 from tradingagents.llm_clients.model_catalog import get_model_options
 from tradingagents.llm_clients.openai_client import (
-    OpenAIClient,
     _PROVIDER_BASE_URL,
+    OpenAIClient,
     _resolve_provider_base_url,
 )
-
 
 # ---- Factory membership ----------------------------------------------------
 

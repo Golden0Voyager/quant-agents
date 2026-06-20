@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-
 SCRIPT_PATH = Path(__file__).parent.parent / "scripts" / "report_auditor.py"
 
 

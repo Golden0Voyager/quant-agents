@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
-
-ModelOption = Tuple[str, str]
-ProviderModeOptions = Dict[str, Dict[str, List[ModelOption]]]
+ModelOption = tuple[str, str]
+ProviderModeOptions = dict[str, dict[str, list[ModelOption]]]
 
 
 # Shared model list for GLM via Z.AI (international) and BigModel (China).
 # Source: docs.z.ai (GLM Coding Plan supported models + LLM guides).
 # All GLM 4.7+ entries support thinking mode via thinking={"type":"enabled"}.
-_GLM_MODELS: Dict[str, List[ModelOption]] = {
+_GLM_MODELS: dict[str, list[ModelOption]] = {
     "quick": [
         ("GLM-5-Turbo - Fast, switchable thinking modes", "glm-5-turbo"),
         ("GLM-4.7 - Previous-gen flagship", "glm-4.7"),
@@ -37,7 +35,7 @@ _GLM_MODELS: Dict[str, List[ModelOption]] = {
 # the backing model. Users who want a specific generation pick it
 # explicitly; users who really want auto-latest can enter the alias via
 # "Custom model ID".
-_QWEN_MODELS: Dict[str, List[ModelOption]] = {
+_QWEN_MODELS: dict[str, list[ModelOption]] = {
     "quick": [
         ("Qwen 3.6 Flash - Latest fast, agentic coding + vision-language", "qwen3.6-flash"),
         ("Qwen 3.5 Flash - Previous-gen fast", "qwen3.5-flash"),
@@ -55,7 +53,7 @@ _QWEN_MODELS: Dict[str, List[ModelOption]] = {
 # Shared model list for MiniMax's global and CN endpoints (same IDs).
 # Full official lineup per platform.minimax.io/docs/api-reference/text-openai-api.
 # All M2.x models share a 204,800-token context window.
-_MINIMAX_MODELS: Dict[str, List[ModelOption]] = {
+_MINIMAX_MODELS: dict[str, list[ModelOption]] = {
     "quick": [
         ("MiniMax-M2.7-highspeed - Faster M2.7, 204K ctx, ~100 TPS", "MiniMax-M2.7-highspeed"),
         ("MiniMax-M2.5-highspeed - Previous-gen highspeed, 204K ctx", "MiniMax-M2.5-highspeed"),
@@ -254,12 +252,12 @@ MODEL_OPTIONS: ProviderModeOptions = {
 }
 
 
-def get_model_options(provider: str, mode: str) -> List[ModelOption]:
+def get_model_options(provider: str, mode: str) -> list[ModelOption]:
     """Return shared model options for a provider and selection mode."""
     return MODEL_OPTIONS[provider.lower()][mode]
 
 
-def get_known_models() -> Dict[str, List[str]]:
+def get_known_models() -> dict[str, list[str]]:
     """Build known model names from the shared CLI catalog."""
     return {
         provider: sorted(
