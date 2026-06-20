@@ -32,8 +32,10 @@ DECISION_NO_RATING = (
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-def make_log(tmp_path, filename="trading_memory.md"):
+def make_log(tmp_path, filename="trading_memory.md", max_entries=None):
     config = {"memory_log_path": str(tmp_path / filename)}
+    if max_entries is not None:
+        config["memory_log_max_entries"] = max_entries
     return TradingMemoryLog(config)
 
 
@@ -308,12 +310,10 @@ class TestTradingMemoryLogCore:
             "memory_log_path": str(tmp_path / "trading_memory.md"),
             "memory_log_max_entries": 3,
         })
-        # Resolve 5 entries; rotation should keep only the 3 most recent.
         for i in range(5):
             _resolve_entry(log, "NVDA", f"2026-01-{i+1:02d}", DECISION_BUY, f"Lesson {i}.")
         entries = log.load_entries()
         assert len(entries) == 3
-        # Confirm the OLDEST were dropped, not the newest.
         dates = [e["date"] for e in entries]
         assert dates == ["2026-01-03", "2026-01-04", "2026-01-05"]
 
@@ -323,12 +323,10 @@ class TestTradingMemoryLogCore:
             "memory_log_path": str(tmp_path / "trading_memory.md"),
             "memory_log_max_entries": 2,
         })
-        # 3 resolved + 2 pending. With cap=2, only 2 resolved survive; both pending stay.
         for i in range(3):
             _resolve_entry(log, "NVDA", f"2026-01-{i+1:02d}", DECISION_BUY, f"Resolved {i}.")
         log.store_decision("NVDA", "2026-02-01", DECISION_BUY)
         log.store_decision("NVDA", "2026-02-02", DECISION_OVERWEIGHT)
-        # Trigger rotation by resolving one more entry — pending entries must stay.
         _resolve_entry(log, "NVDA", "2026-01-04", DECISION_BUY, "Resolved 3.")
         entries = log.load_entries()
         pending = [e for e in entries if e["pending"]]
@@ -503,7 +501,7 @@ class TestDeferredReflection:
         assert days == 5
 
     def test_fetch_returns_too_recent(self):
-        """Only 1 data point available → returns (None, None, None), no crash."""
+        """Only 1 data point available -> returns (None, None, None), no crash."""
         mock_graph = MagicMock(spec=TradingAgentsGraph)
         with patch("yfinance.Ticker") as mock_ticker_cls:
             m = MagicMock()
@@ -513,7 +511,7 @@ class TestDeferredReflection:
         assert raw is None and alpha is None and days is None
 
     def test_fetch_returns_delisted(self):
-        """Empty DataFrame → returns (None, None, None), no crash."""
+        """Empty DataFrame -> returns (None, None, None), no crash."""
         mock_graph = MagicMock(spec=TradingAgentsGraph)
         with patch("yfinance.Ticker") as mock_ticker_cls:
             m = MagicMock()
@@ -566,8 +564,7 @@ class TestDeferredReflection:
         assert TradingAgentsGraph._resolve_benchmark(mock_graph, "AZN.L") == "^FTSE"
 
     def test_resolve_benchmark_china_a_shares(self):
-        """A-share tickers route to their exchange composite (uses the real
-        default benchmark_map, since A-share support relies on it)."""
+        """A-share tickers route to their exchange composite."""
         from tradingagents.default_config import DEFAULT_CONFIG
         mock_graph = MagicMock(spec=TradingAgentsGraph)
         mock_graph.config = {"benchmark_ticker": None,
@@ -817,7 +814,7 @@ class TestPortfolioManagerInjection:
         assert "Exit position immediately." not in result
 
     def test_n_same_limit_respected(self, tmp_path):
-        """More than 5 same-ticker completed entries → only 5 injected."""
+        """More than 5 same-ticker completed entries -> only 5 injected."""
         log = make_log(tmp_path)
         for i in range(7):
             _resolve_entry(log, "NVDA", f"2026-01-{i+1:02d}", DECISION_BUY, f"Lesson {i}.")
@@ -826,7 +823,7 @@ class TestPortfolioManagerInjection:
         assert lessons_present == 5
 
     def test_n_cross_limit_respected(self, tmp_path):
-        """More than 3 cross-ticker completed entries → only 3 injected."""
+        """More than 3 cross-ticker completed entries -> only 3 injected."""
         log = make_log(tmp_path)
         tickers = ["AAPL", "MSFT", "TSLA", "AMZN", "GOOG"]
         for i, ticker in enumerate(tickers):
@@ -835,10 +832,10 @@ class TestPortfolioManagerInjection:
         cross_count = sum(result.count(f"{t} lesson.") for t in tickers)
         assert cross_count == 3
 
-    # Full A→B→C integration cycle
+    # Full A->B->C integration cycle
 
     def test_full_cycle_store_resolve_inject(self, tmp_path):
-        """store pending → resolve with outcome → past_context non-empty for PM."""
+        """store pending -> resolve with outcome -> past_context non-empty for PM."""
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-05", DECISION_BUY)
         assert len(log.get_pending_entries()) == 1
@@ -914,8 +911,6 @@ class TestLegacyRemoval:
         mock_graph.propagator.create_initial_state.return_value = fake_state
         mock_graph.propagator.get_graph_args.return_value = {}
         mock_graph.signal_processor.process_signal.return_value = "Buy"
-        # Bind the real _run_graph so propagate's call to self._run_graph executes
-        # the actual write path instead of the auto-MagicMock.
         mock_graph._run_graph = functools.partial(
             TradingAgentsGraph._run_graph, mock_graph
         )
