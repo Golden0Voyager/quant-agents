@@ -28,6 +28,14 @@ def test_flat_article_publish_time_is_parsed():
 
 
 @pytest.mark.unit
+def test_flat_article_invalid_timestamp_handled_gracefully():
+    data = ynews._extract_article_data(
+        {"title": "X", "publisher": "P", "link": "l", "providerPublishTime": "not-a-number"}
+    )
+    assert data["pub_date"] is None
+
+
+@pytest.mark.unit
 def test_window_excludes_future_and_undated_in_backtest():
     start = datetime(2025, 5, 1)
     end = datetime(2025, 5, 9)  # historical window (well in the past)

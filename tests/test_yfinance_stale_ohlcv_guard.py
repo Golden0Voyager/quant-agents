@@ -57,6 +57,50 @@ class StaleGuardUnitTests(unittest.TestCase):
     def test_long_holiday_gap_within_threshold_is_accepted(self):
         _assert_ohlcv_not_stale(_frame("2026-06-02"), "2026-06-11", "X")  # 9 days
 
+    def test_unparseable_curr_date_passes_through(self):
+        _assert_ohlcv_not_stale(_frame("2026-06-10"), "bad-date", "CB")
+
+    def test_all_nan_dates_passes_through(self):
+        df = pd.DataFrame({
+            "Date": [pd.NaT, pd.NaT],
+            "Close": [100.0, 101.0],
+        })
+        _assert_ohlcv_not_stale(df, "2026-06-11", "CB")
+
+    def test_none_data_passes_through(self):
+        _assert_ohlcv_not_stale(None, "2026-06-11", "CB")
+
+
+@pytest.mark.unit
+class CoerceOhlcvDatesTests(unittest.TestCase):
+    def test_with_date_column(self):
+        df = pd.DataFrame({"Date": ["2026-06-10", "2026-06-11"], "Close": [100.0, 101.0]})
+        from tradingagents.dataflows.stockstats_utils import _coerce_ohlcv_dates
+        result = _coerce_ohlcv_dates(df)
+        self.assertEqual(len(result), 2)
+
+    def test_with_datetime_index(self):
+        df = pd.DataFrame(
+            {"Close": [100.0, 101.0]},
+            index=pd.DatetimeIndex([pd.Timestamp("2026-06-10"), pd.Timestamp("2026-06-11")]),
+        )
+        from tradingagents.dataflows.stockstats_utils import _coerce_ohlcv_dates
+        result = _coerce_ohlcv_dates(df)
+        self.assertEqual(len(result), 2)
+
+    def test_fallback_reset_index_finds_date_column(self):
+        df = pd.DataFrame({"Close": [100.0, 101.0], "Date": ["2026-06-10", "2026-06-11"]})
+        df.index = pd.RangeIndex(start=10, stop=12)
+        from tradingagents.dataflows.stockstats_utils import _coerce_ohlcv_dates
+        result = _coerce_ohlcv_dates(df)
+        self.assertEqual(len(result), 2)
+
+    def test_fallback_reset_index_uses_index_column(self):
+        df = pd.DataFrame({"Close": [100.0, 101.0]})
+        from tradingagents.dataflows.stockstats_utils import _coerce_ohlcv_dates
+        result = _coerce_ohlcv_dates(df)
+        self.assertEqual(len(result), 2)
+
 
 @pytest.mark.unit
 class StaleGuardPropagationTests(unittest.TestCase):
