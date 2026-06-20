@@ -5,7 +5,13 @@ import pandas as pd
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
 
-from .stockstats_utils import StockstatsUtils, filter_financials_by_date, load_ohlcv, yf_retry
+from .stockstats_utils import (
+    StockstatsUtils,
+    _assert_ohlcv_not_stale,
+    filter_financials_by_date,
+    load_ohlcv,
+    yf_retry,
+)
 from .symbol_utils import NoMarketDataError, normalize_symbol
 
 
@@ -16,14 +22,17 @@ def get_YFin_data_online(
 ):
     try:
         datetime.strptime(start_date, "%Y-%m-%d")
-        datetime.strptime(end_date, "%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
 
         # Resolve broker/forex symbols to Yahoo's convention (XAUUSD+ -> GC=F).
         canonical = normalize_symbol(symbol)
         ticker = yf.Ticker(canonical)
 
-        # Fetch historical data for the specified date range
-        data = yf_retry(lambda: ticker.history(start=start_date, end=end_date))
+        # yfinance treats ``end`` as EXCLUSIVE, so it would drop the requested
+        # end_date row (and the current day when end_date is today). Request one day
+        # past end_date so the requested range is actually inclusive (#986/#987).
+        end_inclusive = (end_dt + relativedelta(days=1)).strftime("%Y-%m-%d")
+        data = yf_retry(lambda: ticker.history(start=start_date, end=end_inclusive))
 
         # Empty result means the symbol is unknown/delisted. Raise a typed error
         # instead of returning prose: the routing layer turns it into a single
@@ -32,6 +41,10 @@ def get_YFin_data_online(
             raise NoMarketDataError(
                 symbol, canonical, f"no rows between {start_date} and {end_date}"
             )
+
+        # Reject a stale frame (latest row far older than end_date) rather than
+        # feeding year-old prices into the report (#1021).
+        _assert_ohlcv_not_stale(data, end_date, symbol, canonical)
 
         # Remove timezone info from index for cleaner output
         if data.index.tz is not None:

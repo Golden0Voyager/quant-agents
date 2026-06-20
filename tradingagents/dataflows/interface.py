@@ -501,7 +501,9 @@ def route_to_vendor(method: str, *args, **kwargs):
     if last_no_data is not None:
         sym = last_no_data.symbol
         canonical = last_no_data.canonical
+        detail = last_no_data.detail
         resolved = "" if canonical == sym else f" (resolved to '{canonical}')"
+        detail_suffix = f" Reason: {detail}." if detail else ""
         # Build the routing chain string so the agent (and user) can see
         # which vendors were attempted and in what order.
         tried = " → ".join(
@@ -509,7 +511,7 @@ def route_to_vendor(method: str, *args, **kwargs):
         )
         return (
             f"NO_DATA_AVAILABLE: No market data found for '{sym}'{resolved} from "
-            f"any configured vendor. Routing chain: {tried}. "
+            f"any configured vendor. Routing chain: {tried}.{detail_suffix} "
             f"The symbol may be invalid, delisted, or not covered. "
             f"Do not estimate or fabricate values — report that data is unavailable."
         )

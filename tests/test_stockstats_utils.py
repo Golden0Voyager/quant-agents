@@ -207,7 +207,7 @@ class LoadOhlcvCacheTests(_TempDirMixin, unittest.TestCase):
         safe = "AAPL"
         today = pd.Timestamp.today()
         start = (today - pd.DateOffset(years=5)).strftime("%Y-%m-%d")
-        end = today.strftime("%Y-%m-%d")
+        end = (today + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
         return self._tmp / f"{safe}-YFin-data-{start}-{end}.csv"
 
     def test_uses_cached_csv(self):
@@ -224,7 +224,9 @@ class LoadOhlcvCacheTests(_TempDirMixin, unittest.TestCase):
         cached_df.to_csv(data_file, index=False, encoding="utf-8")
 
         with patch("tradingagents.dataflows.stockstats_utils.get_config",
-                   return_value={"data_cache_dir": str(cache_dir)}):
+                   return_value={"data_cache_dir": str(cache_dir)}), \
+             patch("tradingagents.dataflows.stockstats_utils.normalize_symbol",
+                   return_value="AAPL"):
             result = load_ohlcv("AAPL", "2026-01-03", lookback_years=5)
 
         self.assertIsNotNone(result)
@@ -246,6 +248,8 @@ class LoadOhlcvCacheTests(_TempDirMixin, unittest.TestCase):
 
         with patch("tradingagents.dataflows.stockstats_utils.get_config",
                    return_value={"data_cache_dir": str(cache_dir)}), \
+             patch("tradingagents.dataflows.stockstats_utils.normalize_symbol",
+                   return_value="AAPL"), \
              patch("tradingagents.dataflows.stockstats_utils.yf_retry",
                    return_value=downloaded):
             result = load_ohlcv("AAPL", "2026-01-03", lookback_years=5)
@@ -272,6 +276,8 @@ class LoadOhlcvDownloadAndFilterTests(_TempDirMixin, unittest.TestCase):
 
         with patch("tradingagents.dataflows.stockstats_utils.get_config",
                    return_value={"data_cache_dir": str(cache_dir)}), \
+             patch("tradingagents.dataflows.stockstats_utils.normalize_symbol",
+                   return_value="AAPL"), \
              patch("tradingagents.dataflows.stockstats_utils.yf_retry",
                    return_value=downloaded):
             result = load_ohlcv("AAPL", "2026-01-03", lookback_years=5)
@@ -328,6 +334,8 @@ class LoadOhlcvNoMarketDataTests(_TempDirMixin, unittest.TestCase):
         cache_dir = self._tmp
         with patch("tradingagents.dataflows.stockstats_utils.get_config",
                    return_value={"data_cache_dir": str(cache_dir)}), \
+             patch("tradingagents.dataflows.stockstats_utils.normalize_symbol",
+                   return_value="INVALID"), \
              patch("tradingagents.dataflows.stockstats_utils.yf_retry",
                    return_value=pd.DataFrame()):
             from tradingagents.dataflows.symbol_utils import NoMarketDataError
