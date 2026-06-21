@@ -1525,10 +1525,7 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
 
     selected_set = {analyst.value for analyst in selections["analysts"]}
     selected_analyst_keys = [a[1].value for a in ANALYST_ORDER if a[1].value in selected_set]
-    analyst_execution_plan = build_analyst_execution_plan(
-        selected_analyst_keys,
-        concurrency_limit=config["analyst_concurrency_limit"],
-    )
+    analyst_execution_plan = build_analyst_execution_plan(selected_analyst_keys)
     analyst_wall_time_tracker = AnalystWallTimeTracker(analyst_execution_plan)
 
     graph = TradingAgentsGraph(
