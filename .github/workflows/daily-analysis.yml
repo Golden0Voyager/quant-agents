@@ -71,7 +71,81 @@ jobs:
             echo "## Daily Analysis Summary" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             cat "$LATEST/batch_summary.md" >> $GITHUB_STEP_SUMMARY
+            # Save summary for Feishu notification
+            cp "$LATEST/batch_summary.md" /tmp/batch_summary.md
           else
             echo "## Daily Analysis Complete" >> $GITHUB_STEP_SUMMARY
             echo "Reports uploaded as artifacts." >> $GITHUB_STEP_SUMMARY
           fi
+
+      - name: Notify Feishu
+        if: always()
+        run: |
+          STATUS="${{ job.status }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          DATE=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
+          
+          if [ "$STATUS" = "success" ]; then
+            COLOR="green"
+            TITLE="✅ 每日分析完成 - $DATE"
+          else
+            COLOR="red"
+            TITLE="❌ 每日分析失败 - $DATE"
+          fi
+
+          # Read summary if available
+          SUMMARY=""
+          if [ -f /tmp/batch_summary.md ]; then
+            SUMMARY=$(head -20 /tmp/batch_summary.md)
+          fi
+
+          # Build Feishu card message
+          PAYLOAD=$(cat <<EOF
+          {
+            "msg_type": "interactive",
+            "card": {
+              "header": {
+                "title": {
+                  "tag": "plain_text",
+                  "content": "$TITLE"
+                },
+                "template": "$COLOR"
+              },
+              "elements": [
+                {
+                  "tag": "markdown",
+                  "content": "**状态**: $STATUS\n**运行**: [查看详情]($RUN_URL)\n**报告**: 作为 Artifact 上传，保留 30 天"
+                }
+          $([ -n "$SUMMARY" ] && cat <<SUMMARY_BLOCK
+                ,
+                {
+                  "tag": "markdown",
+                  "content": "**摘要**:\n\`\`\`\n$SUMMARY\n\`\`\`"
+                }
+          SUMMARY_BLOCK
+          )
+                ,
+                {
+                  "tag": "action",
+                  "actions": [
+                    {
+                      "tag": "button",
+                      "text": {
+                        "tag": "plain_text",
+                        "content": "查看报告"
+                      },
+                      "url": "$RUN_URL",
+                      "type": "primary"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+          EOF
+          )
+
+          curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "${{ secrets.FEISHU_WEBHOOK_URL }}" || echo "Failed to send Feishu notification"
