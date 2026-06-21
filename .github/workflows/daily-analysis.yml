@@ -34,6 +34,39 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      - name: Install gws CLI
+        run: npm install -g @anthropic-ai/gws-cli 2>/dev/null || npm install -g gws-cli 2>/dev/null || echo "gws install skipped"
+
+      - name: Setup gws credentials
+        run: |
+          mkdir -p ~/.config/gws
+          echo '${{ secrets.GWS_CREDENTIALS }}' > ~/.config/gws/client_secret.json
+          # gws uses keyring but we can set env to use file-based auth
+          export GWS_CONFIG_DIR=~/.config/gws
+
+      - name: Sync holdings from Google Sheet
+        run: |
+          # Sync holdings to local cache before analysis
+          uv run python -c "
+          import json, os
+          from tradingagents.portfolio import PortfolioRepository, PortfolioSyncService
+          
+          sheet_id = os.environ.get('PORTFOLIO_SHEET_ID', '${{ secrets.PORTFOLIO_SHEET_ID }}')
+          if not sheet_id:
+              print('No PORTFOLIO_SHEET_ID configured, skipping holdings sync')
+              exit(0)
+          
+          try:
+              sync_service = PortfolioSyncService(sheet_id=sheet_id, worksheet='total')
+              portfolio = sync_service.sync()
+              repo = PortfolioRepository()
+              repo.save(portfolio)
+              print(f'Synced {len(portfolio.holdings)} holdings to local cache')
+          except Exception as e:
+              print(f'Holdings sync failed: {e}')
+              print('Analysis will run without holdings context')
+          "
+
       - name: Create .env from secrets
         run: |
           cat > .env <<EOF
@@ -41,6 +74,7 @@ jobs:
           OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
           DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
+          PORTFOLIO_SHEET_ID=${{ secrets.PORTFOLIO_SHEET_ID }}
           EOF
 
       - name: Run daily analysis
