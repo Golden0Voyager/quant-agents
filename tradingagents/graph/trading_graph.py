@@ -535,6 +535,7 @@ class TradingAgentsGraph:
         # Wall-time tracker for per-analyst elapsed times.
         plan = build_analyst_execution_plan(self.selected_analysts)
         tracker = AnalystWallTimeTracker(plan)
+        last_printed = None
 
         for chunk in self.graph.stream(init_agent_state, **stream_args):
             t_now = _time.perf_counter()
@@ -554,8 +555,15 @@ class TradingAgentsGraph:
                         if state_update.get(spec.report_key):
                             tracker.mark_completed(spec.key, completed_at=t_now)
             t_prev = t_now
+            # Nodes after the trader don't append to messages, so the
+            # same trailing message repeats across chunks. Print it only
+            # when it changes (#1027, upstream 709fe2b).
             if self.debug and merged_state.get("messages"):
-                merged_state["messages"][-1].pretty_print()
+                msg = merged_state["messages"][-1]
+                signature = (type(msg).__name__, getattr(msg, "content", None))
+                if signature != last_printed:
+                    msg.pretty_print()
+                    last_printed = signature
 
         final_state = merged_state
         self.node_timings = timings
