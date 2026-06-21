@@ -412,7 +412,10 @@ class ResolveInstrumentContextTests(unittest.TestCase):
             result = g.resolve_instrument_context("AAPL", asset_type="stock")
 
             mock_resolve.assert_called_once_with("AAPL")
-            mock_build.assert_called_once_with("AAPL", "stock", {"company_name": "Apple Inc.", "sector": "Technology"})
+            mock_build.assert_called_once_with(
+                "AAPL", "stock", {"company_name": "Apple Inc.", "sector": "Technology"},
+                confirmed_name=None,
+            )
             self.assertEqual(result, "Instrument: AAPL (Apple Inc.)")
 
     def test_defaults_to_stock_asset_type(self):
@@ -428,8 +431,29 @@ class ResolveInstrumentContextTests(unittest.TestCase):
 
             result = g.resolve_instrument_context("BTC", asset_type="crypto")
 
-            mock_build.assert_called_once_with("BTC", "crypto", {})
+            mock_build.assert_called_once_with("BTC", "crypto", {}, confirmed_name=None)
             self.assertEqual(result, "Instrument: BTC")
+
+    def test_confirmed_name_overrides_identity(self):
+        from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+        g = TradingAgentsGraph.__new__(TradingAgentsGraph)
+        with (
+            patch("tradingagents.graph.trading_graph.resolve_instrument_identity") as mock_resolve,
+            patch("tradingagents.graph.trading_graph.build_instrument_context") as mock_build,
+        ):
+            mock_resolve.return_value = {"company_name": "WRONG NAME"}
+            mock_build.return_value = "Instrument: 300002.SZ"
+
+            result = g.resolve_instrument_context(
+                "300002.SZ", asset_type="stock", confirmed_name="神州泰岳",
+            )
+
+            mock_build.assert_called_once_with(
+                "300002.SZ", "stock", {"company_name": "WRONG NAME"},
+                confirmed_name="神州泰岳",
+            )
+            self.assertEqual(result, "Instrument: 300002.SZ")
 
     def test_identity_lookup_failure_returns_ticker_only_context(self):
         from tradingagents.graph.trading_graph import TradingAgentsGraph
@@ -1275,7 +1299,9 @@ class PropagateTests(unittest.TestCase):
             state, signal = self.g.propagate("AAPL", "2026-06-15")
             self.assertEqual(self.g.ticker, "AAPL")
             mock_pending.assert_called_once_with("AAPL", asset_type="stock")
-            mock_run.assert_called_once_with("AAPL", "2026-06-15", asset_type="stock")
+            mock_run.assert_called_once_with(
+                "AAPL", "2026-06-15", asset_type="stock", confirmed_name="Apple Inc.",
+            )
 
     def test_with_checkpoint_enabled_and_cached_result(self):
         self.g.config["checkpoint_enabled"] = True

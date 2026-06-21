@@ -112,6 +112,7 @@ def build_instrument_context(
     ticker: str,
     asset_type: str = "stock",
     identity: Mapping[str, str] | None = None,
+    confirmed_name: str | None = None,
 ) -> str:
     """Describe the exact instrument so agents preserve identity and ticker.
 
@@ -119,6 +120,10 @@ def build_instrument_context(
     :func:`resolve_instrument_identity`), the company name and business
     classification are injected so agents anchor to the real company rather
     than pattern-matching the price chart to a wrong one (#814).
+
+    ``confirmed_name`` is the user-confirmed company name from the CLI
+    (resolved via akshare for A-shares). When provided, it takes priority
+    over the yfinance identity to prevent name mismatches.
     """
     is_crypto = asset_type == "crypto"
     instrument_label = "asset" if is_crypto else "instrument"
@@ -129,10 +134,15 @@ def build_instrument_context(
     )
 
     details = []
-    if identity:
+    if confirmed_name:
+        details.append(f"{'Name' if is_crypto else 'Company'}: {confirmed_name}")
+    elif identity:
         name = identity.get("company_name") or identity.get("name")
         if name:
             details.append(f"{'Name' if is_crypto else 'Company'}: {name}")
+
+    # Sector/industry/exchange always come from yfinance identity when available.
+    if identity:
         sector, industry = identity.get("sector"), identity.get("industry")
         if sector and industry:
             details.append(f"Business classification: {sector} / {industry}")
@@ -158,20 +168,33 @@ def build_instrument_context(
     return context
 
 
+def _all_a_share_names() -> set[str]:
+    """Return all known A-share company names from akshare, cached."""
+    try:
+        # Avoid circular import; akshare is always available when this runs.
+        import akshare as ak
+        df = ak.stock_info_a_code_name()
+        return set(str(row["name"]).strip() for _, row in df.iterrows())
+    except Exception:
+        return set()
+
+
 def sanitize_company_name_in_report(report: str, ticker: str, company_name: str) -> str:
     """Post-process analyst reports to correct company-name hallucinations.
 
-    Replaces common wrong names associated with the ticker while preserving
-    the rest of the report unchanged. Returns the report as-is if no company
-    name is known.
+    Scans the report for any A-share company name that differs from the
+    expected ``company_name`` and replaces it. This catches cases where the
+    LLM (or the underlying data vendor) confuses one Chinese company with
+    another for the same ticker. Non-A-share tickers are passed through.
     """
     if not company_name or not report:
         return report
+    suffix = ticker.split(".")[-1].upper() if "." in ticker else ""
+    if suffix not in ("SS", "SZ", "BJ"):
+        return report
 
-    # Map of (wrong_name, right_name) pairs extracted heuristically.
-    # This is intentionally conservative: only exact matches are replaced.
     wrong_names: list[str] = []
-    for candidate in ["江苏银行", "江苏苏垦农发", "苏垦农发"]:
+    for candidate in _all_a_share_names():
         if candidate != company_name and candidate in report:
             wrong_names.append(candidate)
 

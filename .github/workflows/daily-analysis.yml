@@ -1,0 +1,77 @@
+name: Daily Analysis
+
+on:
+  schedule:
+    # 3:00 AM Beijing time (UTC+8) = 19:00 UTC
+    - cron: '0 19 * * *'
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: 'Override tickers (comma-separated, optional)'
+        required: false
+        default: ''
+
+env:
+  UV_SYSTEM_PYTHON: 1
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours max
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Create .env from secrets
+        run: |
+          cat > .env <<EOF
+          SENSENOVA_API_KEY=${{ secrets.SENSENOVA_API_KEY }}
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
+          EOF
+
+      - name: Run daily analysis
+        run: |
+          # If tickers override provided, create temp config
+          if [ -n "${{ inputs.tickers }}" ]; then
+            TICKERS=$(echo '${{ inputs.tickers }}' | jq -R 'split(",") | map(gsub("^\\s+|\\s+$"; ""))')
+            jq --argjson tickers "$TICKERS" '.tickers = $tickers' config/daily.json > /tmp/daily_override.json
+            uv run python -m cli.main analyze --config /tmp/daily_override.json
+          else
+            uv run python -m cli.main analyze --config config/daily.json
+          fi
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ github.run_id }}
+          path: reports/
+          retention-days: 30
+
+      - name: Generate summary
+        if: success()
+        run: |
+          # Find the latest report directory and print summary
+          LATEST=$(ls -td reports/*/ 2>/dev/null | head -1)
+          if [ -n "$LATEST" ] && [ -f "$LATEST/batch_summary.md" ]; then
+            echo "## Daily Analysis Summary" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            cat "$LATEST/batch_summary.md" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## Daily Analysis Complete" >> $GITHUB_STEP_SUMMARY
+            echo "Reports uploaded as artifacts." >> $GITHUB_STEP_SUMMARY
+          fi

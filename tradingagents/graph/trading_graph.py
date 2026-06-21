@@ -390,7 +390,9 @@ class TradingAgentsGraph:
         if updates:
             self.memory_log.batch_update_with_outcomes(updates)
 
-    def resolve_instrument_context(self, ticker: str, asset_type: str = "stock") -> str:
+    def resolve_instrument_context(
+        self, ticker: str, asset_type: str = "stock", confirmed_name: str | None = None,
+    ) -> str:
         """Resolve ticker identity once and return the full instrument context.
 
         Deterministic yfinance lookup (cached, fail-open) injected into a
@@ -398,11 +400,15 @@ class TradingAgentsGraph:
         hallucinating one from the price chart (#814). Both the propagate()
         path and the CLI call this so the resolved identity reaches the whole
         graph regardless of entry point.
+
+        ``confirmed_name`` is the user-confirmed company name from the CLI
+        (resolved via akshare for A-shares). When provided, it takes priority
+        over the yfinance identity to prevent name mismatches (#814 follow-up).
         """
         identity = resolve_instrument_identity(ticker)
-        return build_instrument_context(ticker, asset_type, identity)
+        return build_instrument_context(ticker, asset_type, identity, confirmed_name=confirmed_name)
 
-    def propagate(self, company_name, trade_date, asset_type: str = "stock"):
+    def propagate(self, company_name, trade_date, asset_type: str = "stock", confirmed_name: str | None = None):
         """Run the trading agents graph for a company on a specific date.
 
         ``asset_type`` selects between the stock pipeline (default) and the
@@ -411,12 +417,16 @@ class TradingAgentsGraph:
         ``checkpoint_enabled`` is set in config, the graph is recompiled with
         a per-ticker SqliteSaver so a crashed run can resume from the last
         successful node on a subsequent invocation with the same ticker+date.
+
+        ``confirmed_name`` is the user-confirmed company name (e.g. from
+        akshare for A-shares). When provided, it overrides the yfinance
+        identity to prevent name mismatches.
         """
         from tradingagents.ticker_resolver import resolve_ticker
 
         resolved = resolve_ticker(company_name)
         ticker = resolved["ticker"]
-        resolved.get("company_name", "")
+        resolved_name = confirmed_name or resolved.get("company_name", "")
         self.ticker = ticker
 
         # Resolve any pending memory-log entries for this ticker before the pipeline runs.
@@ -466,19 +476,21 @@ class TradingAgentsGraph:
                 logger.info("Starting fresh for %s on %s", ticker, trade_date)
 
         try:
-            return self._run_graph(ticker, trade_date, asset_type=asset_type)
+            return self._run_graph(ticker, trade_date, asset_type=asset_type, confirmed_name=resolved_name)
         finally:
             if self._checkpointer_ctx is not None:
                 self._checkpointer_ctx.__exit__(None, None, None)
                 self._checkpointer_ctx = None
                 self.graph = self.workflow.compile()
 
-    def _run_graph(self, company_name, trade_date, asset_type: str = "stock"):
+    def _run_graph(self, company_name, trade_date, asset_type: str = "stock", confirmed_name: str | None = None):
         """Execute the graph and write the resulting state to disk and memory log."""
         # Initialize state — inject memory log context for PM and the
         # deterministically resolved instrument identity for all agents.
         past_context = self.memory_log.get_past_context(company_name)
-        instrument_context = self.resolve_instrument_context(company_name, asset_type)
+        instrument_context = self.resolve_instrument_context(
+            company_name, asset_type, confirmed_name=confirmed_name,
+        )
         init_agent_state = self.propagator.create_initial_state(
             company_name,
             trade_date,

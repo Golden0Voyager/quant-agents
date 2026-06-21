@@ -1,0 +1,31 @@
+{
+  "tickers": [
+    "603893",
+    "002241",
+    "002594",
+    "300002",
+    "300562",
+    "300760",
+    "300175",
+    "000100",
+    "300454",
+    "603223",
+    "600901",
+    "600050"
+  ],
+  "config": {
+    "analysts": ["market", "social", "news", "fundamentals", "governance", "industry"],
+    "research_depth": "deep",
+    "llm_provider": "sensenova",
+    "backend_url": "https://token.sensenova.cn/v1",
+    "shallow_thinker": "sensenova-6.7-flash-lite",
+    "deep_thinker": "sensenova-6.7-flash-lite",
+    "output_language": "Chinese",
+    "checkpoint_enabled": true,
+    "max_debate_rounds": 1,
+    "max_risk_discuss_rounds": 1
+  },
+  "output_dir": "./reports",
+  "checkpoint": true,
+  "workers": 1
+}

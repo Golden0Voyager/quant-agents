@@ -249,9 +249,16 @@ class BatchRunner:
         except Exception:
             pass
 
+        # Resolve instrument identity so agents anchor to the real company
+        # rather than hallucinating from the price chart (#814).
+        instrument_context = graph.resolve_instrument_context(
+            resolved_ticker,
+            confirmed_name=company_name or None,
+        )
         init_state = graph.propagator.create_initial_state(
             resolved_ticker,
             trade_date,
+            instrument_context=instrument_context,
             holdings_context=self.holdings,
             transactions_context=transactions_context,
         )

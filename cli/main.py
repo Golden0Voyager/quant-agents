@@ -27,8 +27,8 @@ from cli.dashboard import (
 )
 from cli.profiles import list_profiles, load_profile, save_profile
 from cli.stats_handler import StatsCallbackHandler
-from cli.utils import *
-from cli.utils import ask_workers
+from cli.utils import *  # noqa: F811 — ANALYST_ORDER re-imported below
+from cli.dashboard import ANALYST_ORDER  # noqa: F811 — string list needed at line 1525
 from cli.watchlists import list_watchlists, load_watchlist, save_watchlist
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.analyst_execution import (
@@ -1371,12 +1371,16 @@ ANALYST_AGENT_NAMES = {
     "social": "Sentiment Analyst",
     "news": "News Analyst",
     "fundamentals": "Fundamentals Analyst",
+    "governance": "Governance Analyst",
+    "industry": "Industry Analyst",
 }
 ANALYST_REPORT_MAP = {
     "market": "market_report",
     "social": "sentiment_report",
     "news": "news_report",
     "fundamentals": "fundamentals_report",
+    "governance": "governance_report",
+    "industry": "industry_report",
 }
 
 
@@ -1521,7 +1525,7 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
 
     stats_handler = StatsCallbackHandler()
 
-    selected_set = {analyst.value for analyst in selections["analysts"]}
+    selected_set = {analyst.value.value for analyst in selections["analysts"]}
     selected_analyst_keys = [a for a in ANALYST_ORDER if a in selected_set]
     analyst_execution_plan = build_analyst_execution_plan(
         selected_analyst_keys,
@@ -1643,8 +1647,12 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
         # Resolve the instrument identity once here so all agents anchor to
         # the real company (#814); the CLI builds state directly rather than
         # going through propagate(), so this must happen on the CLI path too.
+        # Pass user-confirmed company name so akshare-resolved identity
+        # overrides yfinance when they disagree (#814 follow-up).
         instrument_context = graph.resolve_instrument_context(
-            selections["ticker"], selections["asset_type"]
+            selections["ticker"],
+            selections["asset_type"],
+            confirmed_name=selections.get("company_name"),
         )
         init_agent_state = graph.propagator.create_initial_state(
             selections["ticker"],
@@ -1828,8 +1836,12 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
         save_report_to_disk(final_state, selections["ticker"], results_dir)
 
 
-def run_batch_analysis(tickers: list[str], profile_config: dict, checkpoint: bool = False, output_dir: Path | None = None, watchlist_name: str | None = None, holdings: dict | None = None, workers: int = 1):
-    """Run unattended batch analysis for multiple tickers."""
+def run_batch_analysis(tickers: list[str], profile_config: dict, checkpoint: bool = False, output_dir: Path | None = None, watchlist_name: str | None = None, holdings: dict | None = None, workers: int = 1, headless: bool = False):
+    """Run unattended batch analysis for multiple tickers.
+
+    When *headless* is True, all interactive prompts are skipped so the
+    function can run in CI/CD pipelines (e.g. GitHub Actions).
+    """
     date_stamp = __import__("datetime").datetime.now().strftime("%Y%m%d")
     timestamp = __import__("datetime").datetime.now().strftime("%Y%m%d_%H%M%S")
     if output_dir is None:
@@ -1883,12 +1895,13 @@ def run_batch_analysis(tickers: list[str], profile_config: dict, checkpoint: boo
             )
     console.print(table)
 
-    # Prompt to save as watchlist if not from one
-    save_wl = typer.prompt("Save ticker list as watchlist?", default="N").strip().upper()
-    if save_wl in ("Y", "YES"):
-        wl_name = typer.prompt("Watchlist name", default=f"batch_{timestamp}").strip()
-        save_watchlist(wl_name, tickers)
-        console.print(f"[green]✓ Watchlist saved:[/green] {wl_name}")
+    # Prompt to save as watchlist if not from one (skip in headless mode)
+    if not headless:
+        save_wl = typer.prompt("Save ticker list as watchlist?", default="N").strip().upper()
+        if save_wl in ("Y", "YES"):
+            wl_name = typer.prompt("Watchlist name", default=f"batch_{timestamp}").strip()
+            save_watchlist(wl_name, tickers)
+            console.print(f"[green]✓ Watchlist saved:[/green] {wl_name}")
 
 
 @app.command()
@@ -1917,6 +1930,11 @@ def analyze(
         None,
         "--tickers",
         help="Comma-separated tickers for batch analysis (e.g. AAPL,MSFT,GOOGL).",
+    ),
+    config: str | None = typer.Option(
+        None,
+        "--config",
+        help="Path to a JSON config file for headless batch mode (GitHub Actions).",
     ),
     output_dir: str | None = typer.Option(
         None,
@@ -1956,6 +1974,41 @@ def analyze(
         holdings_worksheet=holdings_worksheet,
         sync_holdings=sync_holdings,
     )
+
+    # Headless batch mode via JSON config file (--config)
+    if config:
+        import json as _json
+        config_path = Path(config)
+        if not config_path.exists():
+            console.print(f"[red]Config file not found: {config}[/red]")
+            raise typer.Exit(1)
+        try:
+            cfg = _json.loads(config_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            console.print(f"[red]Failed to parse config file: {e}[/red]")
+            raise typer.Exit(1)
+
+        ticker_list = cfg.get("tickers", [])
+        if not ticker_list:
+            console.print("[red]Config file must contain a 'tickers' list.[/red]")
+            raise typer.Exit(1)
+
+        # Merge config file settings with defaults
+        profile_config = DEFAULT_CONFIG.copy()
+        profile_config.update({
+            k: v for k, v in cfg.get("config", {}).items() if v is not None
+        })
+
+        run_batch_analysis(
+            ticker_list,
+            profile_config,
+            checkpoint=cfg.get("checkpoint", checkpoint),
+            output_dir=Path(cfg["output_dir"]) if cfg.get("output_dir") else (Path(output_dir) if output_dir else None),
+            holdings=holdings,
+            workers=cfg.get("workers", workers),
+            headless=True,
+        )
+        return
 
     # Direct batch mode via CLI args
     if profile or watchlist or tickers:
@@ -1997,6 +2050,7 @@ def analyze(
             watchlist_name=watchlist,
             holdings=holdings,
             workers=workers,
+            headless=True,
         )
         return
 
