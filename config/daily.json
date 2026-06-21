@@ -15,7 +15,7 @@
   ],
   "config": {
     "analysts": ["market", "social", "news", "fundamentals", "governance", "industry"],
-    "research_depth": "deep",
+    "research_depth": 3,
     "llm_provider": "sensenova",
     "backend_url": "https://token.sensenova.cn/v1",
     "shallow_thinker": "sensenova-6.7-flash-lite",
