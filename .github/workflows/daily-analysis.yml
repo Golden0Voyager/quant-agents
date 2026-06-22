@@ -96,6 +96,38 @@ jobs:
           path: reports/
           retention-days: 30
 
+      - name: Create GitHub Release with reports
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          DATE=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
+          TAG="daily-report-$DATE"
+          LATEST=$(ls -td reports/*/ 2>/dev/null | head -1)
+          
+          if [ -z "$LATEST" ]; then
+            echo "No reports found, skipping release"
+            exit 0
+          fi
+          
+          # Create a zip of all reports
+          REPORT ZIP="reports-$DATE.zip"
+          cd "$LATEST"
+          zip -r "../$REPORT ZIP" . -x "*.pyc" "__pycache__/*"
+          cd ..
+          
+          # Create or update release
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" \
+            --title "每日分析报告 $DATE" \
+            --notes "TradingAgents 自动分析报告 - $DATE" \
+            "$REPORT ZIP"
+          
+          # Save release URL for Feishu notification
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/$TAG"
+          echo "RELEASE_URL=$RELEASE_URL" >> /tmp/env_vars
+          echo "Release URL: $RELEASE_URL"
+
       - name: Generate summary and extract decisions
         if: success()
         run: |
@@ -153,6 +185,8 @@ jobs:
           STATUS="${{ job.status }}"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           DATE=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
+          RELEASE_TAG="daily-report-$DATE"
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/$RELEASE_TAG"
           
           if [ "$STATUS" = "success" ]; then
             COLOR="green"
@@ -165,7 +199,6 @@ jobs:
           # Read summary
           SUMMARY=""
           if [ -f /tmp/feishu_summary.md ]; then
-            # Feishu markdown has a 30KB limit, truncate if needed
             SUMMARY=$(head -c 25000 /tmp/feishu_summary.md)
           elif [ -f /tmp/batch_summary.md ]; then
             SUMMARY=$(head -c 25000 /tmp/batch_summary.md)
@@ -174,7 +207,7 @@ jobs:
           # Escape JSON special characters in summary
           SUMMARY_ESCAPED=$(echo "$SUMMARY" | jq -Rs . | sed 's/^"//;s/"$//')
 
-          # Build Feishu card message
+          # Build Feishu card message with download button
           cat > /tmp/feishu_payload.json <<ENDJSON
           {
             "msg_type": "interactive",
@@ -205,10 +238,19 @@ jobs:
                       "tag": "button",
                       "text": {
                         "tag": "plain_text",
-                        "content": "查看完整报告"
+                        "content": "📥 下载完整报告"
+                      },
+                      "url": "$RELEASE_URL",
+                      "type": "primary"
+                    },
+                    {
+                      "tag": "button",
+                      "text": {
+                        "tag": "plain_text",
+                        "content": "📊 查看 Actions"
                       },
                       "url": "$RUN_URL",
-                      "type": "primary"
+                      "type": "default"
                     }
                   ]
                 }
