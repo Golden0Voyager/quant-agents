@@ -19,10 +19,12 @@ def create_research_manager(llm):
     def research_manager_node(state) -> dict:
         instrument_context = get_instrument_context_from_state(state)
         history = state["investment_debate_state"].get("history", "")
+        analysis_date = state.get("trade_date", "unknown")
 
         investment_debate_state = state["investment_debate_state"]
 
         prompt = f"""As the Research Manager and debate facilitator, your role is to critically evaluate this round of debate and deliver a clear, actionable investment plan for the trader.
+⚠️ Temporal integrity: The current analysis date is {analysis_date}. All data points, events, and financial figures you cite MUST have occurred on or before this date. Do not reference future events, future financial results, or future announcements.
 
 {instrument_context}
 

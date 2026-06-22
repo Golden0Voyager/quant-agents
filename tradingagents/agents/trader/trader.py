@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import re
 
 from langchain_core.messages import AIMessage
 
@@ -21,7 +22,36 @@ from tradingagents.dataflows.market_data_validator import build_verified_market_
 logger = logging.getLogger(__name__)
 
 
-def _build_verified_snapshot_block(ticker: str, trade_date: str) -> str:
+def _extract_market_analyst_price(market_report: str) -> str | None:
+    """Extract the latest price mentioned in the market analyst's report.
+
+    Looks for patterns like ``现价: 160.51``, ``Latest Close: 91.60``,
+    or ``收盘价.*?(\d+\.\d+)`` in Chinese/English report text.
+    Returns a formatted warning block if a price is found, or None.
+    """
+    if not market_report:
+        return None
+    patterns = [
+        r"现价[：:]\s*(\d+\.?\d*)",
+        r"收盘价[：:]\s*(\d+\.?\d*)",
+        r"最新价[：:]\s*(\d+\.?\d*)",
+        r"价格[：:]\s*(\d+\.?\d*)",
+        r"[Cc]lose[：:]\s*(\d+\.?\d*)",
+        r"[Pp]rice[：:]\s*(\d+\.?\d*)",
+        r"当前.*?(\d+\.?\d*)",
+    ]
+    for pat in patterns:
+        m = re.search(pat, market_report)
+        if m:
+            return m.group(1)
+    # Try table row like | Close | 91.60 |
+    m = re.search(r"\|\s*Close\s*\|\s*(\d+\.\d+)\s*\|", market_report)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _build_verified_snapshot_block(ticker: str, trade_date: str, market_report: str = "") -> str:
     """Render the verified market-data snapshot for the Trader prompt.
 
     Tries to load the deterministic OHLCV snapshot used by the Market Analyst
@@ -38,13 +68,26 @@ def _build_verified_snapshot_block(ticker: str, trade_date: str) -> str:
             "Verified market snapshot unavailable for %s on %s: %s",
             ticker, trade_date, exc,
         )
-        return (
-            "Verified market data is unavailable for this ticker on the "
-            f"requested date ({trade_date}). No current price, indicator, or "
-            "OHLCV row can be cited. You MUST set entry_price and stop_loss "
-            "to null in your proposal — do not estimate or recall a price "
-            "from prior knowledge or training data."
+        fallback_price = _extract_market_analyst_price(market_report)
+        fallback_block = (
+            f"Verified market data is unavailable for this ticker on the "
+            f"requested date ({trade_date}). No OHLCV row from a verified vendor "
+            f"can be cited. You MUST set entry_price and stop_loss to null in "
+            f"your proposal — do not estimate or recall a price from prior "
+            f"knowledge or training data."
         )
+        if fallback_price:
+            fallback_block += (
+                f"\n\n"
+                f"NOTE: The Market Analyst's report mentions a price of "
+                f"{fallback_price} for {ticker}. This is UNVERIFIED (the "
+                f"snapshot vendor returned no data), but you may use it as a "
+                f"rough reference if the Research Plan explicitly names the "
+                f"same level. If you use it, you MUST still leave entry_price "
+                f"and stop_loss as null — do not promote an unverified number "
+                f"into the structured output."
+            )
+        return fallback_block
 
 
 def create_trader(llm):
@@ -72,7 +115,8 @@ def create_trader(llm):
             if trader_prompt:
                 holdings_line = f"\n{trader_prompt}\n"
 
-        snapshot_block = _build_verified_snapshot_block(ticker, trade_date)
+        market_report = state.get("market_report", "")
+        snapshot_block = _build_verified_snapshot_block(ticker, trade_date, market_report=market_report)
 
         messages = [
             {

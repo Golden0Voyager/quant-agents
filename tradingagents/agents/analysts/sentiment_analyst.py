@@ -34,6 +34,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
     get_news,
+    sanitize_company_name_in_report,
 )
 from tradingagents.agents.utils.structured import (
     bind_structured,
@@ -59,6 +60,7 @@ def create_sentiment_analyst(llm):
 
     def sentiment_analyst_node(state):
         ticker = state["company_of_interest"]
+        company_name = state.get("company_name", "")
         end_date = state["trade_date"]
         start_date = _seven_days_back(end_date)
         instrument_context = get_instrument_context_from_state(state)
@@ -72,6 +74,7 @@ def create_sentiment_analyst(llm):
 
         system_message = _build_system_message(
             ticker=ticker,
+            company_name=company_name,
             start_date=start_date,
             end_date=end_date,
             news_block=news_block,
@@ -110,6 +113,10 @@ def create_sentiment_analyst(llm):
             "Sentiment Analyst",
         )
 
+        report_text = sanitize_company_name_in_report(
+            report_text, ticker, company_name
+        )
+
         return {
             "messages": [AIMessage(content=report_text)],
             "sentiment_report": report_text,
@@ -121,6 +128,7 @@ def create_sentiment_analyst(llm):
 def _build_system_message(
     *,
     ticker: str,
+    company_name: str = "",
     start_date: str,
     end_date: str,
     news_block: str,
@@ -128,7 +136,11 @@ def _build_system_message(
     reddit_block: str,
 ) -> str:
     """Assemble the sentiment-analyst system message with structured data blocks."""
-    return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on three complementary data sources that have already been collected for you.
+    ticker_guard = (
+        f"TICKER VERIFICATION — The assigned company is {company_name} ({ticker}). "
+        f"DO NOT change the company, ticker, or industry focus.\n\n"
+    ) if company_name else ""
+    return ticker_guard + f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on three complementary data sources that have already been collected for you.
 
 ## Data sources (pre-fetched, in this prompt)
 

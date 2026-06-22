@@ -379,11 +379,12 @@ class ResolveTickerChineseIntegrationTests(unittest.TestCase):
     def tearDown(self):
         _reset_cache()
 
+    @patch("tradingagents.ticker_resolver._fetch_company_name_from_akshare", return_value=None)
     @patch("tradingagents.ticker_resolver._load_name_cache", return_value={"歌尔股份": "002241"})
     @patch("tradingagents.ticker_resolver._fetch_company_name_from_db", return_value=None)
     @patch("tradingagents.ticker_resolver._fetch_company_name")
     def test_chinese_name_falls_back_to_yfinance(
-        self, mock_fetch, mock_db, mock_cache
+        self, mock_fetch, mock_db, mock_cache, mock_akshare
     ):
         mock_fetch.return_value = "Goertek Inc."
         result = resolve_ticker("歌尔股份")
@@ -399,11 +400,12 @@ class ResolveTickerChineseIntegrationTests(unittest.TestCase):
         result = resolve_ticker("歌尔股份")
         self.assertEqual(result["company_name"], "歌尔股份")
 
+    @patch("tradingagents.ticker_resolver._fetch_company_name_from_akshare", return_value=None)
     @patch("tradingagents.ticker_resolver._load_name_cache", return_value={"宝钢股份": "600019"})
     @patch("tradingagents.ticker_resolver._fetch_company_name_from_db", return_value=None)
     @patch("tradingagents.ticker_resolver._fetch_company_name", return_value=None)
     def test_chinese_name_no_name_found(
-        self, mock_fetch, mock_db, mock_cache
+        self, mock_fetch, mock_db, mock_cache, mock_akshare
     ):
         result = resolve_ticker("宝钢股份")
         self.assertEqual(result["ticker"], "600019.SS")
