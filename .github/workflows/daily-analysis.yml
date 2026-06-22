@@ -265,12 +265,11 @@ jobs:
             -d @/tmp/feishu_payload.json \
             "${{ secrets.FEISHU_WEBHOOK_URL }}" || echo "Failed to send Feishu card"
 
-          # Step 2: Upload and send complete report as file attachment via Open API
+          # Step 2: Upload and send each ticker's report as file attachment via Open API
           if [ "$STATUS" = "success" ]; then
             LATEST=$(ls -td reports/*/ 2>/dev/null | head -1)
-            REPORT_FILE="$LATEST/complete_report.md"
             
-            if [ -f "$REPORT_FILE" ]; then
+            if [ -n "$LATEST" ]; then
               # Get tenant_access_token
               TOKEN=$(curl -s -X POST "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal" \
                 -H "Content-Type: application/json" \
@@ -278,26 +277,39 @@ jobs:
                 | python3 -c "import json,sys; print(json.load(sys.stdin).get('tenant_access_token',''))")
               
               if [ -n "$TOKEN" ]; then
-                # Upload file
-                FILE_KEY=$(curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/files" \
-                  -H "Authorization: Bearer $TOKEN" \
-                  -F "file_type=stream" \
-                  -F "file_name=TradingAgents_${DATE}.md" \
-                  -F "file=@$REPORT_FILE" \
-                  | python3 -c "import json,sys; print(json.load(sys.stdin).get('data',{}).get('file_key',''))")
-                
-                # Send file to chat
-                if [ -n "$FILE_KEY" ]; then
-                  curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id" \
-                    -H "Authorization: Bearer $TOKEN" \
-                    -H "Content-Type: application/json" \
-                    -d "{
-                      \"receive_id\": \"$CHAT_ID\",
-                      \"msg_type\": \"file\",
-                      \"content\": \"{\\\"file_key\\\": \\\"$FILE_KEY\\\"}\"
-                    }" > /dev/null
-                  echo "Report file sent to Feishu chat"
-                fi
+                # Send each ticker's report as a separate file
+                for ticker_dir in "$LATEST"/*/; do
+                  [ -d "$ticker_dir" ] || continue
+                  ticker_name=$(basename "$ticker_dir")
+                  report_file="$ticker_dir/complete_report.md"
+                  
+                  if [ -f "$report_file" ]; then
+                    # Upload file
+                    FILE_KEY=$(curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/files" \
+                      -H "Authorization: Bearer $TOKEN" \
+                      -F "file_type=stream" \
+                      -F "file_name=${ticker_name}_${DATE}.md" \
+                      -F "file=@$report_file" \
+                      | python3 -c "import json,sys; print(json.load(sys.stdin).get('data',{}).get('file_key',''))")
+                    
+                    # Send file to chat
+                    if [ -n "$FILE_KEY" ]; then
+                      curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id" \
+                        -H "Authorization: Bearer $TOKEN" \
+                        -H "Content-Type: application/json" \
+                        -d "{
+                          \"receive_id\": \"$CHAT_ID\",
+                          \"msg_type\": \"file\",
+                          \"content\": \"{\\\"file_key\\\": \\\"$FILE_KEY\\\"}\"
+                        }" > /dev/null
+                      echo "Sent: ${ticker_name}_${DATE}.md"
+                    fi
+                    
+                    # Rate limit: Feishu allows ~5 req/s
+                    sleep 0.3
+                  fi
+                done
+                echo "All ticker reports sent to Feishu chat"
               fi
             fi
           fi
