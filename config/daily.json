@@ -19,7 +19,7 @@
     "llm_provider": "sensenova",
     "backend_url": "https://token.sensenova.cn/v1",
     "shallow_thinker": "sensenova-6.7-flash-lite",
-    "deep_thinker": "sensenova-6.7-flash-lite",
+    "deep_thinker": "deepseek-v4-flash",
     "output_language": "Chinese",
     "checkpoint_enabled": true,
     "max_debate_rounds": 1,
