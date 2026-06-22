@@ -96,17 +96,52 @@ jobs:
           path: reports/
           retention-days: 30
 
-      - name: Generate summary
+      - name: Generate summary and extract decisions
         if: success()
         run: |
-          # Find the latest report directory and print summary
+          # Find the latest report directory
           LATEST=$(ls -td reports/*/ 2>/dev/null | head -1)
-          if [ -n "$LATEST" ] && [ -f "$LATEST/batch_summary.md" ]; then
-            echo "## Daily Analysis Summary" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            cat "$LATEST/batch_summary.md" >> $GITHUB_STEP_SUMMARY
-            # Save summary for Feishu notification
-            cp "$LATEST/batch_summary.md" /tmp/batch_summary.md
+          
+          if [ -n "$LATEST" ]; then
+            # Generate GitHub Step Summary
+            if [ -f "$LATEST/batch_summary.md" ]; then
+              echo "## Daily Analysis Summary" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              cat "$LATEST/batch_summary.md" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            # Extract each ticker's final decision into a summary file
+            echo "# 每日分析结论 - $(TZ='Asia/Shanghai' date +%Y-%m-%d)" > /tmp/feishu_summary.md
+            echo "" >> /tmp/feishu_summary.md
+            
+            for ticker_dir in "$LATEST"/*/; do
+              ticker_name=$(basename "$ticker_dir")
+              decision_file="$ticker_dir/reports/final_trade_decision.md"
+              
+              if [ -f "$decision_file" ]; then
+                # Extract key fields
+                RATING=$(grep -m1 "Rating" "$decision_file" | sed 's/.*\*\*Rating\*\*: *//' | tr -d '*')
+                ENTRY=$(grep -m1 "Entry" "$decision_file" | grep -v "Entry Price" | sed 's/.*\*\*Entry\*\*: *//' | tr -d '*')
+                STOP=$(grep -m1 "Stop" "$decision_file" | grep -v "Stop Loss" | sed 's/.*\*\*Stop\*\*: *//' | tr -d '*')
+                TARGET=$(grep -m1 "Price Target" "$decision_file" | sed 's/.*\*\*Price Target\*\*: *//' | tr -d '*')
+                SIZE=$(grep -m1 "Size" "$decision_file" | sed 's/.*\*\*Size\*\*: *//' | tr -d '*')
+                SUMMARY_LINE=$(grep -m1 "Executive Summary" "$decision_file" | sed 's/.*\*\*Executive Summary\*\*: *//' | tr -d '*')
+                
+                # Add to summary
+                echo "**$ticker_name**" >> /tmp/feishu_summary.md
+                echo "- 评级: ${RATING:-—}" >> /tmp/feishu_summary.md
+                echo "- 入场: ${ENTRY:-—}" >> /tmp/feishu_summary.md
+                echo "- 止损: ${STOP:-—}" >> /tmp/feishu_summary.md
+                echo "- 目标: ${TARGET:-—}" >> /tmp/feishu_summary.md
+                echo "- 仓位: ${SIZE:-—}" >> /tmp/feishu_summary.md
+                if [ -n "$SUMMARY_LINE" ]; then
+                  echo "- 理由: ${SUMMARY_LINE:0:100}..." >> /tmp/feishu_summary.md
+                fi
+                echo "" >> /tmp/feishu_summary.md
+              fi
+            done
+            
+            echo "Summary saved to /tmp/feishu_summary.md"
           else
             echo "## Daily Analysis Complete" >> $GITHUB_STEP_SUMMARY
             echo "Reports uploaded as artifacts." >> $GITHUB_STEP_SUMMARY
@@ -127,14 +162,20 @@ jobs:
             TITLE="❌ 每日分析失败 - $DATE"
           fi
 
-          # Read summary if available
+          # Read summary
           SUMMARY=""
-          if [ -f /tmp/batch_summary.md ]; then
-            SUMMARY=$(head -20 /tmp/batch_summary.md)
+          if [ -f /tmp/feishu_summary.md ]; then
+            # Feishu markdown has a 30KB limit, truncate if needed
+            SUMMARY=$(head -c 25000 /tmp/feishu_summary.md)
+          elif [ -f /tmp/batch_summary.md ]; then
+            SUMMARY=$(head -c 25000 /tmp/batch_summary.md)
           fi
 
+          # Escape JSON special characters in summary
+          SUMMARY_ESCAPED=$(echo "$SUMMARY" | jq -Rs . | sed 's/^"//;s/"$//')
+
           # Build Feishu card message
-          PAYLOAD=$(cat <<EOF
+          cat > /tmp/feishu_payload.json <<ENDJSON
           {
             "msg_type": "interactive",
             "card": {
@@ -148,17 +189,15 @@ jobs:
               "elements": [
                 {
                   "tag": "markdown",
-                  "content": "**状态**: $STATUS\n**运行**: [查看详情]($RUN_URL)\n**报告**: 作为 Artifact 上传，保留 30 天"
-                }
-          $([ -n "$SUMMARY" ] && cat <<SUMMARY_BLOCK
-                ,
+                  "content": "**状态**: $STATUS | **运行**: [查看详情]($RUN_URL)"
+                },
+                {
+                  "tag": "hr"
+                },
                 {
                   "tag": "markdown",
-                  "content": "**摘要**:\n\`\`\`\n$SUMMARY\n\`\`\`"
-                }
-          SUMMARY_BLOCK
-          )
-                ,
+                  "content": "$SUMMARY_ESCAPED"
+                },
                 {
                   "tag": "action",
                   "actions": [
@@ -166,7 +205,7 @@ jobs:
                       "tag": "button",
                       "text": {
                         "tag": "plain_text",
-                        "content": "查看报告"
+                        "content": "查看完整报告"
                       },
                       "url": "$RUN_URL",
                       "type": "primary"
@@ -176,10 +215,9 @@ jobs:
               ]
             }
           }
-          EOF
-          )
+          ENDJSON
 
           curl -s -X POST \
             -H "Content-Type: application/json" \
-            -d "$PAYLOAD" \
+            -d @/tmp/feishu_payload.json \
             "${{ secrets.FEISHU_WEBHOOK_URL }}" || echo "Failed to send Feishu notification"
