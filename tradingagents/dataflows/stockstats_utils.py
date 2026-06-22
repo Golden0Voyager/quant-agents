@@ -115,13 +115,101 @@ def _assert_ohlcv_not_stale(
         )
 
 
+def _load_ohlcv_from_smartmoney_db(
+    symbol: str,
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame | None:
+    """Fetch OHLCV from local quant_core.db (zero network)."""
+    from tradingagents.dataflows.akshare_common import is_a_share_ticker
+    from tradingagents.dataflows.smartmoney_vendor import (
+        _df_from_sql,
+        _to_smartmoney_symbol,
+    )
+
+    if not is_a_share_ticker(symbol):
+        return None
+
+    code = _to_smartmoney_symbol(symbol)
+    df = _df_from_sql(
+        """SELECT trade_date AS Date, open AS Open, high AS High,
+                  low AS Low, close AS Close, volume AS Volume
+           FROM daily_bars
+           WHERE ts_code = ? AND trade_date BETWEEN ? AND ?
+           ORDER BY trade_date""",
+        (code, start_date, end_date),
+    )
+    return df  # _df_from_sql returns None on any error
+
+
+def _load_ohlcv_from_akshare(
+    symbol: str,
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame | None:
+    """Fetch OHLCV data via akshare (Eastmoney network API) for A-share.
+
+    Returns a DataFrame with Date/Open/High/Low/Close/Volume columns,
+    or None on failure. Uses lazy imports to avoid circular dependencies.
+    """
+    try:
+        import akshare as ak
+        from tradingagents.dataflows.akshare_common import (
+            is_a_share_ticker,
+            no_proxy,
+            to_akshare_symbol,
+        )
+    except ImportError:
+        return None
+
+    if not is_a_share_ticker(symbol):
+        return None
+
+    try:
+        code = to_akshare_symbol(symbol, style="bare")
+        ak_start = start_date.replace("-", "")
+        ak_end = end_date.replace("-", "")
+
+        with no_proxy():
+            df = ak.stock_zh_a_hist(
+                symbol=code,
+                period="daily",
+                start_date=ak_start,
+                end_date=ak_end,
+                adjust="qfq",
+            )
+
+        if df is None or df.empty:
+            return None
+
+        col_map = {
+            "日期": "Date",
+            "开盘": "Open",
+            "收盘": "Close",
+            "最高": "High",
+            "最低": "Low",
+            "成交量": "Volume",
+        }
+        df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
+        return df
+    except Exception:
+        logger.warning("akshare network fallback failed for %s", symbol, exc_info=True)
+        return None
+
+
 def load_ohlcv(symbol: str, curr_date: str, lookback_years: int = 5) -> pd.DataFrame:
     """Fetch OHLCV data with caching, filtered to prevent look-ahead bias.
 
     Downloads ``lookback_years`` of data up to today and caches per symbol.
     On subsequent calls the cache is reused. Rows after curr_date are
     filtered out so backtests never see future prices.
+
+    For A-share tickers (``.SS`` / ``.SZ`` / ``.BJ``) with ``is_a_share_ticker``,
+    falls back to akshare (Eastmoney) when yfinance fails — yfinance rate-limits
+    aggressively on batch runs and its A-share coverage is unreliable.
     """
+    from tradingagents.dataflows.akshare_common import is_a_share_ticker
+
     canonical = normalize_symbol(symbol)
     safe_symbol = safe_ticker_component(canonical)
 
@@ -153,17 +241,35 @@ def load_ohlcv(symbol: str, curr_date: str, lookback_years: int = 5) -> pd.DataF
             data = cached
 
     if data is None:
-        downloaded = yf_retry(lambda: yf.download(
-            canonical,
-            start=start_str,
-            end=end_str,
-            multi_level_index=False,
-            progress=False,
-            auto_adjust=True,
-        ))
-        downloaded = _ensure_date_column(downloaded.reset_index())
-        # Only cache real data — never persist an empty frame.
-        if downloaded.empty or "Close" not in downloaded.columns:
+        downloaded = None
+        try:
+            downloaded = yf_retry(lambda: yf.download(
+                canonical,
+                start=start_str,
+                end=end_str,
+                multi_level_index=False,
+                progress=False,
+                auto_adjust=True,
+            ))
+            downloaded = _ensure_date_column(downloaded.reset_index())
+            if downloaded.empty or "Close" not in downloaded.columns:
+                downloaded = None
+        except Exception:
+            logger.warning(
+                "yfinance failed for %s, trying akshare fallback",
+                symbol,
+                exc_info=True,
+            )
+            downloaded = None
+
+        # For A-share: local DB → akshare network, in that order
+        if downloaded is None and is_a_share_ticker(canonical):
+            downloaded = _load_ohlcv_from_smartmoney_db(canonical, start_str, end_str)
+            if downloaded is None:
+                logger.info("Falling back to akshare for A-share ticker %s", symbol)
+                downloaded = _load_ohlcv_from_akshare(canonical, start_str, end_str)
+
+        if downloaded is None or downloaded.empty or "Close" not in downloaded.columns:
             raise NoMarketDataError(
                 symbol, canonical, "Yahoo Finance returned no rows"
             )

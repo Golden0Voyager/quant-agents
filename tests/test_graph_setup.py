@@ -87,9 +87,14 @@ class SetupGraphTests(unittest.TestCase):
 
         mock_stategraph.assert_called_once()
         mock_market.assert_called_once_with(self.quick)
-        mock_bull.assert_called_once_with(self.quick)
-        mock_trader.assert_called_once_with(self.quick)
+        mock_bull.assert_called_once_with(self.deep)
+        mock_bear.assert_called_once_with(self.deep)
+        mock_trader.assert_called_once_with(self.deep)
+        mock_agg.assert_called_once_with(self.deep)
+        mock_neutral.assert_called_once_with(self.deep)
+        mock_cons.assert_called_once_with(self.deep)
         mock_pm.assert_called_once_with(self.deep)
+        mock_rm.assert_called_once_with(self.deep)
 
         add_node_calls = [
             c[0][0] for c in workflow_instance.add_node.call_args_list

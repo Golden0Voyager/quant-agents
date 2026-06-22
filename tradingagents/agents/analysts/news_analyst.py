@@ -7,12 +7,15 @@ from tradingagents.agents.utils.agent_utils import (
     get_macro_indicators,
     get_news,
     get_research_reports,
+    sanitize_company_name_in_report,
 )
 
 
 def create_news_analyst(llm):
     def news_analyst_node(state):
         current_date = state["trade_date"]
+        ticker = state["company_of_interest"]
+        company_name = state.get("company_name", "")
         asset_type = state.get("asset_type", "stock")
         asset_label = "company" if asset_type == "stock" else "asset"
         instrument_context = get_instrument_context_from_state(state)
@@ -24,7 +27,13 @@ def create_news_analyst(llm):
             get_research_reports,
         ]
 
-        system_message = (
+        ticker_guard = (
+            f"TICKER VERIFICATION — You are analyzing {company_name} ({ticker}). "
+            f"DO NOT change the company, ticker, or industry focus. ALL news "
+            f"searches MUST be for {ticker} only.\n\n"
+        ) if company_name else ""
+
+        system_message = ticker_guard + (
             f"You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(query, start_date, end_date) for {asset_label}-specific or targeted news searches, get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news, get_macro_indicators(indicator) for quantitative macro data (pmi, cpi, m2, social_finance), and get_research_reports(ticker) for broker analyst ratings, target prices, and institutional opinions. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
             + get_language_instruction()
@@ -55,10 +64,11 @@ def create_news_analyst(llm):
         chain = prompt | llm.bind_tools(tools)
         result = chain.invoke(state["messages"])
 
-        report = ""
+        report = result.content or ""
 
-        if len(result.tool_calls) == 0:
-            report = result.content
+        report = sanitize_company_name_in_report(
+            report, ticker, company_name
+        )
 
         return {
             "messages": [result],

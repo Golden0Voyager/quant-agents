@@ -150,6 +150,41 @@ def _resolve_chinese_name(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# A-share name lookup (akshare, authoritative for Chinese equities)
+# ---------------------------------------------------------------------------
+
+
+_A_SHARE_NAME_BY_CODE: dict[str, str] | None = None
+
+
+def _fetch_company_name_from_akshare(ticker: str) -> str | None:
+    """Look up company name by code using akshare (East Money source).
+
+    Only applies to A-share tickers (suffix .SS, .SZ, .BJ). Returns None
+    for non-A-share tickers or on any error. The result is cached so the
+    akshare table is fetched at most once per process.
+    """
+    suffix = ticker.split(".")[-1].upper() if "." in ticker else ""
+    if suffix not in ("SS", "SZ", "BJ"):
+        return None
+    bare = ticker.split(".")[0]
+
+    global _A_SHARE_NAME_BY_CODE
+    if _A_SHARE_NAME_BY_CODE is None:
+        try:
+            import akshare as ak
+            df = ak.stock_info_a_code_name()
+            _A_SHARE_NAME_BY_CODE = {
+                str(row["code"]).strip(): str(row["name"]).strip()
+                for _, row in df.iterrows()
+            }
+        except Exception:
+            _A_SHARE_NAME_BY_CODE = {}  # cache empty so we don't retry
+
+    return _A_SHARE_NAME_BY_CODE.get(bare)
+
+
+# ---------------------------------------------------------------------------
 # yfinance validation / company name fetch
 # ---------------------------------------------------------------------------
 
@@ -213,25 +248,30 @@ def resolve_ticker(user_input: str) -> dict[str, str]:
         raw,
         re.IGNORECASE,
     )
+    def _resolve_name(ticker: str) -> str:
+        """Resolve company name: akshare > local DB > yfinance."""
+        return (
+            _fetch_company_name_from_akshare(ticker)
+            or _fetch_company_name_from_db(ticker)
+            or _fetch_company_name(ticker)
+            or ""
+        )
+
     if suffix_match:
         ticker = suffix_match.group(1).upper()
-        company_name = _fetch_company_name_from_db(ticker) or _fetch_company_name(ticker) or ""
-        return {"ticker": ticker, "company_name": company_name}
+        return {"ticker": ticker, "company_name": _resolve_name(ticker)}
 
     # 2. Pure numeric -> A-share suffix auto-append
     if _is_numeric_code(raw):
         ticker = _append_a_share_suffix(raw).upper()
-        company_name = _fetch_company_name_from_db(ticker) or _fetch_company_name(ticker) or ""
-        return {"ticker": ticker, "company_name": company_name}
+        return {"ticker": ticker, "company_name": _resolve_name(ticker)}
 
     # 3. Contains Chinese characters -> resolve via akshare
     if re.search(r"[一-鿿]", raw):
         numeric_code = _resolve_chinese_name(raw)
         ticker = _append_a_share_suffix(numeric_code).upper()
-        company_name = _fetch_company_name_from_db(ticker) or _fetch_company_name(ticker) or ""
-        return {"ticker": ticker, "company_name": company_name}
+        return {"ticker": ticker, "company_name": _resolve_name(ticker)}
 
     # 4. International ticker (e.g. AAPL, TSLA, BNS.TO)
     ticker = raw.upper()
-    company_name = _fetch_company_name_from_db(ticker) or _fetch_company_name(ticker) or ""
-    return {"ticker": ticker, "company_name": company_name}
+    return {"ticker": ticker, "company_name": _resolve_name(ticker)}

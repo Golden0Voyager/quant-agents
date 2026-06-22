@@ -8,6 +8,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_sector_fund_flow,
     get_stock_data,
     get_verified_market_snapshot,
+    sanitize_company_name_in_report,
 )
 
 
@@ -15,6 +16,8 @@ def create_market_analyst(llm):
 
     def market_analyst_node(state):
         current_date = state["trade_date"]
+        ticker = state["company_of_interest"]
+        company_name = state.get("company_name", "")
         instrument_context = get_instrument_context_from_state(state)
 
         tools = [
@@ -25,7 +28,13 @@ def create_market_analyst(llm):
             get_verified_market_snapshot,
         ]
 
-        system_message = (
+        ticker_guard = (
+            f"TICKER VERIFICATION — You are analyzing {company_name} ({ticker}). "
+            f"DO NOT change the company, ticker, or industry focus. ALL data calls "
+            f"and analysis MUST be for {ticker} only.\n\n"
+        ) if company_name else ""
+
+        system_message = ticker_guard + (
             """You are a trading assistant tasked with analyzing financial markets. Your role is to select the **most relevant indicators** for a given market condition or trading strategy from the following list. The goal is to choose up to **8 indicators** that provide complementary insights without redundancy. Categories and each category's indicators are:
 
 Moving Averages:
@@ -88,6 +97,10 @@ Volume-Based Indicators:
 
         if len(result.tool_calls) == 0:
             report = result.content
+
+        report = sanitize_company_name_in_report(
+            report, ticker, company_name
+        )
 
         return {
             "messages": [result],

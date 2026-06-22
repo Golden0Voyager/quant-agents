@@ -16,6 +16,7 @@ def create_bear_researcher(llm):
         news_report = state["news_report"]
         fundamentals_report = state["fundamentals_report"]
         instrument_context = get_instrument_context_from_state(state)
+        analysis_date = state.get("trade_date", "unknown")
         asset_type = state.get("asset_type", "stock")
         target_label = "stock" if asset_type == "stock" else "asset"
         fundamentals_label = (
@@ -35,6 +36,9 @@ Key points to focus on:
 - Valuation Risks: Highlight if the stock trades at a premium to industry peers, if earnings estimates have been downgraded, or if macro headwinds threaten the sector.
 - Bull Counterpoints: Critically analyze the bull argument with specific data and sound reasoning, exposing weaknesses or over-optimistic assumptions.
 - Engagement: Present your argument in a conversational style, directly engaging with the bull analyst's points and debating effectively rather than simply listing facts.
+- ⚠️ Anti-repetition: You may build upon your previous arguments or reaffirm your position. Only introduce new evidence if it is actually present in the provided reports — never fabricate data, events, dates, or financial figures. If you have nothing new to add, simply say "I maintain my previous position" and briefly summarize why.
+
+⚠️ Temporal integrity: The current analysis date is {analysis_date}. All data points, events, and financial figures you cite MUST have occurred on or before this date. Do not reference future events, future financial results, or future announcements.
 
 Resources available:
 

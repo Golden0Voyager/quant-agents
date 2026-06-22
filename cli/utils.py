@@ -184,7 +184,7 @@ def select_analysts(
                 ("selected", "fg:green noinherit"),
                 ("highlighted", "noinherit"),
                 ("pointer", "noinherit"),
-                ("disabled", "fg:dark_grey italic"),
+                ("disabled", "fg:gray italic"),
             ]
         ),
     ).ask()
