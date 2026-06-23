@@ -123,7 +123,7 @@ class TestStocktwitsEdgeCases(unittest.TestCase):
             mock_resp.read.return_value = json.dumps(data).encode("utf-8")
             mock_urlopen.return_value = mock_resp
 
-            result = fetch_stocktwits_messages("AAPL", limit=5)
+            result = fetch_stocktwits_messages("AAPL", limit=5, days_back=0)
         self.assertIn("\u2026", result)
 
     def test_no_sentiment_key(self):
@@ -144,7 +144,7 @@ class TestStocktwitsEdgeCases(unittest.TestCase):
             mock_resp.read.return_value = json.dumps(data).encode("utf-8")
             mock_urlopen.return_value = mock_resp
 
-            result = fetch_stocktwits_messages("AAPL", limit=5)
+            result = fetch_stocktwits_messages("AAPL", limit=5, days_back=0)
         self.assertIn("no-label", result)
 
     def test_no_entities_key(self):
@@ -157,7 +157,7 @@ class TestStocktwitsEdgeCases(unittest.TestCase):
             mock_resp.read.return_value = json.dumps(data).encode("utf-8")
             mock_urlopen.return_value = mock_resp
 
-            result = fetch_stocktwits_messages("AAPL", limit=5)
+            result = fetch_stocktwits_messages("AAPL", limit=5, days_back=0)
         self.assertIn("no-label", result)
 
     def test_days_back_zero_includes_all(self):
