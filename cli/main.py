@@ -2397,6 +2397,7 @@ def default(ctx: typer.Context):
         analyze(
             checkpoint=True,
             clear_checkpoints=False,
+            config=None,
             profile=None,
             watchlist=None,
             tickers=None,

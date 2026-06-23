@@ -111,17 +111,15 @@ jobs:
           fi
           
           # Create a zip of all reports
-          REPORT ZIP="reports-$DATE.zip"
-          cd "$LATEST"
-          zip -r "../$REPORT ZIP" . -x "*.pyc" "__pycache__/*"
-          cd ..
+          REPORT_ZIP="reports-$DATE.zip"
+          (cd "$LATEST" && zip -r "$OLDPWD/$REPORT_ZIP" . -x "*.pyc" "__pycache__/*")
           
           # Create or update release
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
           gh release create "$TAG" \
             --title "每日分析报告 $DATE" \
             --notes "TradingAgents 自动分析报告 - $DATE" \
-            "$REPORT ZIP"
+            "$REPORT_ZIP"
           
           # Save release URL for Feishu notification
           RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/$TAG"
