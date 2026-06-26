@@ -14,6 +14,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 from tradingagents.llm_clients import anthropic_client as mod
+from tradingagents.llm_clients.retry_utils import RetryConfig
 
 
 def _capture_kwargs(monkeypatch):
@@ -103,16 +104,17 @@ class AnthropicClientEdgeTests(unittest.TestCase):
         client = NormalizedChatAnthropic(model="claude-sonnet-4-5", api_key="test")
         raw_response = MagicMock()
         raw_response.content = "normalized result"
-        with patch.object(NormalizedChatAnthropic, "invoke", wraps=client.invoke) as wrapped, \
-             patch("langchain_anthropic.ChatAnthropic.invoke", return_value=raw_response), \
-             patch("tradingagents.llm_clients.anthropic_client.normalize_content",
-                   return_value=raw_response) as mock_norm:
+        with (
+            patch.object(NormalizedChatAnthropic, "invoke", wraps=client.invoke),
+            patch("langchain_anthropic.ChatAnthropic.invoke", return_value=raw_response),
+            patch("tradingagents.llm_clients.anthropic_client.normalize_content", return_value=raw_response),
+        ):
             result = client.invoke("hello")
         self.assertEqual(result.content, "normalized result")
 
     def test_get_llm_with_base_url(self):
-        from tradingagents.llm_clients.anthropic_client import AnthropicClient
         import tradingagents.llm_clients.anthropic_client as mod
+        from tradingagents.llm_clients.anthropic_client import AnthropicClient
 
         captured = {}
         with patch.object(mod, "NormalizedChatAnthropic", lambda **kwargs: captured.__setitem__("kwargs", kwargs)):
@@ -121,8 +123,8 @@ class AnthropicClientEdgeTests(unittest.TestCase):
         self.assertEqual(captured["kwargs"]["base_url"], "https://custom.anthropic.com")
 
     def test_get_llm_without_base_url(self):
-        from tradingagents.llm_clients.anthropic_client import AnthropicClient
         import tradingagents.llm_clients.anthropic_client as mod
+        from tradingagents.llm_clients.anthropic_client import AnthropicClient
 
         captured = {}
         with patch.object(mod, "NormalizedChatAnthropic", lambda **kwargs: captured.__setitem__("kwargs", kwargs)):
@@ -137,8 +139,8 @@ class AnthropicClientEdgeTests(unittest.TestCase):
             client.get_llm()
 
     def test_get_llm_effort_skipped_for_haiku(self):
-        from tradingagents.llm_clients.anthropic_client import AnthropicClient
         import tradingagents.llm_clients.anthropic_client as mod
+        from tradingagents.llm_clients.anthropic_client import AnthropicClient
 
         captured = {}
         with patch.object(mod, "NormalizedChatAnthropic", lambda **kwargs: captured.__setitem__("kwargs", kwargs)):
@@ -188,3 +190,33 @@ class TestAnthropicClient(unittest.TestCase):
         from tradingagents.llm_clients.anthropic_client import _supports_effort
 
         self.assertTrue(_supports_effort("CLAUDE-OPUS-4-5"))
+
+
+class AnthropicRetryTests(unittest.TestCase):
+    """Retry/backoff behavior on NormalizedChatAnthropic and AnthropicClient."""
+
+    @patch("tradingagents.llm_clients.retry_utils.time.sleep")
+    def test_invoke_retries_on_rate_limit(self, mock_sleep):
+        from tradingagents.llm_clients.anthropic_client import NormalizedChatAnthropic
+
+        client = NormalizedChatAnthropic(model="claude-sonnet-4-5", api_key="test")
+        client._retry_config = RetryConfig(max_retries=1, base_delay=0.05)
+        anthropic = pytest.importorskip("anthropic")
+        raw_response = MagicMock(content="ok")
+        side_effect = [
+            anthropic.RateLimitError("rate limit", response=MagicMock(status_code=429), body=None),
+            raw_response,
+        ]
+        with patch("langchain_anthropic.ChatAnthropic.invoke", side_effect=side_effect):
+            result = client.invoke("hello")
+        self.assertEqual(result.content, "ok")
+        mock_sleep.assert_called_once_with(0.05)
+
+    @patch("tradingagents.llm_clients.anthropic_client.NormalizedChatAnthropic")
+    def test_get_llm_binds_retry_config(self, mock_cls):
+        from tradingagents.llm_clients.anthropic_client import AnthropicClient
+
+        retry_config = RetryConfig(max_retries=4, base_delay=0.5)
+        client = AnthropicClient("claude-sonnet-4-5", api_key="x", retry_config=retry_config)
+        llm = client.get_llm()
+        self.assertEqual(llm._retry_config, retry_config)
