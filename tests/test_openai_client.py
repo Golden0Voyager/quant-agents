@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import pytest
+from langchain_core.messages import AIMessage
 
 from tradingagents.llm_clients.openai_client import (
     DeepSeekChatOpenAI,
@@ -10,6 +11,7 @@ from tradingagents.llm_clients.openai_client import (
     OpenAIClient,
     _resolve_provider_base_url,
 )
+from tradingagents.llm_clients.retry_utils import RetryConfig
 
 
 @pytest.mark.unit
@@ -34,7 +36,7 @@ class OpenAIClientGetLlmTests(unittest.TestCase):
     @patch("tradingagents.llm_clients.openai_client.NormalizedChatOpenAI")
     def test_creates_chat_openai_with_base_url(self, mock_chat):
         client = OpenAIClient("gpt-4", provider="openai")
-        llm = client.get_llm()
+        client.get_llm()
         mock_chat.assert_called_once()
         args, kwargs = mock_chat.call_args
         self.assertEqual(kwargs["model"], "gpt-4")
@@ -44,35 +46,35 @@ class OpenAIClientGetLlmTests(unittest.TestCase):
     @patch("tradingagents.llm_clients.openai_client.DeepSeekChatOpenAI")
     def test_deepseek_uses_deepseek_chat(self, mock_chat):
         client = OpenAIClient("deepseek-v4-flash", provider="deepseek")
-        llm = client.get_llm()
+        client.get_llm()
         mock_chat.assert_called_once()
 
     @patch.dict(os.environ, {"MINIMAX_API_KEY": "mm-test"}, clear=True)
     @patch("tradingagents.llm_clients.openai_client.MinimaxChatOpenAI")
     def test_minimax_uses_minimax_chat(self, mock_chat):
         client = OpenAIClient("MiniMax-M2.7", provider="minimax")
-        llm = client.get_llm()
+        client.get_llm()
         mock_chat.assert_called_once()
 
     @patch.dict(os.environ, {"SENSENOVA_API_KEY": "ss-test"}, clear=True)
     @patch("tradingagents.llm_clients.openai_client.DeepSeekChatOpenAI")
     def test_sensenova_reasoning_model(self, mock_chat):
         client = OpenAIClient("deepseek-v4-flash", provider="sensenova")
-        llm = client.get_llm()
+        client.get_llm()
         mock_chat.assert_called_once()
 
     @patch.dict(os.environ, {"SENSENOVA_API_KEY": "ss-test"}, clear=True)
     @patch("tradingagents.llm_clients.openai_client.NormalizedChatOpenAI")
     def test_sensenova_non_reasoning_model(self, mock_chat):
         client = OpenAIClient("sensenova-6.7-flash-lite", provider="sensenova")
-        llm = client.get_llm()
+        client.get_llm()
         mock_chat.assert_called_once()
 
     @patch.dict(os.environ, {"KIMI_CODING_API_KEY": "kimi-test"}, clear=True)
     @patch("tradingagents.llm_clients.openai_client.NormalizedChatOpenAI")
     def test_kimi_sets_user_agent(self, mock_chat):
         client = OpenAIClient("kimi-k2.6", provider="kimi")
-        llm = client.get_llm()
+        client.get_llm()
         _, kwargs = mock_chat.call_args
         self.assertEqual(
             kwargs["default_headers"]["user-agent"], "KimiCLI/1.8.0"
@@ -125,11 +127,13 @@ class NormalizedChatOpenAIInvokeTests(unittest.TestCase):
     def test_invoke_normalizes_content(self):
         client = NormalizedChatOpenAI(model="gpt-5.4")
         raw_msg = MagicMock(content="raw")
-        with patch.object(NormalizedChatOpenAI, "invoke", wraps=client.invoke) as wrapped:
-            with patch("langchain_openai.ChatOpenAI.invoke", return_value=raw_msg):
-                with patch("tradingagents.llm_clients.openai_client.normalize_content",
-                           return_value="normalized") as mock_norm:
-                    result = client.invoke("input")
+        with (
+            patch.object(NormalizedChatOpenAI, "invoke", wraps=client.invoke),
+            patch("langchain_openai.ChatOpenAI.invoke", return_value=raw_msg),
+            patch("tradingagents.llm_clients.openai_client.normalize_content",
+                  return_value="normalized"),
+        ):
+            result = client.invoke("input")
         self.assertEqual(result, "normalized")
 
 
@@ -238,6 +242,117 @@ class OpenAIClientGetLLMEdgeCases(unittest.TestCase):
         client = OpenAIClient("", provider="openai")
         with self.assertRaises(ValueError):
             client.get_llm()
+
+
+@pytest.mark.unit
+class OpenAIClientRetryTests(unittest.TestCase):
+    """Retry/backoff behavior on NormalizedChatOpenAI and OpenAIClient."""
+
+    @patch("tradingagents.llm_clients.retry_utils.time.sleep")
+    def test_invoke_retries_on_rate_limit_then_succeeds(self, mock_sleep):
+        client = NormalizedChatOpenAI(model="gpt-test")
+        client._retry_config = RetryConfig(max_retries=2, base_delay=0.05)
+        raw_msg = MagicMock(content="ok")
+
+        side_effect = [
+            pytest.importorskip("openai").RateLimitError(
+                "rate limit",
+                response=MagicMock(status_code=429),
+                body={"error": {"message": "rate limit"}},
+            ),
+            raw_msg,
+        ]
+
+        with patch("langchain_openai.ChatOpenAI.invoke", side_effect=side_effect):
+            result = client.invoke("input")
+
+        self.assertEqual(result.content, "ok")
+        mock_sleep.assert_called_once_with(0.05)
+
+    @patch("tradingagents.llm_clients.retry_utils.time.sleep")
+    def test_invoke_does_not_retry_non_transient_errors(self, mock_sleep):
+        client = NormalizedChatOpenAI(model="gpt-test")
+        client._retry_config = RetryConfig(max_retries=2, base_delay=0.05)
+
+        with (
+            patch("langchain_openai.ChatOpenAI.invoke", side_effect=ValueError("bad")),
+            self.assertRaises(ValueError),
+        ):
+            client.invoke("input")
+
+        mock_sleep.assert_not_called()
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True)
+    @patch("tradingagents.llm_clients.openai_client.NormalizedChatOpenAI")
+    def test_get_llm_binds_retry_config(self, mock_chat):
+        retry_config = RetryConfig(max_retries=5, base_delay=1.0)
+        client = OpenAIClient("gpt-4", provider="openai", retry_config=retry_config)
+        llm = client.get_llm()
+        self.assertEqual(llm._retry_config, retry_config)
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True)
+    @patch("tradingagents.llm_clients.openai_client.NormalizedChatOpenAI")
+    def test_get_llm_binds_retry_config_from_dict(self, mock_chat):
+        client = OpenAIClient(
+            "gpt-4", provider="openai", retry_config={"max_retries": 4, "base_delay": 0.5}
+        )
+        llm = client.get_llm()
+        self.assertEqual(llm._retry_config.max_retries, 4)
+        self.assertEqual(llm._retry_config.base_delay, 0.5)
+
+    @patch("tradingagents.llm_clients.retry_utils.time.sleep")
+    def test_deepseek_inherits_retry(self, mock_sleep):
+        client = DeepSeekChatOpenAI(model="deepseek-v4-flash")
+        client._retry_config = RetryConfig(max_retries=1, base_delay=0.05)
+        raw_msg = MagicMock(content="ok")
+
+        openai = pytest.importorskip("openai")
+        side_effect = [
+            openai.RateLimitError(
+                "rate limit",
+                response=MagicMock(status_code=429),
+                body={"error": {"message": "rate limit"}},
+            ),
+            raw_msg,
+        ]
+
+        with patch("langchain_openai.ChatOpenAI.invoke", side_effect=side_effect):
+            result = client.invoke("input")
+
+        self.assertEqual(result.content, "ok")
+        mock_sleep.assert_called_once_with(0.05)
+
+    @patch("tradingagents.llm_clients.retry_utils.time.sleep")
+    def test_structured_output_path_retries(self, mock_sleep):
+        """with_structured_output binding calls the wrapped invoke, so retries apply."""
+        client = NormalizedChatOpenAI(model="gpt-test")
+        client._retry_config = RetryConfig(max_retries=1, base_delay=0.05)
+
+        openai = pytest.importorskip("openai")
+        raw_msg = AIMessage(content='{"answer": 42}')
+        side_effect = [
+            openai.RateLimitError(
+                "rate limit",
+                response=MagicMock(status_code=429),
+                body={"error": {"message": "rate limit"}},
+            ),
+            raw_msg,
+        ]
+
+        with patch(
+            "tradingagents.llm_clients.openai_client.get_capabilities"
+        ) as mock_caps:
+            caps = MagicMock()
+            caps.preferred_structured_method = "json_mode"
+            caps.supports_tool_choice = True
+            mock_caps.return_value = caps
+
+            with patch("langchain_openai.ChatOpenAI.invoke", side_effect=side_effect):
+                structured = client.with_structured_output(dict)
+                result = structured.invoke("input")
+
+        self.assertEqual(result, {"answer": 42})
+        mock_sleep.assert_called_once_with(0.05)
 
 
 if __name__ == "__main__":

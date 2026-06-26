@@ -7,6 +7,7 @@ from langchain_openai import ChatOpenAI
 from .api_key_env import get_api_key_env
 from .base_client import BaseLLMClient, normalize_content
 from .capabilities import get_capabilities
+from .retry_utils import RetryConfig, with_llm_retry
 from .validators import validate_model
 
 
@@ -29,6 +30,7 @@ class NormalizedChatOpenAI(ChatOpenAI):
     stays small.
     """
 
+    @with_llm_retry
     def invoke(self, input, config=None, **kwargs):
         return normalize_content(super().invoke(input, config, **kwargs))
 
@@ -304,6 +306,10 @@ class OpenAIClient(BaseLLMClient):
             "deepseek-v4-flash", "deepseek-reasoner", "deepseek-r1",
             "mimo-v2.5", "mimo-v2.5-pro",
         }
+        retry_config = self.kwargs.get("retry_config")
+        if retry_config is not None and isinstance(retry_config, dict):
+            retry_config = RetryConfig(**retry_config)
+
         if self.provider == "deepseek":
             chat_cls = DeepSeekChatOpenAI
         elif self.provider in ("minimax", "minimax-cn"):
@@ -314,7 +320,10 @@ class OpenAIClient(BaseLLMClient):
             chat_cls = DeepSeekChatOpenAI
         else:
             chat_cls = NormalizedChatOpenAI
-        return chat_cls(**llm_kwargs)
+        llm = chat_cls(**llm_kwargs)
+        if retry_config is not None:
+            setattr(llm, "_retry_config", retry_config)
+        return llm
 
     def validate_model(self) -> bool:
         """Validate model for the provider."""
