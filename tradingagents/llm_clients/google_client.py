@@ -3,6 +3,7 @@ from typing import Any
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from .base_client import BaseLLMClient, normalize_content
+from .retry_utils import RetryConfig, with_llm_retry
 from .validators import validate_model
 
 
@@ -13,6 +14,7 @@ class NormalizedChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
     This normalizes to string for consistent downstream handling.
     """
 
+    @with_llm_retry
     def invoke(self, input, config=None, **kwargs):
         return normalize_content(super().invoke(input, config, **kwargs))
 
@@ -57,7 +59,14 @@ class GoogleClient(BaseLLMClient):
                 # Gemini 2.5: map to thinking_budget
                 llm_kwargs["thinking_budget"] = -1 if thinking_level == "high" else 0
 
-        return NormalizedChatGoogleGenerativeAI(**llm_kwargs)
+        retry_config = self.kwargs.get("retry_config")
+        if retry_config is not None and isinstance(retry_config, dict):
+            retry_config = RetryConfig(**retry_config)
+
+        llm = NormalizedChatGoogleGenerativeAI(**llm_kwargs)
+        if retry_config is not None:
+            setattr(llm, "_retry_config", retry_config)
+        return llm
 
     def validate_model(self) -> bool:
         """Validate model for Google."""
