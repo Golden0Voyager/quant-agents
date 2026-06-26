@@ -421,3 +421,13 @@ class TestSentimentAnalystAgent:
         llm.with_structured_output.return_value = structured
         llm.invoke.return_value = MagicMock(content=plain)
         assert create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"] == plain
+
+    def test_falls_back_to_freetext_when_structured_call_hits_rate_limit(self):
+        """Regression: transient provider errors from the structured path still fall back."""
+        plain = "Fallback free-text sentiment after rate limit."
+        structured = MagicMock()
+        structured.invoke.side_effect = RuntimeError("rate limit exceeded on dimension: tpm")
+        llm = MagicMock()
+        llm.with_structured_output.return_value = structured
+        llm.invoke.return_value = MagicMock(content=plain)
+        assert create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"] == plain
