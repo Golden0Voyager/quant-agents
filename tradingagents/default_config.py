@@ -18,6 +18,9 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_CHECKPOINT_ENABLED":   "checkpoint_enabled",
     "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
     "TRADINGAGENTS_TEMPERATURE":          "temperature",
+    "TRADINGAGENTS_LLM_RETRY_ENABLED":    "llm_retry_enabled",
+    "TRADINGAGENTS_LLM_RETRY_MAX_RETRIES": "llm_retry_max_retries",
+    "TRADINGAGENTS_LLM_RETRY_BASE_DELAY": "llm_retry_base_delay",
     "INPUT_TOKEN_PRICE_PER_1M":           "input_token_price_per_1m",
     "OUTPUT_TOKEN_PRICE_PER_1M":          "output_token_price_per_1m",
 }
@@ -68,6 +71,11 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # variation on models that honor it; reasoning models largely ignore it
     # and no setting makes LLM output bit-identical across runs (see README).
     "temperature": None,
+    # LLM retry/backoff for transient provider errors (rate limits, timeouts,
+    # 5xx). ``llm_retry_enabled`` can be set to false to disable retries.
+    "llm_retry_enabled": True,
+    "llm_retry_max_retries": 3,
+    "llm_retry_base_delay": 2.0,
     # Checkpoint/resume: when True, LangGraph saves state after each node
     # so a crashed run can resume from the last successful step.
     "checkpoint_enabled": False,
