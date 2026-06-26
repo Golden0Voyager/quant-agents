@@ -2,7 +2,6 @@
 log state, run graph, propagate checkpoint paths, and helper methods."""
 
 import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -52,7 +51,7 @@ def _construct_graph(config_override=None, callbacks=None):
         mock_reflector.return_value = mock_reflector_instance
 
         mock_signal_proc_instance = MagicMock()
-        mock_signal_processor.return_value = mock_signal_proc_instance
+        mock_signal_proc.return_value = mock_signal_proc_instance
 
         mock_memory_log_instance = MagicMock()
         mock_memory_log.return_value = mock_memory_log_instance
@@ -281,7 +280,12 @@ class GetProviderKwargsTests(unittest.TestCase):
     def test_unknown_provider_no_extra_kwargs(self):
         g = self._make_graph({"llm_provider": "unknown_provider"})
         kwargs = g._get_provider_kwargs()
-        self.assertEqual(kwargs, {})
+        # Retry config is always forwarded; provider-specific kwargs are not.
+        self.assertIn("retry_config", kwargs)
+        self.assertNotIn("temperature", kwargs)
+        self.assertNotIn("effort", kwargs)
+        self.assertNotIn("thinking_level", kwargs)
+        self.assertNotIn("reasoning_effort", kwargs)
 
     def test_provider_case_insensitive(self):
         g = self._make_graph({"llm_provider": "OpenAI", "openai_reasoning_effort": "medium"})
@@ -705,7 +709,7 @@ class ConstructorTests(unittest.TestCase):
             mock_setup_instance.setup_graph.return_value = mock_workflow
             mock_graph_setup.return_value = mock_setup_instance
 
-            g = TradingAgentsGraph(config=self.config)
+            TradingAgentsGraph(config=self.config)
 
             mock_set_config.assert_called_once_with(self.config)
 
@@ -731,7 +735,7 @@ class ConstructorTests(unittest.TestCase):
             mock_setup_instance.setup_graph.return_value = mock_workflow
             mock_graph_setup.return_value = mock_setup_instance
 
-            g = TradingAgentsGraph(config=self.config)
+            TradingAgentsGraph(config=self.config)
 
             self.assertEqual(mock_makedirs.call_count, 2)
             mock_makedirs.assert_any_call(self.config["data_cache_dir"], exist_ok=True)
@@ -764,7 +768,7 @@ class ConstructorTests(unittest.TestCase):
             mock_setup_instance.setup_graph.return_value = mock_workflow
             mock_graph_setup.return_value = mock_setup_instance
 
-            g = TradingAgentsGraph(config=custom_config)
+            TradingAgentsGraph(config=custom_config)
 
             mock_cl.assert_called_once_with(
                 max_debate_rounds=3, max_risk_discuss_rounds=2
@@ -795,7 +799,7 @@ class ConstructorTests(unittest.TestCase):
             mock_setup_instance.setup_graph.return_value = mock_workflow
             mock_graph_setup.return_value = mock_setup_instance
 
-            g = TradingAgentsGraph(config=custom_config)
+            TradingAgentsGraph(config=custom_config)
 
             mock_propagator.assert_called_once_with(max_recur_limit=200)
 

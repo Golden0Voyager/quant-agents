@@ -40,6 +40,7 @@ from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.llm_clients import create_llm_client
+from tradingagents.llm_clients.retry_utils import RetryConfig
 
 from .analyst_execution import (
     AnalystWallTimeTracker,
@@ -169,6 +170,16 @@ class TradingAgentsGraph:
         temperature = self.config.get("temperature")
         if temperature is not None and temperature != "":
             kwargs["temperature"] = float(temperature)
+
+        # Retry/backoff configuration for transient LLM errors.
+        if self.config.get("llm_retry_enabled", True):
+            kwargs["retry_config"] = RetryConfig(
+                enabled=True,
+                max_retries=int(self.config.get("llm_retry_max_retries", 3)),
+                base_delay=float(self.config.get("llm_retry_base_delay", 2.0)),
+            )
+        else:
+            kwargs["retry_config"] = RetryConfig(enabled=False)
 
         return kwargs
 
