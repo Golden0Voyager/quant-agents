@@ -11,6 +11,7 @@ from tradingagents.llm_clients.azure_client import (
     AzureOpenAIClient,
     NormalizedAzureChatOpenAI,
 )
+from tradingagents.llm_clients.retry_utils import RetryConfig
 
 pytestmark = pytest.mark.unit
 
@@ -28,10 +29,11 @@ class AzureClientEdgeTests(unittest.TestCase):
         )
         raw_response = MagicMock()
         raw_response.content = "normalized"
-        with patch.object(NormalizedAzureChatOpenAI, "invoke", wraps=client.invoke), \
-             patch("langchain_openai.AzureChatOpenAI.invoke", return_value=raw_response), \
-             patch("tradingagents.llm_clients.azure_client.normalize_content",
-                   return_value=raw_response) as mock_norm:
+        with (
+            patch.object(NormalizedAzureChatOpenAI, "invoke", wraps=client.invoke),
+            patch("langchain_openai.AzureChatOpenAI.invoke", return_value=raw_response),
+            patch("tradingagents.llm_clients.azure_client.normalize_content", return_value=raw_response),
+        ):
             result = client.invoke("hello")
         self.assertEqual(result.content, "normalized")
 
@@ -87,18 +89,38 @@ class TestAzureClient(unittest.TestCase):
         call_kwargs = mock_chat.call_args[1]
         self.assertEqual(call_kwargs["azure_deployment"], "my-deployment")
 
-    @patch("tradingagents.llm_clients.azure_client.NormalizedAzureChatOpenAI")
-    def test_get_llm_passthrough_kwargs(self, mock_chat):
-        client = AzureOpenAIClient(
-            "gpt-4",
-            api_key="test-key",
-            max_retries=3,
-            temperature=0.5,
-            timeout=60,
+    @patch("tradingagents.llm_clients.retry_utils.time.sleep")
+    def test_invoke_retries_on_rate_limit(self, mock_sleep):
+        client = NormalizedAzureChatOpenAI(
+            model="gpt-4",
+            azure_deployment="my-deploy",
+            openai_api_key="test",
+            openai_api_version="2025-03-01-preview",
+            azure_endpoint="https://test.openai.azure.com",
         )
-        client.get_llm()
-        call_kwargs = mock_chat.call_args[1]
-        self.assertEqual(call_kwargs["api_key"], "test-key")
-        self.assertEqual(call_kwargs["max_retries"], 3)
-        self.assertEqual(call_kwargs["temperature"], 0.5)
-        self.assertEqual(call_kwargs["timeout"], 60)
+        client._retry_config = RetryConfig(max_retries=1, base_delay=0.05)
+        openai = pytest.importorskip("openai")
+        raw_response = MagicMock(content="ok")
+        side_effect = [
+            openai.RateLimitError(
+                "rate limit",
+                response=MagicMock(status_code=429),
+                body={"error": {"message": "rate limit"}},
+            ),
+            raw_response,
+        ]
+        with patch("langchain_openai.AzureChatOpenAI.invoke", side_effect=side_effect):
+            result = client.invoke("hello")
+        self.assertEqual(result.content, "ok")
+        mock_sleep.assert_called_once_with(0.05)
+
+    @patch("tradingagents.llm_clients.azure_client.NormalizedAzureChatOpenAI")
+    def test_get_llm_binds_retry_config(self, mock_chat):
+        retry_config = RetryConfig(max_retries=4, base_delay=0.5)
+        client = AzureOpenAIClient("gpt-4", api_key="x", retry_config=retry_config)
+        llm = client.get_llm()
+        self.assertEqual(llm._retry_config, retry_config)
+
+
+if __name__ == "__main__":
+    unittest.main()
