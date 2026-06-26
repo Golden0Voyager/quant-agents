@@ -85,7 +85,7 @@ class StocktwitsFetchTests(unittest.TestCase):
     def test_date_parse_fail_open(self):
         messages = [
             {"created_at": "invalid-date!!", "body": "Great stock!", "user": {"username": "trader1"}},
-            {"created_at": "2026-06-18T10:30:00Z", "body": "To the moon!", "user": {"username": "trader2"}},
+            {"created_at": "2026-06-22T10:30:00Z", "body": "To the moon!", "user": {"username": "trader2"}},
         ]
         payload = json.dumps({"messages": messages}).encode("utf-8")
 

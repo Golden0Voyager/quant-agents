@@ -289,9 +289,10 @@ class ResolveTickerTests(unittest.TestCase):
             resolve_ticker("   ")
 
     @patch("tradingagents.ticker_resolver._fetch_company_name_from_db", return_value="贵州茅台")
+    @patch("tradingagents.ticker_resolver._fetch_company_name_from_akshare", return_value=None)
     @patch("tradingagents.ticker_resolver._fetch_company_name", return_value=None)
     def test_numeric_a_share(
-        self, mock_fetch, mock_db
+        self, mock_fetch, mock_akshare, mock_db
     ):
         result = resolve_ticker("600519")
         self.assertEqual(result["ticker"], "600519.SS")

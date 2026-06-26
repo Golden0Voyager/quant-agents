@@ -72,7 +72,7 @@ class TestRouteToVendor:
         with patch.dict(
             interface.VENDOR_METHODS["get_indicators"],
             {"akshare": ak_raises, "yfinance": fake_yf},
-            clear=False,
+            clear=True,
         ):
             result = interface.route_to_vendor(
                 "get_indicators", "600519.SS", "rsi", "2026-05-14", 30
