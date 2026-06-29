@@ -1,0 +1,32 @@
+{
+  "tickers": [
+    "000100",
+    "300059",
+    "601899",
+    "601088",
+    "002475",
+    "002223",
+    "002230"
+  ],
+  "config": {
+    "analysts": ["market", "social", "news", "fundamentals", "governance", "industry"],
+    "research_depth": 3,
+    "llm_provider": "sensenova",
+    "backend_url": "https://token.sensenova.cn/v1",
+    "shallow_thinker": "sensenova-6.7-flash-lite",
+    "deep_thinker": "deepseek-v4-flash",
+    "output_language": "Chinese",
+    "checkpoint_enabled": true,
+    "max_debate_rounds": 1,
+    "max_risk_discuss_rounds": 1,
+    "data_vendors": {
+      "core_stock_apis": "yfinance",
+      "technical_indicators": "yfinance",
+      "fundamental_data": "yfinance",
+      "news_data": "yfinance"
+    }
+  },
+  "output_dir": "./reports",
+  "checkpoint": true,
+  "workers": 1
+}
