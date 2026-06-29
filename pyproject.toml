@@ -78,3 +78,4 @@ ignore = ["E501", "E402", "F403", "F405", "N802", "N805", "N806", "UP047"]
 
 [tool.mypy]
 ignore_missing_imports = true
+files = ["tradingagents/", "cli/"]

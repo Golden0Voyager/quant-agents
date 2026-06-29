@@ -53,7 +53,7 @@ class AzureOpenAIClient(BaseLLMClient):
 
         llm = NormalizedAzureChatOpenAI(**llm_kwargs)
         if retry_config is not None:
-            setattr(llm, "_retry_config", retry_config)
+            llm._retry_config = retry_config
         return llm
 
     def validate_model(self) -> bool:

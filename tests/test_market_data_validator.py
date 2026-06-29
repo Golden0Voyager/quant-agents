@@ -190,11 +190,13 @@ class MktDataValidatorIndicatorExceptionTests(unittest.TestCase):
             "Volume": [10000, 11000],
         })
 
-        with patch("tradingagents.dataflows.market_data_validator.load_ohlcv", return_value=df):
-            with patch("tradingagents.dataflows.market_data_validator.wrap") as mock_wrap:
-                mock_stock_df = df.copy()
-                mock_stock_df["rsi"] = [55.0, 60.0]
-                mock_wrap.return_value = mock_stock_df
+        with (
+            patch("tradingagents.dataflows.market_data_validator.load_ohlcv", return_value=df),
+            patch("tradingagents.dataflows.market_data_validator.wrap") as mock_wrap,
+        ):
+            mock_stock_df = df.copy()
+            mock_stock_df["rsi"] = [55.0, 60.0]
+            mock_wrap.return_value = mock_stock_df
 
-                result = validator.build_verified_market_snapshot("AAPL", "2026-05-20", indicators=("rsi",))
+            result = validator.build_verified_market_snapshot("AAPL", "2026-05-20", indicators=("rsi",))
         self.assertIn("| rsi | 60.00 |", result)

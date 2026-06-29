@@ -1,6 +1,5 @@
 """Test checkpoint resume: crash mid-analysis, re-run resumes from last node."""
 
-import os
 import sqlite3
 import tempfile
 import unittest
@@ -19,6 +18,7 @@ from tradingagents.graph.checkpointer import (
     has_checkpoint,
     thread_id,
 )
+
 
 class _TempDirMixin:
     def setUp(self):

@@ -3,6 +3,7 @@
 import json
 import os
 import unittest
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -76,6 +77,7 @@ class AlphaVantageImportTests(unittest.TestCase):
 
     def test_common_format_datetime_datetime_input(self):
         from datetime import datetime
+
         from tradingagents.dataflows.alpha_vantage_common import format_datetime_for_api
 
         dt = datetime(2026, 6, 15, 14, 30)
@@ -90,7 +92,8 @@ class AlphaVantageImportTests(unittest.TestCase):
 
     def test_common_get_api_key_no_env(self):
         from tradingagents.dataflows.alpha_vantage_common import (
-            AlphaVantageNotConfiguredError, get_api_key,
+            AlphaVantageNotConfiguredError,
+            get_api_key,
         )
 
         with patch.dict(os.environ, {"ALPHA_VANTAGE_API_KEY": ""}, clear=False):
@@ -256,7 +259,7 @@ class AlphaVantageCommonMakeRequestTests(unittest.TestCase):
         self.assertNotIn("entitlement", kwargs["params"])
 
     def test_rate_limit_detected(self):
-        from tradingagents.dataflows.alpha_vantage_common import _make_api_request, AlphaVantageRateLimitError
+        from tradingagents.dataflows.alpha_vantage_common import AlphaVantageRateLimitError, _make_api_request
 
         with patch("tradingagents.dataflows.alpha_vantage_common.get_api_key", return_value="key"), \
              patch("tradingagents.dataflows.alpha_vantage_common.requests.get") as mock_get:
@@ -266,7 +269,7 @@ class AlphaVantageCommonMakeRequestTests(unittest.TestCase):
                 _make_api_request("SMA", {"symbol": "AAPL"})
 
     def test_rate_limit_detected_api_key(self):
-        from tradingagents.dataflows.alpha_vantage_common import _make_api_request, AlphaVantageRateLimitError
+        from tradingagents.dataflows.alpha_vantage_common import AlphaVantageRateLimitError, _make_api_request
 
         with patch("tradingagents.dataflows.alpha_vantage_common.get_api_key", return_value="key"), \
              patch("tradingagents.dataflows.alpha_vantage_common.requests.get") as mock_get:
@@ -465,7 +468,7 @@ class TestAlphaVantageCommonMakeApiRequest(unittest.TestCase):
         api_params = {"symbol": "AAPL", "entitlement": sentinel}
 
         with self._patch_common(), self._patch_get():
-            result = _make_api_request("SMA", api_params)
+            _make_api_request("SMA", api_params)
 
     def test_make_request_entitlement_in_params_falsy(self):
         """Line 78: entitlement popped when it is falsy."""
@@ -488,9 +491,8 @@ class TestAlphaVantageCommonMakeApiRequest(unittest.TestCase):
             "Information": "The rate limit was exceeded. Please try again later."
         })
 
-        with self._patch_common(), self._patch_get(text=error_json):
-            with self.assertRaises(AlphaVantageRateLimitError):
-                _make_api_request("SMA", {"symbol": "AAPL"})
+        with self._patch_common(), self._patch_get(text=error_json), self.assertRaises(AlphaVantageRateLimitError):
+            _make_api_request("SMA", {"symbol": "AAPL"})
 
     def test_make_request_api_key_message_detected(self):
         """Lines 90–92: 'api key' in Information message also triggers."""
@@ -503,9 +505,8 @@ class TestAlphaVantageCommonMakeApiRequest(unittest.TestCase):
             "Information": "Invalid API key. Please check your key."
         })
 
-        with self._patch_common(), self._patch_get(text=error_json):
-            with self.assertRaises(AlphaVantageRateLimitError):
-                _make_api_request("SMA", {"symbol": "AAPL"})
+        with self._patch_common(), self._patch_get(text=error_json), self.assertRaises(AlphaVantageRateLimitError):
+            _make_api_request("SMA", {"symbol": "AAPL"})
 
     def test_make_request_non_json_csv_response_passes(self):
         """Line 93–95: CSV (non-JSON) response passes through normally."""
@@ -541,7 +542,7 @@ class TestAlphaVantageIndicator(unittest.TestCase):
         self.assertIn("105.0", result)
 
     def test_indicator_csv_no_time_column(self):
-        """Line 150: 'time' column missing.""" 
+        """Line 150: 'time' column missing."""
         from tradingagents.dataflows.alpha_vantage_indicator import get_indicator
 
         csv_no_time = "date,SMA\n2026-05-01,100.0\n"

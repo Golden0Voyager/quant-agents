@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv sync
-      - run: uv run ruff check --exit-zero
+      - run: uv run ruff check .
 
   typecheck:
     runs-on: ubuntu-latest
@@ -50,7 +50,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv sync
-      - run: uv run pytest -m unit --no-header -q
+      - run: uv run pytest -m unit --no-header -q --cov --cov-report=
+      - run: uv run coverage report
 
   test-integration:
     runs-on: ubuntu-latest

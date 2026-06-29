@@ -45,10 +45,8 @@ def _extract_article_data(article: dict) -> dict:
         pub_date = None
         ts = article.get("providerPublishTime")
         if ts:
-            try:
+            with contextlib.suppress(ValueError, OSError, TypeError):
                 pub_date = datetime.fromtimestamp(ts)
-            except (ValueError, OSError, TypeError):
-                pass
         return {
             "title": article.get("title", "No title"),
             "summary": article.get("summary", ""),

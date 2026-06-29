@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_market_analyst_price(market_report: str) -> str | None:
-    """Extract the latest price mentioned in the market analyst's report.
+    r"""Extract the latest price mentioned in the market analyst's report.
 
     Looks for patterns like ``现价: 160.51``, ``Latest Close: 91.60``,
     or ``收盘价.*?(\d+\.\d+)`` in Chinese/English report text.

@@ -174,7 +174,7 @@ def _all_a_share_names() -> set[str]:
         # Avoid circular import; akshare is always available when this runs.
         import akshare as ak
         df = ak.stock_info_a_code_name()
-        return set(str(row["name"]).strip() for _, row in df.iterrows())
+        return {str(row["name"]).strip() for _, row in df.iterrows()}
     except Exception:
         return set()
 
