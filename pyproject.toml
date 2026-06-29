@@ -62,7 +62,8 @@ dev = [
 ]
 
 [tool.coverage.run]
-source = ["tradingagents", "cli"]
+source = ["tradingagents"]
+omit = ["*/__init__.py"]
 
 [tool.coverage.report]
 fail_under = 85
