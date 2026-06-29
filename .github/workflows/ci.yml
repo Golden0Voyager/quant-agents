@@ -50,8 +50,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv sync
-      - run: uv run pytest -m unit --no-header -q --cov --cov-report=
-      - run: uv run coverage report
+      - run: uv run pytest -m unit --no-header -q
 
   test-integration:
     runs-on: ubuntu-latest
