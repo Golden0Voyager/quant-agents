@@ -16,6 +16,7 @@ import pandas as pd
 import pytest
 from yfinance.exceptions import YFRateLimitError
 
+from tradingagents.dataflows import stockstats_utils as su
 from tradingagents.dataflows.stockstats_utils import (
     StockstatsUtils,
     _clean_dataframe,
@@ -24,7 +25,6 @@ from tradingagents.dataflows.stockstats_utils import (
     load_ohlcv,
     yf_retry,
 )
-from tradingagents.dataflows import stockstats_utils as su
 
 
 class _TempDirMixin:

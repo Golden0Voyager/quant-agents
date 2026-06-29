@@ -154,6 +154,7 @@ def _load_ohlcv_from_akshare(
     """
     try:
         import akshare as ak
+
         from tradingagents.dataflows.akshare_common import (
             is_a_share_ticker,
             no_proxy,

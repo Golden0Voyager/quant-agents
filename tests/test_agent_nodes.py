@@ -34,7 +34,6 @@ _BASE_STATE = {
     "fundamentals_report": "Strong earnings growth",
     "instrument_context": "Company: Apple Inc.; Sector: Technology",
     "trader_investment_plan": "Buy 100 shares at $180",
-    "company_of_interest": "AAPL",
     "holdings_context": {},
     "transactions_context": [],
 }

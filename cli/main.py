@@ -23,12 +23,11 @@ from rich.text import Text
 from cli.announcements import display_announcements, fetch_announcements
 from cli.batch_runner import BatchRunner
 from cli.dashboard import (
-    ANALYST_ORDER,
+    ANALYST_ORDER,  # noqa: F811 — string list needed at line 1525
 )
 from cli.profiles import list_profiles, load_profile, save_profile
 from cli.stats_handler import StatsCallbackHandler
 from cli.utils import *  # noqa: F811 — ANALYST_ORDER re-imported below
-from cli.dashboard import ANALYST_ORDER  # noqa: F811 — string list needed at line 1525
 from cli.watchlists import list_watchlists, load_watchlist, save_watchlist
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.analyst_execution import (
@@ -1986,7 +1985,7 @@ def analyze(
             cfg = _json.loads(config_path.read_text(encoding="utf-8"))
         except Exception as e:
             console.print(f"[red]Failed to parse config file: {e}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
 
         ticker_list = cfg.get("tickers", [])
         if not ticker_list:

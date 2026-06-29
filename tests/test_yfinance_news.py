@@ -2,7 +2,7 @@
 
 import time
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 
@@ -146,12 +146,11 @@ class GetNewsYFinanceTests(unittest.TestCase):
             with patch(
                 "tradingagents.dataflows.yfinance_news.yf.Ticker",
                 return_value=mock_ticker,
+            ), patch(
+                "tradingagents.dataflows.yfinance_news.yf_retry",
+                side_effect=lambda f: f(),
             ):
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    result = get_news_yfinance(self.ticker, self.start, self.end)
+                result = get_news_yfinance(self.ticker, self.start, self.end)
 
         self.assertIn("AAPL News, from 2025-06-01 to 2025-06-30", result)
         self.assertIn("Apple News 1", result)
@@ -168,12 +167,11 @@ class GetNewsYFinanceTests(unittest.TestCase):
             with patch(
                 "tradingagents.dataflows.yfinance_news.yf.Ticker",
                 return_value=mock_ticker,
+            ), patch(
+                "tradingagents.dataflows.yfinance_news.yf_retry",
+                side_effect=lambda f: f(),
             ):
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    result = get_news_yfinance(self.ticker, self.start, self.end)
+                result = get_news_yfinance(self.ticker, self.start, self.end)
 
         self.assertEqual(result, "No news found for AAPL")
 
@@ -187,12 +185,11 @@ class GetNewsYFinanceTests(unittest.TestCase):
             with patch(
                 "tradingagents.dataflows.yfinance_news.yf.Ticker",
                 return_value=mock_ticker,
+            ), patch(
+                "tradingagents.dataflows.yfinance_news.yf_retry",
+                side_effect=lambda f: f(),
             ):
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    result = get_news_yfinance(self.ticker, self.start, self.end)
+                result = get_news_yfinance(self.ticker, self.start, self.end)
 
         self.assertEqual(result, "No news found for AAPL")
 
@@ -210,12 +207,11 @@ class GetNewsYFinanceTests(unittest.TestCase):
             with patch(
                 "tradingagents.dataflows.yfinance_news.yf.Ticker",
                 return_value=mock_ticker,
+            ), patch(
+                "tradingagents.dataflows.yfinance_news.yf_retry",
+                side_effect=lambda f: f(),
             ):
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    result = get_news_yfinance(self.ticker, self.start, self.end)
+                result = get_news_yfinance(self.ticker, self.start, self.end)
 
         self.assertNotIn("Outside Range", result)
         self.assertIn("Inside Range", result)
@@ -234,12 +230,11 @@ class GetNewsYFinanceTests(unittest.TestCase):
             with patch(
                 "tradingagents.dataflows.yfinance_news.yf.Ticker",
                 return_value=mock_ticker,
+            ), patch(
+                "tradingagents.dataflows.yfinance_news.yf_retry",
+                side_effect=lambda f: f(),
             ):
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    result = get_news_yfinance(self.ticker, self.start, self.end)
+                result = get_news_yfinance(self.ticker, self.start, self.end)
 
         self.assertNotIn("No Date", result)
         self.assertNotIn("No PubDate Field", result)
@@ -258,12 +253,11 @@ class GetNewsYFinanceTests(unittest.TestCase):
             with patch(
                 "tradingagents.dataflows.yfinance_news.yf.Ticker",
                 return_value=mock_ticker,
+            ), patch(
+                "tradingagents.dataflows.yfinance_news.yf_retry",
+                side_effect=lambda f: f(),
             ):
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    result = get_news_yfinance(self.ticker, self.start, self.end)
+                result = get_news_yfinance(self.ticker, self.start, self.end)
 
         self.assertEqual(
             result,
@@ -288,12 +282,11 @@ class GetNewsYFinanceTests(unittest.TestCase):
             with patch(
                 "tradingagents.dataflows.yfinance_news.yf.Ticker",
                 return_value=mock_ticker,
+            ), patch(
+                "tradingagents.dataflows.yfinance_news.yf_retry",
+                side_effect=lambda f: f(),
             ):
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    result = get_news_yfinance(self.ticker, self.start, self.end)
+                result = get_news_yfinance(self.ticker, self.start, self.end)
 
         self.assertIn("Detailed content here", result)
         self.assertIn("https://example.com/full", result)
@@ -308,12 +301,11 @@ class GetNewsYFinanceTests(unittest.TestCase):
             with patch(
                 "tradingagents.dataflows.yfinance_news.yf.Ticker",
                 return_value=mock_ticker,
+            ), patch(
+                "tradingagents.dataflows.yfinance_news.yf_retry",
+                side_effect=lambda f: f(),
             ):
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    result = get_news_yfinance(self.ticker, self.start, self.end)
+                result = get_news_yfinance(self.ticker, self.start, self.end)
 
         self.assertIn("Error fetching news for AAPL", result)
         self.assertIn("network failure", result)
@@ -328,12 +320,11 @@ class GetNewsYFinanceTests(unittest.TestCase):
             with patch(
                 "tradingagents.dataflows.yfinance_news.yf.Ticker",
                 return_value=mock_ticker,
+            ), patch(
+                "tradingagents.dataflows.yfinance_news.yf_retry",
+                side_effect=lambda f: f(),
             ):
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    get_news_yfinance(self.ticker, self.start, self.end)
+                get_news_yfinance(self.ticker, self.start, self.end)
 
         mock_ticker.get_news.assert_called_once_with(count=5)
 
@@ -380,12 +371,11 @@ class GetNewsYFinanceTests(unittest.TestCase):
             with patch(
                 "tradingagents.dataflows.yfinance_news.yf.Ticker",
                 return_value=mock_ticker,
+            ), patch(
+                "tradingagents.dataflows.yfinance_news.yf_retry",
+                side_effect=lambda f: f(),
             ):
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    result = get_news_yfinance(self.ticker, self.start, self.end)
+                result = get_news_yfinance(self.ticker, self.start, self.end)
 
         self.assertIn("Flat News", result)
         self.assertIn("Flat summary", result)
@@ -413,16 +403,14 @@ class GetGlobalNewsYFinanceTests(unittest.TestCase):
         with patch(
             "tradingagents.dataflows.yfinance_news.get_config",
             return_value=_mock_config(),
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf.Search",
+            return_value=mock_search,
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf_retry",
+            side_effect=lambda f: f(),
         ):
-            with patch(
-                "tradingagents.dataflows.yfinance_news.yf.Search",
-                return_value=mock_search,
-            ):
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    result = get_global_news_yfinance(self.curr_date)
+            result = get_global_news_yfinance(self.curr_date)
 
         self.assertIn("Global Market News", result)
         self.assertIn("Global News 1", result)
@@ -441,16 +429,14 @@ class GetGlobalNewsYFinanceTests(unittest.TestCase):
         with patch(
             "tradingagents.dataflows.yfinance_news.get_config",
             return_value=_mock_config(),
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf.Search",
+            return_value=mock_search,
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf_retry",
+            side_effect=lambda f: f(),
         ):
-            with patch(
-                "tradingagents.dataflows.yfinance_news.yf.Search",
-                return_value=mock_search,
-            ):
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    result = get_global_news_yfinance(self.curr_date)
+            result = get_global_news_yfinance(self.curr_date)
 
         self.assertIn("Duplicate Title", result)
         self.assertIn("Unique Title", result)
@@ -467,16 +453,14 @@ class GetGlobalNewsYFinanceTests(unittest.TestCase):
         with patch(
             "tradingagents.dataflows.yfinance_news.get_config",
             return_value=_mock_config(),
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf.Search",
+            return_value=mock_search,
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf_retry",
+            side_effect=lambda f: f(),
         ):
-            with patch(
-                "tradingagents.dataflows.yfinance_news.yf.Search",
-                return_value=mock_search,
-            ):
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    result = get_global_news_yfinance(self.curr_date)
+            result = get_global_news_yfinance(self.curr_date)
 
         self.assertNotIn("empty title", result)
         self.assertIn("Real Article", result)
@@ -498,16 +482,14 @@ class GetGlobalNewsYFinanceTests(unittest.TestCase):
         with patch(
             "tradingagents.dataflows.yfinance_news.get_config",
             return_value=_mock_config(),
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf.Search",
+            return_value=mock_search,
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf_retry",
+            side_effect=lambda f: f(),
         ):
-            with patch(
-                "tradingagents.dataflows.yfinance_news.yf.Search",
-                return_value=mock_search,
-            ):
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    result = get_global_news_yfinance(self.curr_date)
+            result = get_global_news_yfinance(self.curr_date)
 
         self.assertNotIn("Future Article", result)
         self.assertIn("Past Article", result)
@@ -527,16 +509,14 @@ class GetGlobalNewsYFinanceTests(unittest.TestCase):
         with patch(
             "tradingagents.dataflows.yfinance_news.get_config",
             return_value=_mock_config(),
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf.Search",
+            return_value=mock_search,
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf_retry",
+            side_effect=lambda f: f(),
         ):
-            with patch(
-                "tradingagents.dataflows.yfinance_news.yf.Search",
-                return_value=mock_search,
-            ):
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    result = get_global_news_yfinance(self.curr_date)
+            result = get_global_news_yfinance(self.curr_date)
 
         self.assertIn("Flat Global", result)
         self.assertIn("Bloomberg", result)
@@ -548,16 +528,14 @@ class GetGlobalNewsYFinanceTests(unittest.TestCase):
         with patch(
             "tradingagents.dataflows.yfinance_news.get_config",
             return_value=_mock_config(),
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf.Search",
+            return_value=mock_search,
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf_retry",
+            side_effect=lambda f: f(),
         ):
-            with patch(
-                "tradingagents.dataflows.yfinance_news.yf.Search",
-                return_value=mock_search,
-            ):
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    result = get_global_news_yfinance(self.curr_date)
+            result = get_global_news_yfinance(self.curr_date)
 
         self.assertEqual(result, "No global news found for 2025-06-20")
 
@@ -575,16 +553,14 @@ class GetGlobalNewsYFinanceTests(unittest.TestCase):
         with patch(
             "tradingagents.dataflows.yfinance_news.get_config",
             return_value=_mock_config(global_news_article_limit=3),
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf.Search",
+            return_value=mock_search,
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf_retry",
+            side_effect=lambda f: f(),
         ):
-            with patch(
-                "tradingagents.dataflows.yfinance_news.yf.Search",
-                return_value=mock_search,
-            ):
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    result = get_global_news_yfinance(self.curr_date)
+            result = get_global_news_yfinance(self.curr_date)
 
         self.assertIn("Article 0", result)
         self.assertIn("Article 1", result)
@@ -596,16 +572,14 @@ class GetGlobalNewsYFinanceTests(unittest.TestCase):
         with patch(
             "tradingagents.dataflows.yfinance_news.get_config",
             return_value=_mock_config(),
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf.Search",
+            side_effect=RuntimeError("search failed"),
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf_retry",
+            side_effect=lambda f: f(),
         ):
-            with patch(
-                "tradingagents.dataflows.yfinance_news.yf.Search",
-                side_effect=RuntimeError("search failed"),
-            ):
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    result = get_global_news_yfinance(self.curr_date)
+            result = get_global_news_yfinance(self.curr_date)
 
         self.assertIn("Error fetching global news", result)
         self.assertIn("search failed", result)
@@ -623,20 +597,18 @@ class GetGlobalNewsYFinanceTests(unittest.TestCase):
         with patch(
             "tradingagents.dataflows.yfinance_news.get_config",
             return_value=_mock_config(),
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf.Search",
+            return_value=mock_search,
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf_retry",
+            side_effect=lambda f: f(),
         ):
-            with patch(
-                "tradingagents.dataflows.yfinance_news.yf.Search",
-                return_value=mock_search,
-            ):
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    result = get_global_news_yfinance(
-                        self.curr_date,
-                        look_back_days=30,
-                        limit=5,
-                    )
+            result = get_global_news_yfinance(
+                self.curr_date,
+                look_back_days=30,
+                limit=5,
+            )
 
         self.assertIn("Global Market News", result)
         self.assertIn("from 2025-05-21 to 2025-06-20", result)
@@ -654,15 +626,13 @@ class GetGlobalNewsYFinanceTests(unittest.TestCase):
         with patch(
             "tradingagents.dataflows.yfinance_news.get_config",
             return_value=_mock_config(),
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf.Search",
+            return_value=mock_search_obj,
+        ) as mock_search_patch, patch(
+            "tradingagents.dataflows.yfinance_news.yf_retry",
+            side_effect=lambda f: f(),
         ):
-            with patch(
-                "tradingagents.dataflows.yfinance_news.yf.Search",
-                return_value=mock_search_obj,
-            ) as mock_search_patch:
-                with patch(
-                    "tradingagents.dataflows.yfinance_news.yf_retry",
-                    side_effect=lambda f: f(),
-                ):
-                    get_global_news_yfinance(self.curr_date)
+            get_global_news_yfinance(self.curr_date)
 
         self.assertEqual(mock_search_patch.call_count, 2)

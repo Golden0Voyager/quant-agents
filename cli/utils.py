@@ -36,7 +36,7 @@ def get_ticker() -> str:
         f"Enter ticker symbol (e.g. {TICKER_INPUT_EXAMPLES}):",
         validate=lambda x: (
             not x.strip()
-            or (all(ch.isalnum() or ch in "._-^" for ch in x.strip()) and len(x.strip()) <= 32)
+            or (all(ch.isalnum() or ch in ".,_ -^" for ch in x.strip()) and len(x.strip()) <= 128)
             or "Please enter a valid ticker symbol, e.g. AAPL, 000404.SZ, 0700.HK."
         ),
         style=questionary.Style(
@@ -176,6 +176,7 @@ def select_analysts(
     questionary.checkbox(
         "Select Your [Analysts Team]:",
         choices=choices,
+        default=list(available_analysts),
         instruction="\n- Press Space to select/unselect analysts\n- Press 'a' to select/unselect all\n- Press Enter when done",
         validate=lambda x: len(x) > 0 or "You must select at least one analyst.",
         style=questionary.Style(
@@ -392,9 +393,9 @@ def ask_workers() -> int:
     choice = questionary.select(
         "并发 Worker 数量（每个 Worker 分析一只股票）:",
         choices=[
-            questionary.Choice("3 — 中等并发，适合多只股票（推荐）", value=3),
-            questionary.Choice("2 — 轻量并发，速度翻倍", value=2),
             questionary.Choice("1 — 顺序执行，稳定可靠", value=1),
+            questionary.Choice("2 — 轻量并发，速度翻倍（推荐）", value=2),
+            questionary.Choice("3 — 中等并发，适合多只股票", value=3),
             questionary.Choice("5 — 高并发，需确保 API 限流允许", value=5),
         ],
         style=questionary.Style([

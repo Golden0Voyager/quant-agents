@@ -288,7 +288,7 @@ class TestGetBalanceSheet(TestCase):
         assert "Balance Sheet" in result
         assert "5546.00亿" in result
         assert "1780.00亿" in result
-        assert "SH600519" == mock_ak.stock_balance_sheet_by_report_em.call_args.kwargs["symbol"]
+        assert mock_ak.stock_balance_sheet_by_report_em.call_args.kwargs["symbol"] == "SH600519"
 
     def test_empty_returns_warning(self):
         from tradingagents.dataflows import akshare_vendor
@@ -316,7 +316,7 @@ class TestGetCashflow(TestCase):
         assert "Cash Flow" in result
         assert "230.00亿" in result
         assert "-50.00亿" in result
-        assert "SH600519" == mock_ak.stock_cash_flow_sheet_by_report_em.call_args.kwargs["symbol"]
+        assert mock_ak.stock_cash_flow_sheet_by_report_em.call_args.kwargs["symbol"] == "SH600519"
 
     def test_empty_returns_warning(self):
         from tradingagents.dataflows import akshare_vendor
@@ -350,7 +350,7 @@ class TestGetIncomeStatement(TestCase):
         assert "198.40亿" in result
         assert "15.7800" in result
         assert "akshare" in result.lower()
-        assert "SH600519" == mock_ak.stock_profit_sheet_by_report_em.call_args.kwargs["symbol"]
+        assert mock_ak.stock_profit_sheet_by_report_em.call_args.kwargs["symbol"] == "SH600519"
 
     def test_empty_returns_warning(self):
         from tradingagents.dataflows import akshare_vendor

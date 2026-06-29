@@ -3,31 +3,26 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pandas as pd
 import pytest
 
-from tradingagents.dataflows.config import get_config, set_config
+from tradingagents.agents.utils.rating import parse_rating
+from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.interface import (
-    VENDOR_METHODS,
     get_category_for_method,
     route_to_vendor,
 )
 from tradingagents.dataflows.stockstats_utils import (
     MAX_OHLCV_STALE_DAYS,
-    _assert_ohlcv_not_stale,
 )
 from tradingagents.dataflows.symbol_utils import normalize_symbol
 from tradingagents.portfolio.models import Holding, Portfolio, PortfolioMetadata, Transaction
 from tradingagents.portfolio.validators import (
     _parse_number,
-    deduplicate_holdings,
     normalize_ticker,
     validate_holding,
 )
-from tradingagents.agents.utils.rating import parse_rating
-
 
 # =========================================================================
 # portfolio/validators.py — edge cases
@@ -170,6 +165,7 @@ class ConfigEdgeTests(unittest.TestCase):
 class AkshareCommonEdgeTests(unittest.TestCase):
     def test_no_proxy_clears_env_and_restores(self):
         import os
+
         from tradingagents.dataflows.akshare_common import no_proxy
 
         os.environ["HTTP_PROXY"] = "http://proxy:8080"
@@ -281,7 +277,7 @@ class TechnicalIndicatorsToolsEdgeTests(unittest.TestCase):
     def test_get_indicators_multi_indicator_splits(self, mock_route):
         mock_route.return_value = "ind"
         from tradingagents.agents.utils.technical_indicators_tools import get_indicators
-        result = get_indicators.func("AAPL", "rsi, macd", "2025-01-01")
+        get_indicators.func("AAPL", "rsi, macd", "2025-01-01")
         self.assertEqual(mock_route.call_count, 2)
 
     @patch("tradingagents.agents.utils.technical_indicators_tools.route_to_vendor")
@@ -359,7 +355,6 @@ class PortfolioManagerEdgeTests(unittest.TestCase):
 @pytest.mark.unit
 class AkshareVendorEdgeTests(unittest.TestCase):
     def test_tqdm_disabled_import(self):
-        import tradingagents.dataflows.akshare_vendor
         self.assertTrue(True)
 
 

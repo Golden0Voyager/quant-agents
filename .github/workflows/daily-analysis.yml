@@ -6,18 +6,26 @@ on:
     - cron: '0 19 * * *'
   workflow_dispatch:
     inputs:
-      tickers:
-        description: 'Override tickers (comma-separated, optional)'
+      my_tickers:
+        description: 'Override my list tickers (comma-separated, optional)'
         required: false
         default: ''
+      erin_tickers:
+        description: 'Override Erin list tickers (comma-separated, optional)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
 
 env:
   UV_SYSTEM_PYTHON: 1
 
 jobs:
-  analyze:
+  analyze-my:
+    name: Analyze My List
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6 hours max
+    timeout-minutes: 360
 
     steps:
       - uses: actions/checkout@v4
@@ -34,38 +42,52 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Install gws CLI
-        run: npm install -g @anthropic-ai/gws-cli 2>/dev/null || npm install -g gws-cli 2>/dev/null || echo "gws install skipped"
-
-      - name: Setup gws credentials
+      - name: Create .env from secrets
         run: |
-          mkdir -p ~/.config/gws
-          echo '${{ secrets.GWS_CREDENTIALS }}' > ~/.config/gws/client_secret.json
-          # gws uses keyring but we can set env to use file-based auth
-          export GWS_CONFIG_DIR=~/.config/gws
+          cat > .env <<EOF
+          SENSENOVA_API_KEY=${{ secrets.SENSENOVA_API_KEY }}
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
+          EOF
 
-      - name: Sync holdings from Google Sheet
+      - name: Run my list analysis
         run: |
-          # Sync holdings to local cache before analysis
-          uv run python -c "
-          import json, os
-          from tradingagents.portfolio import PortfolioRepository, PortfolioSyncService
-          
-          sheet_id = os.environ.get('PORTFOLIO_SHEET_ID', '${{ secrets.PORTFOLIO_SHEET_ID }}')
-          if not sheet_id:
-              print('No PORTFOLIO_SHEET_ID configured, skipping holdings sync')
-              exit(0)
-          
-          try:
-              sync_service = PortfolioSyncService(sheet_id=sheet_id, worksheet='total')
-              portfolio = sync_service.sync()
-              repo = PortfolioRepository()
-              repo.save(portfolio)
-              print(f'Synced {len(portfolio.holdings)} holdings to local cache')
-          except Exception as e:
-              print(f'Holdings sync failed: {e}')
-              print('Analysis will run without holdings context')
-          "
+          if [ -n "${{ inputs.my_tickers }}" ]; then
+            TICKERS=$(echo '${{ inputs.my_tickers }}' | jq -R 'split(",") | map(gsub("^\\s+|\\s+$"; ""))')
+            jq --argjson tickers "$TICKERS" '.tickers = $tickers' config/daily-my.json > /tmp/daily_my_override.json
+            uv run python -m cli.main analyze --config /tmp/daily_my_override.json
+          else
+            uv run python -m cli.main analyze --config config/daily-my.json
+          fi
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-my-${{ github.run_id }}
+          path: reports/
+          retention-days: 30
+
+  analyze-erin:
+    name: Analyze Erin List
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: uv sync
 
       - name: Create .env from secrets
         run: |
@@ -74,91 +96,92 @@ jobs:
           OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
           DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
-          PORTFOLIO_SHEET_ID=${{ secrets.PORTFOLIO_SHEET_ID }}
           EOF
 
-      - name: Run daily analysis
+      - name: Run Erin list analysis
         run: |
-          # If tickers override provided, create temp config
-          if [ -n "${{ inputs.tickers }}" ]; then
-            TICKERS=$(echo '${{ inputs.tickers }}' | jq -R 'split(",") | map(gsub("^\\s+|\\s+$"; ""))')
-            jq --argjson tickers "$TICKERS" '.tickers = $tickers' config/daily.json > /tmp/daily_override.json
-            uv run python -m cli.main analyze --config /tmp/daily_override.json
+          if [ -n "${{ inputs.erin_tickers }}" ]; then
+            TICKERS=$(echo '${{ inputs.erin_tickers }}' | jq -R 'split(",") | map(gsub("^\\s+|\\s+$"; ""))')
+            jq --argjson tickers "$TICKERS" '.tickers = $tickers' config/daily-erin.json > /tmp/daily_erin_override.json
+            uv run python -m cli.main analyze --config /tmp/daily_erin_override.json
           else
-            uv run python -m cli.main analyze --config config/daily.json
+            uv run python -m cli.main analyze --config config/daily-erin.json
           fi
 
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: reports-${{ github.run_id }}
+          name: reports-erin-${{ github.run_id }}
           path: reports/
           retention-days: 30
 
-      - name: Create GitHub Release with reports
-        if: success()
-        env:
-          GH_TOKEN: ${{ github.token }}
+  notify-feishu:
+    name: Notify Feishu
+    needs: [analyze-my, analyze-erin]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download my reports
+        uses: actions/download-artifact@v4
+        with:
+          name: reports-my-${{ github.run_id }}
+          path: reports/my/
+
+      - name: Download Erin reports
+        uses: actions/download-artifact@v4
+        with:
+          name: reports-erin-${{ github.run_id }}
+          path: reports/erin/
+
+      - name: Combine reports
+        run: |
+          mkdir -p reports/combined
+          # Merge both report directories into combined/
+          for dir in reports/my reports/erin; do
+            for batch_dir in "$dir"/batch_*/; do
+              [ -d "$batch_dir" ] || continue
+              # Copy batch run: flatten into combined/<ticker>/
+              for ticker_dir in "$batch_dir"*/; do
+                ticker=$(basename "$ticker_dir")
+                cp -r "$ticker_dir" "reports/combined/$ticker" 2>/dev/null || true
+              done
+            done
+          done
+          echo "Combined reports:"
+          ls reports/combined/
+          # Pick the latest batch dir for summary generation
+          LATEST_MY=$(ls -td reports/my/batch_*/ 2>/dev/null | head -1)
+          LATEST_ERIN=$(ls -td reports/erin/batch_*/ 2>/dev/null | head -1)
+          echo "LATEST_MY=$LATEST_MY"
+          echo "LATEST_ERIN=$LATEST_ERIN"
+
+      - name: Generate combined summary
         run: |
           DATE=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
-          TAG="daily-report-$DATE"
-          LATEST=$(ls -td reports/*/ 2>/dev/null | head -1)
-          
-          if [ -z "$LATEST" ]; then
-            echo "No reports found, skipping release"
-            exit 0
-          fi
-          
-          # Create a zip of all reports
-          REPORT_ZIP="reports-$DATE.zip"
-          (cd "$LATEST" && zip -r "$OLDPWD/$REPORT_ZIP" . -x "*.pyc" "__pycache__/*")
-          
-          # Create or update release
-          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" \
-            --title "每日分析报告 $DATE" \
-            --notes "TradingAgents 自动分析报告 - $DATE" \
-            "$REPORT_ZIP"
-          
-          # Save release URL for Feishu notification
-          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/$TAG"
-          echo "RELEASE_URL=$RELEASE_URL" >> /tmp/env_vars
-          echo "Release URL: $RELEASE_URL"
+          echo "# 每日分析结论 - $DATE" > /tmp/feishu_summary.md
+          echo "" >> /tmp/feishu_summary.md
 
-      - name: Generate summary and extract decisions
-        if: success()
-        run: |
-          # Find the latest report directory
-          LATEST=$(ls -td reports/*/ 2>/dev/null | head -1)
-          
-          if [ -n "$LATEST" ]; then
-            # Generate GitHub Step Summary
-            if [ -f "$LATEST/batch_summary.md" ]; then
-              echo "## Daily Analysis Summary" >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-              cat "$LATEST/batch_summary.md" >> $GITHUB_STEP_SUMMARY
-            fi
-            
-            # Extract each ticker's final decision into a summary file
-            echo "# 每日分析结论 - $(TZ='Asia/Shanghai' date +%Y-%m-%d)" > /tmp/feishu_summary.md
-            echo "" >> /tmp/feishu_summary.md
-            
-            for ticker_dir in "$LATEST"/*/; do
+          for batch_dir in reports/my reports/erin; do
+            LATEST=$(ls -td "$batch_dir"/batch_*/ 2>/dev/null | head -1)
+            for ticker_dir in "$LATEST"*/ 2>/dev/null; do
+              [ -d "$ticker_dir" ] || continue
               ticker_name=$(basename "$ticker_dir")
               decision_file="$ticker_dir/reports/final_trade_decision.md"
-              
+
               if [ -f "$decision_file" ]; then
-                # Extract key fields
                 RATING=$(grep -m1 "Rating" "$decision_file" | sed 's/.*\*\*Rating\*\*: *//' | tr -d '*')
                 ENTRY=$(grep -m1 "Entry" "$decision_file" | grep -v "Entry Price" | sed 's/.*\*\*Entry\*\*: *//' | tr -d '*')
                 STOP=$(grep -m1 "Stop" "$decision_file" | grep -v "Stop Loss" | sed 's/.*\*\*Stop\*\*: *//' | tr -d '*')
                 TARGET=$(grep -m1 "Price Target" "$decision_file" | sed 's/.*\*\*Price Target\*\*: *//' | tr -d '*')
                 SIZE=$(grep -m1 "Size" "$decision_file" | sed 's/.*\*\*Size\*\*: *//' | tr -d '*')
                 SUMMARY_LINE=$(grep -m1 "Executive Summary" "$decision_file" | sed 's/.*\*\*Executive Summary\*\*: *//' | tr -d '*')
-                
-                # Add to summary
-                echo "**$ticker_name**" >> /tmp/feishu_summary.md
+
+                echo "**${ticker_name}**" >> /tmp/feishu_summary.md
                 echo "- 评级: ${RATING:-—}" >> /tmp/feishu_summary.md
                 echo "- 入场: ${ENTRY:-—}" >> /tmp/feishu_summary.md
                 echo "- 止损: ${STOP:-—}" >> /tmp/feishu_summary.md
@@ -170,43 +193,76 @@ jobs:
                 echo "" >> /tmp/feishu_summary.md
               fi
             done
-            
-            echo "Summary saved to /tmp/feishu_summary.md"
-          else
-            echo "## Daily Analysis Complete" >> $GITHUB_STEP_SUMMARY
-            echo "Reports uploaded as artifacts." >> $GITHUB_STEP_SUMMARY
-          fi
+          done
+
+          echo "Summary saved to /tmp/feishu_summary.md"
+          cat /tmp/feishu_summary.md >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+
+      - name: Create GitHub Release with combined reports
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          DATE=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
+          TAG="daily-report-$DATE"
+          REPORT_ZIP="reports-$DATE.zip"
+
+          # Zip combined reports
+          (cd reports/combined && zip -r "$OLDPWD/$REPORT_ZIP" . -x "*.pyc" "__pycache__/*")
+
+          # Create or update release
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" \
+            --title "每日分析报告 $DATE" \
+            --notes "TradingAgents 自动分析报告 - $DATE（我的 + Erin）" \
+            "$REPORT_ZIP"
+
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/$TAG"
+          echo "RELEASE_URL=$RELEASE_URL" >> "$GITHUB_ENV"
+          echo "Release URL: $RELEASE_URL"
 
       - name: Notify Feishu
         if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          STATUS="${{ job.status }}"
+          STATUS="${{ needs.analyze-my.result }}/${{ needs.analyze-erin.result }}"
+          # Determine overall status
+          if echo "$STATUS" | grep -q "failure"; then
+            OVERALL="failure"
+          elif echo "$STATUS" | grep -q "cancelled"; then
+            OVERALL="cancelled"
+          else
+            OVERALL="success"
+          fi
+
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           DATE=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
           RELEASE_TAG="daily-report-$DATE"
           RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/$RELEASE_TAG"
           CHAT_ID="oc_6a477c033c31899f3212fa0dd5f10dde"
-          
-          if [ "$STATUS" = "success" ]; then
+
+          if [ "$OVERALL" = "success" ]; then
             COLOR="green"
             TITLE="✅ 每日分析完成 - $DATE"
           else
             COLOR="red"
-            TITLE="❌ 每日分析失败 - $DATE"
+            TITLE="❌ 每日分析异常 - $DATE"
           fi
+
+          # Check which lists succeeded
+          MY_STATUS="${{ needs.analyze-my.result }}"
+          ERIN_STATUS="${{ needs.analyze-erin.result }}"
+          STATUS_LINE="**我的 list**: $MY_STATUS | **Erin list**: $ERIN_STATUS"
 
           # Read summary
           SUMMARY=""
           if [ -f /tmp/feishu_summary.md ]; then
             SUMMARY=$(head -c 25000 /tmp/feishu_summary.md)
-          elif [ -f /tmp/batch_summary.md ]; then
-            SUMMARY=$(head -c 25000 /tmp/batch_summary.md)
           fi
 
-          # Escape JSON special characters in summary
           SUMMARY_ESCAPED=$(echo "$SUMMARY" | jq -Rs . | sed 's/^"//;s/"$//')
 
-          # Step 1: Send summary card via webhook
           cat > /tmp/feishu_payload.json <<ENDJSON
           {
             "msg_type": "interactive",
@@ -221,7 +277,7 @@ jobs:
               "elements": [
                 {
                   "tag": "markdown",
-                  "content": "**状态**: $STATUS | **运行**: [查看详情]($RUN_URL)"
+                  "content": "**运行**: [查看详情]($RUN_URL)\\n$STATUS_LINE"
                 },
                 {
                   "tag": "hr"
@@ -263,51 +319,42 @@ jobs:
             -d @/tmp/feishu_payload.json \
             "${{ secrets.FEISHU_WEBHOOK_URL }}" || echo "Failed to send Feishu card"
 
-          # Step 2: Upload and send each ticker's report as file attachment via Open API
-          if [ "$STATUS" = "success" ]; then
-            LATEST=$(ls -td reports/*/ 2>/dev/null | head -1)
-            
-            if [ -n "$LATEST" ]; then
-              # Get tenant_access_token
-              TOKEN=$(curl -s -X POST "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal" \
-                -H "Content-Type: application/json" \
-                -d "{\"app_id\":\"${{ secrets.FEISHU_APP_ID }}\",\"app_secret\":\"${{ secrets.FEISHU_APP_SECRET }}\"}" \
-                | python3 -c "import json,sys; print(json.load(sys.stdin).get('tenant_access_token',''))")
-              
-              if [ -n "$TOKEN" ]; then
-                # Send each ticker's report as a separate file
-                for ticker_dir in "$LATEST"/*/; do
-                  [ -d "$ticker_dir" ] || continue
-                  ticker_name=$(basename "$ticker_dir")
-                  report_file="$ticker_dir/complete_report.md"
-                  
-                  if [ -f "$report_file" ]; then
-                    # Upload file
-                    FILE_KEY=$(curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/files" \
+          # Step 2: Upload and send each ticker's report as file attachment
+          if [ "$OVERALL" = "success" ]; then
+            TOKEN=$(curl -s -X POST "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal" \
+              -H "Content-Type: application/json" \
+              -d "{\"app_id\":\"${{ secrets.FEISHU_APP_ID }}\",\"app_secret\":\"${{ secrets.FEISHU_APP_SECRET }}\"}" \
+              | python3 -c "import json,sys; print(json.load(sys.stdin).get('tenant_access_token',''))")
+
+            if [ -n "$TOKEN" ]; then
+              for ticker_dir in reports/combined/*/; do
+                [ -d "$ticker_dir" ] || continue
+                ticker_name=$(basename "$ticker_dir")
+                report_file="$ticker_dir/complete_report.md"
+
+                if [ -f "$report_file" ]; then
+                  FILE_KEY=$(curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/files" \
+                    -H "Authorization: Bearer $TOKEN" \
+                    -F "file_type=stream" \
+                    -F "file_name=${ticker_name}_${DATE}.md" \
+                    -F "file=@$report_file" \
+                    | python3 -c "import json,sys; print(json.load(sys.stdin).get('data',{}).get('file_key',''))")
+
+                  if [ -n "$FILE_KEY" ]; then
+                    curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id" \
                       -H "Authorization: Bearer $TOKEN" \
-                      -F "file_type=stream" \
-                      -F "file_name=${ticker_name}_${DATE}.md" \
-                      -F "file=@$report_file" \
-                      | python3 -c "import json,sys; print(json.load(sys.stdin).get('data',{}).get('file_key',''))")
-                    
-                    # Send file to chat
-                    if [ -n "$FILE_KEY" ]; then
-                      curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id" \
-                        -H "Authorization: Bearer $TOKEN" \
-                        -H "Content-Type: application/json" \
-                        -d "{
-                          \"receive_id\": \"$CHAT_ID\",
-                          \"msg_type\": \"file\",
-                          \"content\": \"{\\\"file_key\\\": \\\"$FILE_KEY\\\"}\"
-                        }" > /dev/null
-                      echo "Sent: ${ticker_name}_${DATE}.md"
-                    fi
-                    
-                    # Rate limit: Feishu allows ~5 req/s
-                    sleep 0.3
+                      -H "Content-Type: application/json" \
+                      -d "{
+                        \"receive_id\": \"$CHAT_ID\",
+                        \"msg_type\": \"file\",
+                        \"content\": \"{\\\"file_key\\\": \\\"$FILE_KEY\\\"}\"
+                      }" > /dev/null
+                    echo "Sent: ${ticker_name}_${DATE}.md"
                   fi
-                done
-                echo "All ticker reports sent to Feishu chat"
-              fi
+
+                  sleep 0.3
+                fi
+              done
+              echo "All ticker reports sent to Feishu chat"
             fi
           fi

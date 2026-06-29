@@ -4,7 +4,6 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import pandas as pd
 import pytest
 
 
@@ -220,9 +219,8 @@ class GetStockDataTests(unittest.TestCase):
             db_path = f.name
         try:
             _create_test_db(db_path)
-            with _PatchedVendor(db_path):
-                with self.assertRaises(RuntimeError):
-                    get_stock_data("999999.SS", "2026-06-15", "2026-06-19")
+            with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
+                get_stock_data("999999.SS", "2026-06-15", "2026-06-19")
         finally:
             os.unlink(db_path)
 
@@ -267,9 +265,8 @@ class GetFundFlowTests(unittest.TestCase):
             db_path = f.name
         try:
             _create_full_test_db(db_path)
-            with _PatchedVendor(db_path):
-                with self.assertRaises(RuntimeError):
-                    get_fund_flow("999999.SS")
+            with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
+                get_fund_flow("999999.SS")
         finally:
             os.unlink(db_path)
 
@@ -322,9 +319,8 @@ class GetMarginTradingTests(unittest.TestCase):
             db_path = f.name
         try:
             _create_full_test_db(db_path)
-            with _PatchedVendor(db_path):
-                with self.assertRaises(RuntimeError):
-                    get_margin_trading("999999.SS")
+            with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
+                get_margin_trading("999999.SS")
         finally:
             os.unlink(db_path)
 
@@ -352,9 +348,8 @@ class GetDragonTigerTests(unittest.TestCase):
             db_path = f.name
         try:
             _create_full_test_db(db_path)
-            with _PatchedVendor(db_path):
-                with self.assertRaises(RuntimeError):
-                    get_dragon_tiger("999999.SS")
+            with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
+                get_dragon_tiger("999999.SS")
         finally:
             os.unlink(db_path)
 
@@ -407,9 +402,8 @@ class GetBlockTradeTests(unittest.TestCase):
             db_path = f.name
         try:
             _create_full_test_db(db_path)
-            with _PatchedVendor(db_path):
-                with self.assertRaises(RuntimeError):
-                    get_block_trade("999999.SS")
+            with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
+                get_block_trade("999999.SS")
         finally:
             os.unlink(db_path)
 
@@ -461,9 +455,8 @@ class GetSectorFundFlowTests(unittest.TestCase):
             db_path = f.name
         try:
             _create_full_test_db(db_path)
-            with _PatchedVendor(db_path):
-                with self.assertRaises(RuntimeError):
-                    get_sector_fund_flow("Nonexistent Sector")
+            with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
+                get_sector_fund_flow("Nonexistent Sector")
         finally:
             os.unlink(db_path)
 
@@ -491,9 +484,8 @@ class GetShareholderCountTests(unittest.TestCase):
             db_path = f.name
         try:
             _create_full_test_db(db_path)
-            with _PatchedVendor(db_path):
-                with self.assertRaises(RuntimeError):
-                    get_shareholder_count("999999.SS")
+            with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
+                get_shareholder_count("999999.SS")
         finally:
             os.unlink(db_path)
 
@@ -582,9 +574,8 @@ class GetIndicatorsTests(unittest.TestCase):
             db_path = f.name
         try:
             _create_full_test_db(db_path)
-            with _PatchedVendor(db_path):
-                with self.assertRaises(RuntimeError):
-                    get_indicators("600519.SS", "zzz_not_an_indicator", "2026-06-19", 5)
+            with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
+                get_indicators("600519.SS", "zzz_not_an_indicator", "2026-06-19", 5)
         finally:
             os.unlink(db_path)
 
@@ -595,9 +586,8 @@ class GetIndicatorsTests(unittest.TestCase):
             db_path = f.name
         try:
             _create_full_test_db(db_path)
-            with _PatchedVendor(db_path):
-                with self.assertRaises(RuntimeError):
-                    get_indicators("999999.SS", "rsi6", "2026-06-19", 5)
+            with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
+                get_indicators("999999.SS", "rsi6", "2026-06-19", 5)
         finally:
             os.unlink(db_path)
 
@@ -635,9 +625,8 @@ class GetIndicatorsTests(unittest.TestCase):
                 INSERT INTO daily_bars VALUES ('600519','2026-06-19',1540.0,1560.0,1530.0,1550.0,60000);
             """)
             conn.close()
-            with _PatchedVendor(db_path):
-                with self.assertRaises(RuntimeError):
-                    get_indicators("600519.SS", "rsi6", "2026-06-19", 5)
+            with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
+                get_indicators("600519.SS", "rsi6", "2026-06-19", 5)
         finally:
             os.unlink(db_path)
 

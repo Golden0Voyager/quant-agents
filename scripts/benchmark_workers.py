@@ -17,7 +17,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 # Ensure project root is on path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -26,21 +26,21 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from cli.stats_handler import StatsCallbackHandler
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
-from cli.stats_handler import StatsCallbackHandler
 
 
 def run_single_benchmark(
     ticker: str,
     config: dict,
     worker_id: int = 0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run a single ticker analysis and collect timing data.
 
     Returns dict with ticker, total_time, node_timings, stats, error.
     """
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "ticker": ticker,
         "worker_id": worker_id,
         "error": None,
@@ -74,8 +74,8 @@ def run_single_benchmark(
 
 
 def benchmark_sequential(
-    tickers: List[str], config: dict
-) -> List[Dict[str, Any]]:
+    tickers: list[str], config: dict
+) -> list[dict[str, Any]]:
     """Run tickers one by one."""
     results = []
     for i, ticker in enumerate(tickers):
@@ -88,8 +88,8 @@ def benchmark_sequential(
 
 
 def benchmark_parallel(
-    tickers: List[str], config: dict, workers: int
-) -> List[Dict[str, Any]]:
+    tickers: list[str], config: dict, workers: int
+) -> list[dict[str, Any]]:
     """Run tickers concurrently with ThreadPoolExecutor."""
     results = [None] * len(tickers)
 
@@ -114,7 +114,7 @@ def benchmark_parallel(
 
 
 def analyze_results(
-    all_results: Dict[int, List[Dict[str, Any]]],
+    all_results: dict[int, list[dict[str, Any]]],
 ) -> None:
     """Print comparison table and bottleneck analysis."""
     print("\n" + "=" * 80)
@@ -143,7 +143,7 @@ def analyze_results(
         print("⏱  逐节点耗时分布 (workers=1)")
         print("=" * 80)
 
-        node_stats: Dict[str, List[float]] = {}
+        node_stats: dict[str, list[float]] = {}
         for r in all_results[1]:
             if r.get("error") or not r.get("node_timings"):
                 continue

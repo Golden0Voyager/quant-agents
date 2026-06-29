@@ -9,7 +9,7 @@ Covers:
 from __future__ import annotations
 
 import unittest
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -17,7 +17,6 @@ from tradingagents.agents.managers.portfolio_manager import (
     _extract_snapshot_close,
     create_portfolio_manager,
 )
-
 
 # ---------------------------------------------------------------------------
 # _extract_snapshot_close

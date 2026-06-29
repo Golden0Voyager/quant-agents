@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import MagicMock, PropertyMock, call, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pandas as pd
 import pytest
@@ -7,7 +7,6 @@ import pytest
 from tradingagents.dataflows.symbol_utils import NoMarketDataError
 from tradingagents.dataflows.y_finance import (
     _get_stock_stats_bulk,
-    get_YFin_data_online,
     get_balance_sheet,
     get_cashflow,
     get_fundamentals,
@@ -15,6 +14,7 @@ from tradingagents.dataflows.y_finance import (
     get_insider_transactions,
     get_stock_stats_indicators_window,
     get_stockstats_indicator,
+    get_YFin_data_online,
 )
 
 
@@ -119,9 +119,8 @@ class GetYFinDataOnlineTests(unittest.TestCase):
         with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value=self.canonical):
             mock_ticker = MagicMock()
             mock_ticker.history.return_value = self.history_df
-            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                    result = get_YFin_data_online(self.symbol, self.start, self.end)
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
+                result = get_YFin_data_online(self.symbol, self.start, self.end)
 
         self.assertIn("2025-01-01", result)
 
@@ -130,9 +129,8 @@ class GetYFinDataOnlineTests(unittest.TestCase):
         with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value=self.canonical):
             mock_ticker = MagicMock()
             mock_ticker.history.return_value = empty
-            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                with self.assertRaises(NoMarketDataError):
-                    get_YFin_data_online(self.symbol, self.start, self.end)
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError):
+                get_YFin_data_online(self.symbol, self.start, self.end)
 
     def test_invalid_dates_return_error_string(self):
         with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value=self.canonical):
@@ -188,22 +186,19 @@ class GetStockStatsIndicatorsWindowTests(unittest.TestCase):
         self.assertIn("N/A: Not a trading day", result)
 
     def test_no_market_data_raised_through(self):
-        with patch("tradingagents.dataflows.y_finance._get_stock_stats_bulk", side_effect=NoMarketDataError("FAKE")):
-            with self.assertRaises(NoMarketDataError):
-                get_stock_stats_indicators_window("FAKE", "close_50_sma", "2025-01-10", 5)
+        with patch("tradingagents.dataflows.y_finance._get_stock_stats_bulk", side_effect=NoMarketDataError("FAKE")), self.assertRaises(NoMarketDataError):
+            get_stock_stats_indicators_window("FAKE", "close_50_sma", "2025-01-10", 5)
 
     def test_bulk_failure_falls_back_to_per_date(self):
-        with patch("tradingagents.dataflows.y_finance._get_stock_stats_bulk", side_effect=Exception("bulk failed")):
-            with patch("tradingagents.dataflows.y_finance.get_stockstats_indicator", return_value="52.3"):
-                result = get_stock_stats_indicators_window("AAPL", "close_50_sma", "2025-01-10", 2)
+        with patch("tradingagents.dataflows.y_finance._get_stock_stats_bulk", side_effect=Exception("bulk failed")), patch("tradingagents.dataflows.y_finance.get_stockstats_indicator", return_value="52.3"):
+            result = get_stock_stats_indicators_window("AAPL", "close_50_sma", "2025-01-10", 2)
 
         self.assertIn("2025-01-10: 52.3", result)
         self.assertIn("2025-01-09: 52.3", result)
 
     def test_fallback_respects_date_range(self):
-        with patch("tradingagents.dataflows.y_finance._get_stock_stats_bulk", side_effect=Exception("bulk failed")):
-            with patch("tradingagents.dataflows.y_finance.get_stockstats_indicator", return_value="55.0"):
-                result = get_stock_stats_indicators_window("AAPL", "rsi", "2025-01-05", 3)
+        with patch("tradingagents.dataflows.y_finance._get_stock_stats_bulk", side_effect=Exception("bulk failed")), patch("tradingagents.dataflows.y_finance.get_stockstats_indicator", return_value="55.0"):
+            result = get_stock_stats_indicators_window("AAPL", "rsi", "2025-01-05", 3)
 
         self.assertIn("2025-01-05: 55.0", result)
         self.assertIn("2025-01-04: 55.0", result)
@@ -285,12 +280,11 @@ class GetStockstatsIndicatorTests(unittest.TestCase):
 @pytest.mark.unit
 class GetFundamentalsTests(unittest.TestCase):
     def test_returns_formatted_fundamentals(self):
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                mock_ticker = MagicMock()
-                mock_ticker.info = _make_info_dict()
-                with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                    result = get_fundamentals("AAPL")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
+            mock_ticker = MagicMock()
+            mock_ticker.info = _make_info_dict()
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
+                result = get_fundamentals("AAPL")
 
         self.assertIn("Name: Test Corp", result)
         self.assertIn("Sector: Technology", result)
@@ -300,44 +294,38 @@ class GetFundamentalsTests(unittest.TestCase):
         self.assertIn("Company Fundamentals for AAPL", result)
 
     def test_empty_info_raises_no_market_data(self):
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="FAKE"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                mock_ticker = MagicMock()
-                mock_ticker.info = {}
-                with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                    with self.assertRaises(NoMarketDataError):
-                        get_fundamentals("FAKE")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="FAKE"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
+            mock_ticker = MagicMock()
+            mock_ticker.info = {}
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError):
+                get_fundamentals("FAKE")
 
     def test_no_usable_fields_raises_no_market_data(self):
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="STUB"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                mock_ticker = MagicMock()
-                mock_ticker.info = {"trailingPegRatio": None}
-                with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                    with self.assertRaises(NoMarketDataError):
-                        get_fundamentals("STUB")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="STUB"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
+            mock_ticker = MagicMock()
+            mock_ticker.info = {"trailingPegRatio": None}
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError):
+                get_fundamentals("STUB")
 
     def test_skips_none_fields(self):
         info = _make_info_dict()
         info["dividendYield"] = None
         info["beta"] = None
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                mock_ticker = MagicMock()
-                mock_ticker.info = info
-                with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                    result = get_fundamentals("AAPL")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
+            mock_ticker = MagicMock()
+            mock_ticker.info = info
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
+                result = get_fundamentals("AAPL")
 
         self.assertNotIn("Dividend Yield", result)
         self.assertNotIn("Beta", result)
 
     def test_generic_exception_returns_error_string(self):
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                mock_ticker = MagicMock()
-                type(mock_ticker).info = PropertyMock(side_effect=ConnectionError("no host"))
-                with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                    result = get_fundamentals("AAPL")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
+            mock_ticker = MagicMock()
+            type(mock_ticker).info = PropertyMock(side_effect=ConnectionError("no host"))
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
+                result = get_fundamentals("AAPL")
 
         self.assertIn("Error retrieving fundamentals", result)
 
@@ -346,58 +334,48 @@ class GetFundamentalsTests(unittest.TestCase):
 class GetBalanceSheetTests(unittest.TestCase):
     def test_quarterly_fetches_quarterly_balance_sheet(self):
         bs_df = _make_financials_df()
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                with patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=bs_df):
-                    mock_ticker = MagicMock()
-                    mock_ticker.quarterly_balance_sheet = bs_df
-                    with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                        result = get_balance_sheet("AAPL", "quarterly")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()), patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=bs_df):
+            mock_ticker = MagicMock()
+            mock_ticker.quarterly_balance_sheet = bs_df
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
+                result = get_balance_sheet("AAPL", "quarterly")
 
         self.assertIn("Balance Sheet data for AAPL (quarterly)", result)
         self.assertIn("Total Revenue", result)
 
     def test_annual_fetches_annual_balance_sheet(self):
         bs_df = _make_financials_df()
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                with patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=bs_df):
-                    mock_ticker = MagicMock()
-                    mock_ticker.balance_sheet = bs_df
-                    with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                        result = get_balance_sheet("AAPL", "annual")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()), patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=bs_df):
+            mock_ticker = MagicMock()
+            mock_ticker.balance_sheet = bs_df
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
+                result = get_balance_sheet("AAPL", "annual")
 
         self.assertIn("Balance Sheet data for AAPL (annual)", result)
 
     def test_empty_data_raises_no_market_data(self):
         empty = pd.DataFrame()
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="FAKE"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                with patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=empty):
-                    mock_ticker = MagicMock()
-                    mock_ticker.quarterly_balance_sheet = empty
-                    with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                        with self.assertRaises(NoMarketDataError):
-                            get_balance_sheet("FAKE", "quarterly")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="FAKE"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()), patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=empty):
+            mock_ticker = MagicMock()
+            mock_ticker.quarterly_balance_sheet = empty
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError):
+                get_balance_sheet("FAKE", "quarterly")
 
     def test_generic_exception_returns_error_string(self):
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=RuntimeError("crash")):
-                mock_ticker = MagicMock()
-                with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                    result = get_balance_sheet("AAPL", "quarterly")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=RuntimeError("crash")):
+            mock_ticker = MagicMock()
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
+                result = get_balance_sheet("AAPL", "quarterly")
 
         self.assertIn("Error retrieving balance sheet", result)
 
     def test_defaults_to_quarterly(self):
         bs_df = _make_financials_df()
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                with patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=bs_df):
-                    mock_ticker = MagicMock()
-                    mock_ticker.quarterly_balance_sheet = bs_df
-                    with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                        result = get_balance_sheet("AAPL")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()), patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=bs_df):
+            mock_ticker = MagicMock()
+            mock_ticker.quarterly_balance_sheet = bs_df
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
+                result = get_balance_sheet("AAPL")
 
         self.assertIn("(quarterly)", result)
 
@@ -406,46 +384,38 @@ class GetBalanceSheetTests(unittest.TestCase):
 class GetCashflowTests(unittest.TestCase):
     def test_quarterly_fetches_quarterly_cashflow(self):
         cf_df = _make_financials_df()
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                with patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=cf_df):
-                    mock_ticker = MagicMock()
-                    mock_ticker.quarterly_cashflow = cf_df
-                    with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                        result = get_cashflow("AAPL", "quarterly")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()), patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=cf_df):
+            mock_ticker = MagicMock()
+            mock_ticker.quarterly_cashflow = cf_df
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
+                result = get_cashflow("AAPL", "quarterly")
 
         self.assertIn("Cash Flow data for AAPL (quarterly)", result)
         self.assertIn("Total Revenue", result)
 
     def test_annual_fetches_annual_cashflow(self):
         cf_df = _make_financials_df()
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                with patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=cf_df):
-                    mock_ticker = MagicMock()
-                    mock_ticker.cashflow = cf_df
-                    with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                        result = get_cashflow("AAPL", "annual")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()), patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=cf_df):
+            mock_ticker = MagicMock()
+            mock_ticker.cashflow = cf_df
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
+                result = get_cashflow("AAPL", "annual")
 
         self.assertIn("Cash Flow data for AAPL (annual)", result)
 
     def test_empty_data_raises_no_market_data(self):
         empty = pd.DataFrame()
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="FAKE"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                with patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=empty):
-                    mock_ticker = MagicMock()
-                    mock_ticker.quarterly_cashflow = empty
-                    with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                        with self.assertRaises(NoMarketDataError):
-                            get_cashflow("FAKE", "quarterly")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="FAKE"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()), patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=empty):
+            mock_ticker = MagicMock()
+            mock_ticker.quarterly_cashflow = empty
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError):
+                get_cashflow("FAKE", "quarterly")
 
     def test_generic_exception_returns_error_string(self):
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=RuntimeError("fail")):
-                mock_ticker = MagicMock()
-                with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                    result = get_cashflow("AAPL")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=RuntimeError("fail")):
+            mock_ticker = MagicMock()
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
+                result = get_cashflow("AAPL")
 
         self.assertIn("Error retrieving cash flow", result)
 
@@ -454,58 +424,48 @@ class GetCashflowTests(unittest.TestCase):
 class GetIncomeStatementTests(unittest.TestCase):
     def test_quarterly_fetches_quarterly_income_stmt(self):
         is_df = _make_financials_df()
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                with patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=is_df):
-                    mock_ticker = MagicMock()
-                    mock_ticker.quarterly_income_stmt = is_df
-                    with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                        result = get_income_statement("AAPL", "quarterly")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()), patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=is_df):
+            mock_ticker = MagicMock()
+            mock_ticker.quarterly_income_stmt = is_df
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
+                result = get_income_statement("AAPL", "quarterly")
 
         self.assertIn("Income Statement data for AAPL (quarterly)", result)
         self.assertIn("Total Revenue", result)
 
     def test_annual_fetches_annual_income_stmt(self):
         is_df = _make_financials_df()
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                with patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=is_df):
-                    mock_ticker = MagicMock()
-                    mock_ticker.income_stmt = is_df
-                    with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                        result = get_income_statement("AAPL", "annual")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()), patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=is_df):
+            mock_ticker = MagicMock()
+            mock_ticker.income_stmt = is_df
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
+                result = get_income_statement("AAPL", "annual")
 
         self.assertIn("Income Statement data for AAPL (annual)", result)
 
     def test_empty_data_raises_no_market_data(self):
         empty = pd.DataFrame()
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="FAKE"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                with patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=empty):
-                    mock_ticker = MagicMock()
-                    mock_ticker.quarterly_income_stmt = empty
-                    with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                        with self.assertRaises(NoMarketDataError):
-                            get_income_statement("FAKE", "quarterly")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="FAKE"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()), patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=empty):
+            mock_ticker = MagicMock()
+            mock_ticker.quarterly_income_stmt = empty
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError):
+                get_income_statement("FAKE", "quarterly")
 
     def test_generic_exception_returns_error_string(self):
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=RuntimeError("broken")):
-                mock_ticker = MagicMock()
-                with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                    result = get_income_statement("AAPL")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=RuntimeError("broken")):
+            mock_ticker = MagicMock()
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
+                result = get_income_statement("AAPL")
 
         self.assertIn("Error retrieving income statement", result)
 
     def test_defaults_to_quarterly(self):
         is_df = _make_financials_df()
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                with patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=is_df):
-                    mock_ticker = MagicMock()
-                    mock_ticker.quarterly_income_stmt = is_df
-                    with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                        result = get_income_statement("AAPL")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()), patch("tradingagents.dataflows.y_finance.filter_financials_by_date", return_value=is_df):
+            mock_ticker = MagicMock()
+            mock_ticker.quarterly_income_stmt = is_df
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
+                result = get_income_statement("AAPL")
 
         self.assertIn("(quarterly)", result)
 
@@ -517,42 +477,38 @@ class GetInsiderTransactionsTests(unittest.TestCase):
             {"Transaction": ["Buy"], "Shares": [1000]},
             index=[0],
         )
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                mock_ticker = MagicMock()
-                mock_ticker.insider_transactions = df
-                with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                    result = get_insider_transactions("AAPL")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
+            mock_ticker = MagicMock()
+            mock_ticker.insider_transactions = df
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
+                result = get_insider_transactions("AAPL")
 
         self.assertIn("Insider Transactions data for AAPL", result)
         self.assertIn("Transaction", result)
 
     def test_none_data_returns_no_transactions_message(self):
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                mock_ticker = MagicMock()
-                mock_ticker.insider_transactions = None
-                with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                    result = get_insider_transactions("AAPL")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
+            mock_ticker = MagicMock()
+            mock_ticker.insider_transactions = None
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
+                result = get_insider_transactions("AAPL")
 
         self.assertEqual(result, "No insider transactions reported for symbol 'AAPL'")
 
     def test_empty_dataframe_returns_no_transactions_message(self):
         empty = pd.DataFrame()
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
-                mock_ticker = MagicMock()
-                mock_ticker.insider_transactions = empty
-                with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                    result = get_insider_transactions("AAPL")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
+            mock_ticker = MagicMock()
+            mock_ticker.insider_transactions = empty
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
+                result = get_insider_transactions("AAPL")
 
         self.assertIn("No insider transactions reported", result)
 
     def test_generic_exception_returns_error_string(self):
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"):
-            with patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=RuntimeError("boom")):
-                mock_ticker = MagicMock()
-                with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                    result = get_insider_transactions("AAPL")
+        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=RuntimeError("boom")):
+            mock_ticker = MagicMock()
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
+                result = get_insider_transactions("AAPL")
 
         self.assertIn("Error retrieving insider transactions", result)

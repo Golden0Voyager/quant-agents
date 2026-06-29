@@ -67,8 +67,14 @@ def _is_numeric_code(s: str) -> bool:
 def _append_a_share_suffix(code: str) -> str:
     """Append exchange suffix for Chinese A-share numeric codes.
 
-    Raises ValueError if the prefix is not recognised.
+    Raises ValueError if the prefix is not recognised or the code length
+    is not 6 digits (the standard A-share format).
     """
+    if len(code) != 6:
+        raise ValueError(
+            f"A 股代码应为 6 位数字，收到 {len(code)} 位: 「{code}」。"
+            "请检查输入是否有误。"
+        )
     for prefixes, suffix in _A_SHARE_SUFFIX_RULES:
         if any(code.startswith(p) for p in prefixes):
             return code + suffix
