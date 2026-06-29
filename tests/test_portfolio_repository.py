@@ -5,7 +5,6 @@ All tests use local temporary directories and do not perform network I/O.
 """
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import tempfile
@@ -86,9 +85,8 @@ class PortfolioRepoSaveLoadTests(unittest.TestCase):
         portfolio = self._make_portfolio()
         temp_path = self._repo.path.with_suffix(".tmp")
 
-        with patch("json.dump", side_effect=RuntimeError("disk full")):
-            with self.assertRaises(RuntimeError):
-                self._repo.save(portfolio)
+        with patch("json.dump", side_effect=RuntimeError("disk full")), self.assertRaises(RuntimeError):
+            self._repo.save(portfolio)
 
         self.assertFalse(temp_path.exists())
         self.assertFalse(os.path.exists(self._portfolio_path))

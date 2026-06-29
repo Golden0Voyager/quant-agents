@@ -471,9 +471,8 @@ class LoadOhlcvFromSmartmoneyDbTests(unittest.TestCase):
                 msg = f"No module named '{name}'"
                 raise ImportError(msg)
             return real_import(name, *args, **kwargs)
-        with patch("builtins.__import__", side_effect=_mock_import):
-            with self.assertRaises(ImportError):
-                _load_ohlcv_from_smartmoney_db("000001.SZ", "2026-01-01", "2026-01-10")
+        with patch("builtins.__import__", side_effect=_mock_import), self.assertRaises(ImportError):
+            _load_ohlcv_from_smartmoney_db("000001.SZ", "2026-01-01", "2026-01-10")
 
 
 # =========================================================================

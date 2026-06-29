@@ -656,9 +656,11 @@ class TestLitellmOverlayEdgeCases:
         # Make read_text raise OSError to simulate permission issue.
         # Both the initial cache read and the post-network-failure retry
         # hit this, so we end up with an empty overlay.
-        with patch("pathlib.Path.read_text", side_effect=OSError("permission denied")):
-            with patch("httpx.get", side_effect=RuntimeError("network down")):
-                overlay = _load_litellm_overlay()
+        with (
+            patch("pathlib.Path.read_text", side_effect=OSError("permission denied")),
+            patch("httpx.get", side_effect=RuntimeError("network down")),
+        ):
+            overlay = _load_litellm_overlay()
         assert overlay == {}
 
     def test_cache_corrupt_json(self, tmp_path, monkeypatch):

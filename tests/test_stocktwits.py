@@ -89,8 +89,11 @@ class StocktwitsFetchTests(unittest.TestCase):
         ]
         payload = json.dumps({"messages": messages}).encode("utf-8")
 
+        # days_back=0 disables date filtering so the test is not time-dependent.
+        # Date-filtering behavior is covered by test_days_back_zero_includes_all
+        # and test_success_path_returns_formatted_messages.
         with self._mock_urlopen(data=payload):
-            result = fetch_stocktwits_messages("AAPL", days_back=7)
+            result = fetch_stocktwits_messages("AAPL", days_back=0)
         self.assertIn("Great stock!", result)
         self.assertIn("To the moon!", result)
 
