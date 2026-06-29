@@ -8,6 +8,7 @@ Covers two systematic fixes:
 """
 
 import os
+import tempfile
 import unittest
 from unittest import mock
 
@@ -15,31 +16,32 @@ import pandas as pd
 import pytest
 
 from tradingagents.dataflows import interface, stockstats_utils
-from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.symbol_utils import NoMarketDataError
 
 
 @pytest.mark.unit
 class TestLoadOhlcvNoPoison(unittest.TestCase):
     def setUp(self):
-        self._tmp = os.path.join(os.path.dirname(__file__), "_tmp_cache")
-        os.makedirs(self._tmp, exist_ok=True)
-        set_config({"data_cache_dir": self._tmp})
+        self._tmp = tempfile.mkdtemp()
 
     def tearDown(self):
-        for f in os.listdir(self._tmp):
-            os.remove(os.path.join(self._tmp, f))
-        os.rmdir(self._tmp)
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_empty_download_raises_and_does_not_cache(self):
         empty = pd.DataFrame()
-        with mock.patch.object(stockstats_utils.yf, "download", return_value=empty), self.assertRaises(NoMarketDataError):
+        with mock.patch("tradingagents.dataflows.stockstats_utils.get_config",
+                        return_value={"data_cache_dir": self._tmp}), \
+             mock.patch.object(stockstats_utils.yf, "download", return_value=empty), \
+             self.assertRaises(NoMarketDataError):
             stockstats_utils.load_ohlcv("FAKE", "2026-01-01")
         # Nothing should have been written to the cache.
         self.assertEqual(os.listdir(self._tmp), [])
 
         # A second call must re-attempt the fetch (no poisoned cache served).
-        with mock.patch.object(stockstats_utils.yf, "download", return_value=empty) as dl2:
+        with mock.patch("tradingagents.dataflows.stockstats_utils.get_config",
+                        return_value={"data_cache_dir": self._tmp}), \
+             mock.patch.object(stockstats_utils.yf, "download", return_value=empty) as dl2:
             with self.assertRaises(NoMarketDataError):
                 stockstats_utils.load_ohlcv("FAKE", "2026-01-01")
             self.assertTrue(dl2.called)
