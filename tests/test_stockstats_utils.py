@@ -19,12 +19,17 @@ from yfinance.exceptions import YFRateLimitError
 from tradingagents.dataflows import stockstats_utils as su
 from tradingagents.dataflows.stockstats_utils import (
     StockstatsUtils,
+    _assert_ohlcv_not_stale,
     _clean_dataframe,
+    _coerce_ohlcv_dates,
     _ensure_date_column,
+    _load_ohlcv_from_akshare,
+    _load_ohlcv_from_smartmoney_db,
     filter_financials_by_date,
     load_ohlcv,
     yf_retry,
 )
+from tradingagents.dataflows.symbol_utils import NoMarketDataError
 
 
 class _TempDirMixin:
@@ -341,6 +346,162 @@ class LoadOhlcvNoMarketDataTests(_TempDirMixin, unittest.TestCase):
             from tradingagents.dataflows.symbol_utils import NoMarketDataError
             with self.assertRaises(NoMarketDataError):
                 load_ohlcv("INVALID", "2026-01-03", lookback_years=5)
+
+
+# =========================================================================
+# Edge-case tests for _assert_ohlcv_not_stale (lines 88-115)
+# =========================================================================
+
+
+@pytest.mark.unit
+class AssertOhlcvNotStaleTests(unittest.TestCase):
+    """Tests for _assert_ohlcv_not_stale edge cases."""
+
+    def test_none_data_returns_early(self):
+        """None data should return without raising."""
+        _assert_ohlcv_not_stale(None, "2026-01-10", "X")
+
+    def test_empty_data_returns_early(self):
+        """Empty DataFrame should return without raising."""
+        _assert_ohlcv_not_stale(pd.DataFrame(), "2026-01-10", "X")
+
+    def test_invalid_curr_date_returns_early(self):
+        """Invalid curr_date should return without raising."""
+        df = pd.DataFrame({"Date": ["2026-01-10"]})
+        _assert_ohlcv_not_stale(df, "not-a-date", "X")
+
+    def test_no_dates_in_data_returns_early(self):
+        """Data without date column/index should return without raising."""
+        # Use a non-numeric index so reset_index creates a column that
+        # doesn't parse as dates (avoiding epoch-1970 false positives).
+        df = pd.DataFrame({"Close": [100]}, index=["a"])
+        _assert_ohlcv_not_stale(df, "2026-01-10", "X")
+
+    def test_recent_data_passes(self):
+        """Data within max_stale_days should not raise."""
+        dates = pd.bdate_range("2026-01-05", periods=3)
+        df = pd.DataFrame({"Date": dates, "Close": [100.0, 101.0, 102.0]})
+        # latest date 2026-01-07, curr_date 2026-01-10 → 3 days stale
+        _assert_ohlcv_not_stale(df, "2026-01-10", "X")
+
+    def test_stale_data_raises(self):
+        """Data older than max_stale_days should raise NoMarketDataError."""
+        dates = pd.bdate_range("2025-12-20", periods=3)
+        df = pd.DataFrame({"Date": dates, "Close": [100.0, 101.0, 102.0]})
+        # latest date ~2025-12-24, curr_date 2026-01-10 → ~17 days stale
+        with self.assertRaises(NoMarketDataError):
+            _assert_ohlcv_not_stale(df, "2026-01-10", "X")
+
+    def test_stale_data_includes_canonical(self):
+        """Stale data error message should mention the canonical symbol."""
+        dates = pd.bdate_range("2025-12-20", periods=3)
+        df = pd.DataFrame({"Date": dates, "Close": [100.0, 101.0, 102.0]})
+        with self.assertRaises(NoMarketDataError) as ctx:
+            _assert_ohlcv_not_stale(df, "2026-01-10", "AAPL", canonical="AAPL")
+        self.assertIn("AAPL", str(ctx.exception))
+
+    def test_tz_aware_dates_passes(self):
+        """Data with tz-aware dates should not raise when within range."""
+        dates = pd.bdate_range("2026-01-05", periods=3, tz="UTC")
+        df = pd.DataFrame({"Date": dates, "Close": [100.0, 101.0, 102.0]})
+        _assert_ohlcv_not_stale(df, "2026-01-10", "X")
+
+
+# =========================================================================
+# Edge-case tests for _coerce_ohlcv_dates (lines 73-85)
+# =========================================================================
+
+
+@pytest.mark.unit
+class CoerceOhlcvDatesTests(unittest.TestCase):
+    """Tests for _coerce_ohlcv_dates edge cases."""
+
+    def test_date_column(self):
+        """DataFrame with 'Date' column should return non-empty Series."""
+        df = pd.DataFrame({"Date": ["2026-01-01", "2026-01-02"], "Close": [100, 101]})
+        result = _coerce_ohlcv_dates(df)
+        self.assertFalse(result.empty)
+        self.assertEqual(len(result), 2)
+
+    def test_datetime_index(self):
+        """DataFrame with DatetimeIndex should return non-empty Series."""
+        df = pd.DataFrame(
+            {"Close": [100, 101]},
+            index=pd.to_datetime(["2026-01-01", "2026-01-02"]),
+        )
+        result = _coerce_ohlcv_dates(df)
+        self.assertFalse(result.empty)
+        self.assertEqual(len(result), 2)
+
+    def test_no_date_column_no_index(self):
+        """DataFrame with neither Date column nor DatetimeIndex
+        should fall back to reset_index and try common column names."""
+        df = pd.DataFrame({"Datetime": ["2026-01-01", "2026-01-02"], "Close": [100, 101]})
+        result = _coerce_ohlcv_dates(df)
+        self.assertFalse(result.empty)
+        self.assertEqual(len(result), 2)
+
+    def test_empty_dataframe(self):
+        """Empty DataFrame should return empty Series."""
+        df = pd.DataFrame()
+        result = _coerce_ohlcv_dates(df)
+        self.assertTrue(result.empty)
+
+
+# =========================================================================
+# Edge-case tests for _load_ohlcv_from_smartmoney_db (lines 118-142)
+# =========================================================================
+
+
+@pytest.mark.unit
+class LoadOhlcvFromSmartmoneyDbTests(unittest.TestCase):
+    """Tests for _load_ohlcv_from_smartmoney_db."""
+
+    def test_returns_none_for_non_a_share(self):
+        """Non-A-share symbol should return None."""
+        result = _load_ohlcv_from_smartmoney_db("AAPL", "2026-01-01", "2026-01-10")
+        self.assertIsNone(result)
+
+    def test_import_error_on_smartmoney_vendor(self):
+        """ImportError propagates when smartmoney_vendor is not available."""
+        import builtins
+        real_import = builtins.__import__
+        def _mock_import(name, *args, **kwargs):
+            if "smartmoney_vendor" in name:
+                msg = f"No module named '{name}'"
+                raise ImportError(msg)
+            return real_import(name, *args, **kwargs)
+        with patch("builtins.__import__", side_effect=_mock_import):
+            with self.assertRaises(ImportError):
+                _load_ohlcv_from_smartmoney_db("000001.SZ", "2026-01-01", "2026-01-10")
+
+
+# =========================================================================
+# Edge-case tests for _load_ohlcv_from_akshare (lines 145-198)
+# =========================================================================
+
+
+@pytest.mark.unit
+class LoadOhlcvFromAkshareTests(unittest.TestCase):
+    """Tests for _load_ohlcv_from_akshare."""
+
+    def test_returns_none_for_non_a_share(self):
+        """Non-A-share symbol should return None."""
+        result = _load_ohlcv_from_akshare("AAPL", "2026-01-01", "2026-01-10")
+        self.assertIsNone(result)
+
+    def test_returns_none_when_akshare_not_installed(self):
+        """When akshare is not installed, the function should return None."""
+        import builtins
+        real_import = builtins.__import__
+        def _mock_import(name, *args, **kwargs):
+            if name == "akshare":
+                msg = f"No module named '{name}'"
+                raise ImportError(msg)
+            return real_import(name, *args, **kwargs)
+        with patch("builtins.__import__", side_effect=_mock_import):
+            result = _load_ohlcv_from_akshare("000001.SZ", "2026-01-01", "2026-01-10")
+            self.assertIsNone(result)
 
 
 if __name__ == "__main__":

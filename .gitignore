@@ -244,3 +244,7 @@ audit_reports/
 
 # Per-test scratch caches (analyst fetches, e.g. yfinance CSV dumps)
 tests/_tmp_cache/
+
+# Agent planning artifacts
+.omo/
+.scratch/
