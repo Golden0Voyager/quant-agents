@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -500,3 +501,286 @@ def test_local_catalog_used_when_litellm_omits_provider(tmp_path, monkeypatch):
     assert get_price_for_model("deepseek-v4-flash") == (0.14, 0.28)
     assert get_price_for_model("agnes-2.0-flash") == (0.00, 0.00)
     assert get_price_for_model("qwen3.7-max") == (2.50, 7.50)
+
+
+# ---- _parse_litellm_payload edge cases -----------------------------------
+
+
+class TestParseLitellmPayloadEdgeCases:
+    """Edge-case tests for _parse_litellm_payload."""
+
+    def test_skips_non_dict_entries(self):
+        """Non-dict entries in the payload are silently skipped."""
+        overlay = _parse_litellm_payload({
+            "string-entry": "not a dict",
+            "int-entry": 123,
+            "list-entry": [1, 2, 3],
+            "good-model": {
+                "input_cost_per_token": 1e-6,
+                "output_cost_per_token": 2e-6,
+                "litellm_provider": "openai",
+            },
+        })
+        assert "good-model" in overlay
+        assert overlay["good-model"] == (1.0, 2.0)
+        assert "string-entry" not in overlay
+        assert "int-entry" not in overlay
+        assert "list-entry" not in overlay
+
+    def test_skips_missing_cost_keys(self):
+        """Entries missing input_cost_per_token or output_cost_per_token
+        are skipped."""
+        overlay = _parse_litellm_payload({
+            "no-costs": {
+                "litellm_provider": "openai",
+            },
+            "only-input": {
+                "input_cost_per_token": 1e-6,
+                "litellm_provider": "openai",
+            },
+            "only-output": {
+                "output_cost_per_token": 2e-6,
+                "litellm_provider": "openai",
+            },
+            "good-model": {
+                "input_cost_per_token": 1e-6,
+                "output_cost_per_token": 2e-6,
+                "litellm_provider": "openai",
+            },
+        })
+        assert "good-model" in overlay
+        assert "no-costs" not in overlay
+        assert "only-input" not in overlay
+        assert "only-output" not in overlay
+
+    def test_skips_negative_costs(self):
+        """Entries with negative costs are skipped."""
+        overlay = _parse_litellm_payload({
+            "neg-input": {
+                "input_cost_per_token": -1e-6,
+                "output_cost_per_token": 2e-6,
+                "litellm_provider": "openai",
+            },
+            "neg-output": {
+                "input_cost_per_token": 1e-6,
+                "output_cost_per_token": -2e-6,
+                "litellm_provider": "openai",
+            },
+            "both-neg": {
+                "input_cost_per_token": -1e-6,
+                "output_cost_per_token": -2e-6,
+                "litellm_provider": "openai",
+            },
+            "good-model": {
+                "input_cost_per_token": 1e-6,
+                "output_cost_per_token": 2e-6,
+                "litellm_provider": "openai",
+            },
+        })
+        assert "good-model" in overlay
+        assert "neg-input" not in overlay
+        assert "neg-output" not in overlay
+        assert "both-neg" not in overlay
+
+    def test_skips_unparseable_float_costs(self):
+        """Entries with non-numeric cost values are skipped."""
+        overlay = _parse_litellm_payload({
+            "bad-input": {
+                "input_cost_per_token": "not-a-number",
+                "output_cost_per_token": 2e-6,
+                "litellm_provider": "openai",
+            },
+            "bad-output": {
+                "input_cost_per_token": 1e-6,
+                "output_cost_per_token": None,
+                "litellm_provider": "openai",
+            },
+            "good-model": {
+                "input_cost_per_token": 1e-6,
+                "output_cost_per_token": 2e-6,
+                "litellm_provider": "openai",
+            },
+        })
+        assert "good-model" in overlay
+        assert "bad-input" not in overlay
+        assert "bad-output" not in overlay
+
+    def test_skips_bad_deprecation_date(self):
+        """Entries with unparseable deprecation_date are kept (not skipped)."""
+        overlay = _parse_litellm_payload({
+            "bad-deprecation": {
+                "input_cost_per_token": 1e-6,
+                "output_cost_per_token": 2e-6,
+                "litellm_provider": "openai",
+                "deprecation_date": "not-a-date",
+            },
+            "good-model": {
+                "input_cost_per_token": 1e-6,
+                "output_cost_per_token": 2e-6,
+                "litellm_provider": "openai",
+            },
+        })
+        # Bad deprecation date is ignored, model is kept.
+        assert "bad-deprecation" in overlay
+        assert "good-model" in overlay
+
+
+# ---- get_price edge cases ------------------------------------------------
+
+
+class TestGetPriceEdgeCases:
+    """Edge-case tests for get_price."""
+
+    def test_provider_case_insensitive(self):
+        """get_price lowercases the provider before lookup."""
+        assert get_price("OpenAI", "gpt-5.4") == (2.50, 15.00)
+        assert get_price("DEEPSEEK", "deepseek-v4-flash") == (0.14, 0.28)
+        assert get_price("Agnes", "agnes-2.0-flash") == (0.00, 0.00)
+
+
+# ---- _load_litellm_overlay edge cases ------------------------------------
+
+
+class TestLitellmOverlayEdgeCases:
+    """Edge-case tests for _load_litellm_overlay error handling."""
+
+    def test_cache_read_os_error(self, tmp_path, monkeypatch):
+        """OSError during cache read (e.g. permission denied) falls through
+        to network, and if network also fails, returns empty overlay."""
+        cache_path = tmp_path / "litellm_pricing.json"
+        cache_path.write_text(json.dumps(_litellm_payload({
+            "cached-model": {"in": 1.0, "out": 2.0, "provider": "openai"},
+        })))
+        monkeypatch.setattr(pricing, "_LITELLM_CACHE_PATH", str(cache_path))
+
+        # Make read_text raise OSError to simulate permission issue.
+        # Both the initial cache read and the post-network-failure retry
+        # hit this, so we end up with an empty overlay.
+        with patch("pathlib.Path.read_text", side_effect=OSError("permission denied")):
+            with patch("httpx.get", side_effect=RuntimeError("network down")):
+                overlay = _load_litellm_overlay()
+        assert overlay == {}
+
+    def test_cache_corrupt_json(self, tmp_path, monkeypatch):
+        """Corrupt JSON in cache file falls through to network, and if
+        network also fails, returns empty overlay."""
+        cache_path = tmp_path / "litellm_pricing.json"
+        cache_path.write_text("{this is not valid json!!!")
+        monkeypatch.setattr(pricing, "_LITELLM_CACHE_PATH", str(cache_path))
+
+        with patch("httpx.get", side_effect=RuntimeError("network down")):
+            overlay = _load_litellm_overlay()
+        assert overlay == {}
+
+    def test_cache_write_os_error(self, tmp_path, monkeypatch):
+        """OSError during cache write (e.g. read-only filesystem) is handled
+        gracefully — the parsed result is still returned."""
+        cache_path = tmp_path / "litellm_pricing.json"
+        # No existing cache, so the fetch path runs.
+        monkeypatch.setattr(pricing, "_LITELLM_CACHE_PATH", str(cache_path))
+
+        fresh_payload = _litellm_payload({
+            "gpt-5.4": {"in": 2.50, "out": 15.00, "provider": "openai"},
+        })
+        with patch("httpx.get") as mock_get:
+            mock_get.return_value.json.return_value = fresh_payload
+            mock_get.return_value.raise_for_status = lambda: None
+            # Make write_text raise OSError — the parsed result should
+            # still be returned despite the write failure.
+            with patch("pathlib.Path.write_text", side_effect=OSError("read-only")):
+                overlay = _load_litellm_overlay()
+        assert overlay["gpt-5.4"] == (2.50, 15.00)
+
+    def test_network_failure_no_cache(self, tmp_path, monkeypatch):
+        """No cache file + network failure → empty overlay."""
+        cache_path = tmp_path / "missing.json"
+        monkeypatch.setattr(pricing, "_LITELLM_CACHE_PATH", str(cache_path))
+        # Patch at the point of use since `import httpx` is inside the function.
+        with patch("httpx.get", side_effect=RuntimeError("network down")):
+            overlay = _load_litellm_overlay()
+        assert overlay == {}
+
+    def test_network_failure_no_cache_direct(self, tmp_path, monkeypatch):
+        """No cache file + httpx import fails → empty overlay."""
+        cache_path = tmp_path / "missing.json"
+        monkeypatch.setattr(pricing, "_LITELLM_CACHE_PATH", str(cache_path))
+        # Simulate httpx not being available.
+        with patch.dict("sys.modules", {"httpx": None}):
+            overlay = _load_litellm_overlay()
+        assert overlay == {}
+
+    def test_network_failure_uses_stale_cache(self, tmp_path, monkeypatch):
+        """When network fails but a stale cache exists, the stale cache
+        is used as a fallback rather than returning empty."""
+        import time
+
+        cache_path = tmp_path / "litellm_pricing.json"
+        # Seed a cache with known data.
+        cache_payload = _litellm_payload({
+            "gpt-5.4": {"in": 2.50, "out": 15.00, "provider": "openai"},
+        })
+        cache_path.write_text(json.dumps(cache_payload))
+        # Backdate the cache so it looks stale.
+        old_time = time.time() - pricing._LITELLM_TTL_SECONDS - 60
+        os.utime(cache_path, (old_time, old_time))
+        monkeypatch.setattr(pricing, "_LITELLM_CACHE_PATH", str(cache_path))
+
+        # Network fails, but the stale cache should be used.
+        with patch("httpx.get", side_effect=RuntimeError("network down")):
+            overlay = _load_litellm_overlay()
+        assert overlay["gpt-5.4"] == (2.50, 15.00)
+
+    def test_network_returns_non_dict(self, tmp_path, monkeypatch):
+        """Network fetch returns non-dict data → empty overlay."""
+        cache_path = tmp_path / "litellm_pricing.json"
+        monkeypatch.setattr(pricing, "_LITELLM_CACHE_PATH", str(cache_path))
+        with patch("httpx.get") as mock_get:
+            mock_get.return_value.json.return_value = ["not", "a", "dict"]
+            mock_get.return_value.raise_for_status = lambda: None
+            overlay = _load_litellm_overlay()
+        assert overlay == {}
+
+    def test_backup_cache_read_error(self, tmp_path, monkeypatch):
+        """OSError reading the backup cache during integrity check is handled."""
+        cache_path = tmp_path / "litellm_pricing.json"
+        # Seed a large cache so the integrity check path runs.
+        big = _litellm_payload({
+            f"model-{i}": {"in": 1.0, "out": 2.0, "provider": "openai"}
+            for i in range(1000)
+        })
+        cache_path.write_text(json.dumps(big))
+        import time
+        old_time = time.time() - pricing._LITELLM_TTL_SECONDS - 60
+        os.utime(cache_path, (old_time, old_time))
+        monkeypatch.setattr(pricing, "_LITELLM_CACHE_PATH", str(cache_path))
+
+        fresh_payload = _litellm_payload({
+            "gpt-5.4": {"in": 2.50, "out": 15.00, "provider": "openai"},
+        })
+        with patch("httpx.get") as mock_get:
+            mock_get.return_value.json.return_value = fresh_payload
+            mock_get.return_value.raise_for_status = lambda: None
+            # Make the backup read fail during the integrity check by
+            # deleting the cache file after the initial read but before
+            # the integrity check reads it again.
+            import threading
+            event = threading.Event()
+
+            def delete_after_read(*args, **kwargs):
+                event.wait(timeout=0.1)
+                if cache_path.exists():
+                    cache_path.unlink()
+                return json.dumps(big)
+
+            # Patch read_text to delete cache on second call (backup read).
+            call_count = [0]
+            def side_effect(*args, **kwargs):
+                call_count[0] += 1
+                if call_count[0] == 2:
+                    raise OSError("backup cache unreadable")
+                return cache_path.read_text(*args, **kwargs)
+
+            with patch.object(Path, "read_text", side_effect=side_effect):
+                overlay = _load_litellm_overlay()
+        # Despite backup read failure, the fresh fetch should still be used.
+        assert overlay["gpt-5.4"] == (2.50, 15.00)
