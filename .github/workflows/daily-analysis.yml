@@ -333,11 +333,24 @@ jobs:
                 report_file="$ticker_dir/complete_report.md"
 
                 if [ -f "$report_file" ]; then
+                  docx_file="${report_file%.md}.docx"
+                  pandoc "$report_file" -f markdown -t docx -o "$docx_file" 2>/dev/null
+
+                  if [ -f "$docx_file" ]; then
+                    upload_file="$docx_file"
+                    upload_name="${ticker_name}_${DATE}.docx"
+                    file_type="doc"
+                  else
+                    upload_file="$report_file"
+                    upload_name="${ticker_name}_${DATE}.md"
+                    file_type="stream"
+                  fi
+
                   FILE_KEY=$(curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/files" \
                     -H "Authorization: Bearer $TOKEN" \
-                    -F "file_type=stream" \
-                    -F "file_name=${ticker_name}_${DATE}.md" \
-                    -F "file=@$report_file" \
+                    -F "file_type=$file_type" \
+                    -F "file_name=$upload_name" \
+                    -F "file=@$upload_file" \
                     | python3 -c "import json,sys; print(json.load(sys.stdin).get('data',{}).get('file_key',''))")
 
                   if [ -n "$FILE_KEY" ]; then
@@ -349,9 +362,10 @@ jobs:
                         \"msg_type\": \"file\",
                         \"content\": \"{\\\"file_key\\\": \\\"$FILE_KEY\\\"}\"
                       }" > /dev/null
-                    echo "Sent: ${ticker_name}_${DATE}.md"
+                    echo "Sent: $upload_name"
                   fi
 
+                  rm -f "$docx_file"
                   sleep 0.3
                 fi
               done
