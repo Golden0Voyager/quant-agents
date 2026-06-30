@@ -168,7 +168,7 @@ jobs:
 
           for batch_dir in reports/my reports/erin; do
             LATEST=$(ls -td "$batch_dir"/batch_*/ 2>/dev/null | head -1)
-            for ticker_dir in "$LATEST"*/ 2>/dev/null; do
+            for ticker_dir in "$LATEST"*/; do
               [ -d "$ticker_dir" ] || continue
               ticker_name=$(basename "$ticker_dir")
               decision_file="$ticker_dir/reports/final_trade_decision.md"
