@@ -23,7 +23,7 @@ from rich.text import Text
 from cli.announcements import display_announcements, fetch_announcements
 from cli.batch_runner import BatchRunner
 from cli.dashboard import (
-    ANALYST_ORDER,  # noqa: F811 — string list needed at line 1525
+    ANALYST_ORDER as ANALYST_KEY_ORDER,  # noqa: F811 — string list for update_analyst_statuses (~line 1401)
 )
 from cli.profiles import list_profiles, load_profile, save_profile
 from cli.stats_handler import StatsCallbackHandler
@@ -1400,10 +1400,9 @@ def update_analyst_statuses(message_buffer, chunk, wall_time_tracker=None):
     if wall_time_tracker is not None:
         sync_analyst_tracker_from_chunk(wall_time_tracker, chunk)
 
-    for analyst_key in ANALYST_ORDER:
+    for analyst_key in ANALYST_KEY_ORDER:
         if analyst_key not in selected:
             continue
-
         agent_name = ANALYST_AGENT_NAMES[analyst_key]
         report_key = ANALYST_REPORT_MAP[analyst_key]
 
