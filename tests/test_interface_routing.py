@@ -2,24 +2,30 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tradingagents.dataflows.symbol_utils import NoMarketDataError
+
 
 @pytest.mark.unit
 class TestRouteToVendor:
     def test_a_share_prefers_akshare(self):
-        """A-share tickers (.SS/.SZ/.BJ) should be served by akshare first."""
+        """A-share tickers (.SS/.SZ/.BJ) route to smartmoney_db first, then akshare."""
         from tradingagents.dataflows import interface
 
+        fake_sm = MagicMock(
+            side_effect=NoMarketDataError("600519.SS", "600519.SS", "Not in local DB")
+        )
         fake_ak = MagicMock(return_value="AKSHARE_RESULT")
         fake_yf = MagicMock(return_value="YFINANCE_RESULT")
         with patch.dict(
             interface.VENDOR_METHODS["get_fundamentals"],
-            {"akshare": fake_ak, "yfinance": fake_yf},
+            {"smartmoney_db": fake_sm, "akshare": fake_ak, "yfinance": fake_yf},
             clear=False,
         ):
             result = interface.route_to_vendor(
                 "get_fundamentals", "600519.SS", "2026-05-14"
             )
         assert result == "AKSHARE_RESULT"
+        fake_sm.assert_called_once_with("600519.SS", "2026-05-14")
         fake_ak.assert_called_once_with("600519.SS", "2026-05-14")
         fake_yf.assert_not_called()
 
@@ -50,10 +56,13 @@ class TestRouteToVendor:
         def ak_raises(*a, **kw):
             raise AlphaVantageRateLimitError("simulated akshare unavailability")
 
+        fake_sm = MagicMock(
+            side_effect=NoMarketDataError("600519.SS", "600519.SS", "Not in local DB")
+        )
         fake_yf = MagicMock(return_value="YFINANCE_RESULT")
         with patch.dict(
             interface.VENDOR_METHODS["get_fundamentals"],
-            {"akshare": ak_raises, "yfinance": fake_yf},
+            {"smartmoney_db": fake_sm, "akshare": ak_raises, "yfinance": fake_yf},
             clear=False,
         ):
             result = interface.route_to_vendor(

@@ -5,6 +5,7 @@ import os
 os.environ["TQDM_DISABLE"] = "1"
 
 import json
+import shutil
 import threading
 import time
 from datetime import datetime
@@ -117,6 +118,28 @@ class BatchRunner:
         except Exception:
             pass
         return None
+
+    @staticmethod
+    def _resolve_company_name(ticker: str, fallback_dir_name: str = "") -> str:
+        """Resolve a human-readable company name for *ticker*.
+
+        Tries ``resolve_ticker`` first, then falls back to extracting a name
+        from a directory name like ``比亚迪_002594.SZ``.  Returns an empty
+        string when nothing can be determined.
+        """
+        try:
+            from tradingagents.ticker_resolver import resolve_ticker
+            resolved = resolve_ticker(ticker)
+            name = resolved.get("company_name", "")
+            if name:
+                return name
+        except Exception:
+            pass
+        if "_" in fallback_dir_name:
+            candidate = fallback_dir_name.split("_", 1)[0]
+            if candidate and candidate != fallback_dir_name:
+                return candidate
+        return ""
 
     @staticmethod
     def _build_ticker_dir_name(ticker: str, company_name: str = "") -> str:
@@ -578,21 +601,9 @@ class BatchRunner:
         """
         import re
 
-        # Company name — try the directory name first, then resolve_ticker
-        company = ""
+        # Company name — try resolve_ticker first, then fall back to directory name
         ticker_dir = report_path.parent
-        if ticker_dir.name != ticker:
-            # Directory is named like "比亚迪_002594.SZ" or "002594.SZ"
-            company = ticker_dir.name.split("_")[0] if "_" in ticker_dir.name else ""
-            if company == ticker_dir.name:
-                company = ""
-        if not company:
-            try:
-                from tradingagents.ticker_resolver import resolve_ticker
-                resolved = resolve_ticker(ticker)
-                company = resolved.get("company_name", "")
-            except Exception:
-                pass
+        company = self._resolve_company_name(ticker, fallback_dir_name=ticker_dir.name)
 
         # Read the report; skip if it is empty or unreadable.
         try:
@@ -628,6 +639,38 @@ class BatchRunner:
         fields = self._parse_summary_fields(decision, trader)
         self.summaries[ticker] = {"company": company or ticker, **fields}
 
+    def _copy_existing_report(self, ticker: str, report_path: Path) -> None:
+        """Copy an existing report into the current batch output directory.
+
+        When a ticker has already been analyzed today (from a previous batch),
+        this copies ``complete_report.md`` and all sub-folders
+        (``1_analysts/``, ``2_research/``, ``3_trading/``, ``4_risk/``,
+        ``5_portfolio/``) into the current batch's ticker directory so the
+        report is physically present even though no new analysis ran.
+        """
+        src_dir = report_path.parent
+        if not src_dir.is_dir():
+            return
+
+        company = self._resolve_company_name(ticker, fallback_dir_name=src_dir.name)
+
+        dst_dir = self.output_dir / self._build_ticker_dir_name(ticker, company)
+        if dst_dir.resolve() == src_dir.resolve():
+            return
+
+        src_report = src_dir / "complete_report.md"
+        if src_report.exists():
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_report, dst_dir / "complete_report.md")
+
+        for subdir in sorted(src_dir.iterdir()):
+            if subdir.is_dir() and subdir.name[0].isdigit():
+                dst_subdir = dst_dir / subdir.name
+                dst_subdir.mkdir(parents=True, exist_ok=True)
+                for f in subdir.iterdir():
+                    if f.is_file():
+                        shutil.copy2(f, dst_subdir / f.name)
+
     def run(self) -> None:
         """Run the full batch."""
         layout = create_dashboard_layout()
@@ -656,7 +699,10 @@ class BatchRunner:
                 if existing_report is not None:
                     self.completed_tickers.add(ticker)
                     self.dashboard.mark_skipped(ticker)
-                    self.dashboard.add_message("Skip", f"⏭ {ticker} — report already exists, skipping")
+                    self.dashboard.add_message("Copy", f"📋 {ticker} — report exists, copying from previous batch")
+                    # Copy the existing report files to the current batch
+                    # output directory so the report is physically present.
+                    self._copy_existing_report(ticker, existing_report)
                     # Backfill the summary from the existing report so the final
                     # table shows its rating / levels instead of a blank row.
                     with self._lock:

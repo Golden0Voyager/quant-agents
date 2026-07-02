@@ -328,11 +328,47 @@ def get_balance_sheet(
     freq: str = "quarterly",
     curr_date: str | None = None,
 ) -> str:
-    """Balance sheet is not stored in quant_core.db — always fall back."""
-    raise RuntimeError(
-        "Balance sheet data not available in quant_core.db. "
-        "Route to_vendor will fall back to akshare."
+    """Read key balance-sheet metrics from quant_core.db quarterly_financials.
+
+    Covers debt ratio, book value per share, and operating cash flow.
+    Falls back to akshare if not available locally.
+    """
+    code = _to_smartmoney_symbol(symbol)
+    df = _df_from_sql(
+        """
+        SELECT report_period, debt_ratio, bps, operating_cashflow
+        FROM quarterly_financials
+        WHERE ts_code = ?
+        ORDER BY report_period DESC
+        LIMIT 1
+        """,
+        (code,),
     )
+    if df is None or df.empty:
+        raise RuntimeError(
+            "Balance sheet data not available in quant_core.db. "
+            "Route to_vendor will fall back to akshare."
+        )
+
+    row = df.iloc[0]
+    period = row["report_period"]
+    lines = [
+        f"# Balance Sheet for {symbol.upper()} (截至 {period})",
+        "# Source: quant_core.db (local SQLite, quarterly_financials)",
+        "",
+    ]
+    for col, label, fmt in [
+        ("debt_ratio", "资产负债率", ".2f%"),
+        ("bps", "每股净资产", ".2f"),
+        ("operating_cashflow", "经营活动现金流净额", ",.0f"),
+    ]:
+        v = row.get(col)
+        if pd.notna(v):
+            if "%" in fmt:
+                lines.append(f"- {label}: {v:.2f}%")
+            else:
+                lines.append(f"- {label}: {v:{fmt}}")
+    return "\n".join(lines)
 
 
 def get_cashflow(
@@ -340,11 +376,40 @@ def get_cashflow(
     freq: str = "quarterly",
     curr_date: str | None = None,
 ) -> str:
-    """Cashflow statement is not stored in quant_core.db — always fall back."""
-    raise RuntimeError(
-        "Cashflow statement not available in quant_core.db. "
-        "Route to_vendor will fall back to akshare."
+    """Read operating cash flow from quant_core.db quarterly_financials.
+
+    Only operating_cashflow is available from quarterly_financials — this
+    is not a full cash flow statement. Falls back to akshare if not available
+    locally.
+    """
+    code = _to_smartmoney_symbol(symbol)
+    df = _df_from_sql(
+        """
+        SELECT report_period, operating_cashflow
+        FROM quarterly_financials
+        WHERE ts_code = ?
+        ORDER BY report_period DESC
+        LIMIT 1
+        """,
+        (code,),
     )
+    if df is None or df.empty:
+        raise RuntimeError(
+            "Cashflow statement not available in quant_core.db. "
+            "Route to_vendor will fall back to akshare."
+        )
+
+    row = df.iloc[0]
+    period = row["report_period"]
+    lines = [
+        f"# Operating Cash Flow for {symbol.upper()} (截至 {period})",
+        "# Source: quant_core.db (local SQLite, quarterly_financials)",
+        "",
+    ]
+    v = row.get("operating_cashflow")
+    if pd.notna(v):
+        lines.append(f"- 经营活动现金流净额: {v:,.0f}")
+    return "\n".join(lines)
 
 
 def get_income_statement(
@@ -352,11 +417,53 @@ def get_income_statement(
     freq: str = "quarterly",
     curr_date: str | None = None,
 ) -> str:
-    """Income statement is not stored in quant_core.db — always fall back."""
-    raise RuntimeError(
-        "Income statement not available in quant_core.db. "
-        "Route to_vendor will fall back to akshare."
+    """Read income-statement metrics from quant_core.db quarterly_financials.
+
+    Covers revenue, net profit, margins, growth rates, EPS, and ROE.
+    Falls back to akshare if not available locally.
+    """
+    code = _to_smartmoney_symbol(symbol)
+    df = _df_from_sql(
+        """
+        SELECT report_period, revenue, net_profit, gross_margin, net_margin,
+               revenue_growth, profit_growth, eps, roe
+        FROM quarterly_financials
+        WHERE ts_code = ?
+        ORDER BY report_period DESC
+        LIMIT 1
+        """,
+        (code,),
     )
+    if df is None or df.empty:
+        raise RuntimeError(
+            "Income statement not available in quant_core.db. "
+            "Route to_vendor will fall back to akshare."
+        )
+
+    row = df.iloc[0]
+    period = row["report_period"]
+    lines = [
+        f"# Income Statement for {symbol.upper()} (截至 {period})",
+        "# Source: quant_core.db (local SQLite, quarterly_financials)",
+        "",
+    ]
+    for col, label, fmt in [
+        ("revenue", "营业总收入", ",.0f"),
+        ("net_profit", "净利润", ",.0f"),
+        ("gross_margin", "毛利率", ".2f"),
+        ("net_margin", "净利率", ".2f"),
+        ("revenue_growth", "营收同比增长", ".2f%"),
+        ("profit_growth", "净利润同比增长", ".2f%"),
+        ("eps", "基本每股收益", ".2f"),
+        ("roe", "ROE", ".2f"),
+    ]:
+        v = row.get(col)
+        if pd.notna(v):
+            if "%" in fmt:
+                lines.append(f"- {label}: {v:.2f}%")
+            else:
+                lines.append(f"- {label}: {v:{fmt}}")
+    return "\n".join(lines)
 
 
 # ===========================================================================
@@ -453,7 +560,125 @@ def get_northbound_hold(symbol: str) -> str:
 
 
 def get_industry_valuation(symbol: str) -> str:
-    raise RuntimeError("Industry valuation not available in quant_core.db")
+    """Read industry valuation comparison from quant_core.db.
+
+    Uses three local tables:
+      1. stock_list — resolve the stock's industry
+      2. sector_industry — industry average PE/PB/PS
+      3. historical_valuation — the stock's own valuation history
+
+    Falls back to akshare if no data is available locally.
+    """
+    code = _to_smartmoney_symbol(symbol)
+
+    name_df = _df_from_sql(
+        "SELECT name, industry FROM stock_list WHERE code = ?",
+        (code,),
+    )
+    if name_df is None or name_df.empty:
+        raise RuntimeError(
+            "Industry valuation not available in quant_core.db. "
+            "Route to_vendor will fall back to akshare."
+        )
+    company_name = name_df["name"].iloc[0]
+    industry = name_df["industry"].iloc[0]
+
+    sector_df = _df_from_sql(
+        """
+        SELECT avg_pe, avg_pb, avg_ps, avg_roe, avg_revenue_growth,
+               avg_profit_growth, total_market_cap
+        FROM sector_industry
+        WHERE industry_name = ?
+        ORDER BY trade_date DESC
+        LIMIT 1
+        """,
+        (industry,),
+    )
+
+    stock_df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, pe_ttm, pb, ps_ttm, dividend_yield
+        FROM historical_valuation
+        WHERE ts_code = ?
+        ORDER BY trade_date DESC
+        LIMIT 1
+        """,
+        (code,),
+    )
+
+    if (sector_df is None or sector_df.empty) and (stock_df is None or stock_df.empty):
+        raise RuntimeError(
+            "Industry valuation not available in quant_core.db. "
+            "Route to_vendor will fall back to akshare."
+        )
+
+    lines = [
+        f"# {symbol.upper()} ({company_name}) Industry Valuation Comparison",
+        "# Source: quant_core.db (local SQLite, sector_industry + historical_valuation)",
+        "",
+        f"## {symbol.upper()} vs {industry} Industry",
+        "",
+    ]
+
+    if stock_df is not None and not stock_df.empty:
+        sr = stock_df.iloc[0]
+        lines.append("**Target Stock Metrics:**")
+        for col, label, fmt in [
+            ("pe_ttm", "PE(TTM)", ".2f"),
+            ("pb", "PB", ".2f"),
+            ("ps_ttm", "PS(TTM)", ".2f"),
+        ]:
+            v = sr.get(col)
+            if pd.notna(v):
+                lines.append(f"- {label}: {v:{fmt}}")
+        v = sr.get("dividend_yield")
+        if pd.notna(v):
+            lines.append(f"- 股息率: {v:.2f}%")
+        lines.append("")
+
+    if sector_df is not None and not sector_df.empty:
+        ind = sector_df.iloc[0]
+        lines.append("**Industry Average Metrics:**")
+        for col, label, fmt in [
+            ("avg_pe", "平均 PE", ".2f"),
+            ("avg_pb", "平均 PB", ".2f"),
+            ("avg_ps", "平均 PS", ".2f"),
+        ]:
+            v = ind.get(col)
+            if pd.notna(v):
+                lines.append(f"- {label}: {v:{fmt}}")
+        v = ind.get("avg_roe")
+        if pd.notna(v):
+            lines.append(f"- 平均 ROE: {v:.2f}%")
+        v = ind.get("total_market_cap")
+        if pd.notna(v):
+            lines.append(f"- 行业总市值: {v:,.0f}")
+        lines.append("")
+
+    if (
+        sector_df is not None
+        and not sector_df.empty
+        and stock_df is not None
+        and not stock_df.empty
+    ):
+        ind = sector_df.iloc[0]
+        sr = stock_df.iloc[0]
+        pe_ttm = sr.get("pe_ttm")
+        avg_pe = ind.get("avg_pe")
+        if pd.notna(pe_ttm) and pd.notna(avg_pe) and avg_pe > 0:
+            ratio = pe_ttm / avg_pe
+            if ratio < 0.8:
+                verdict = "below industry average (可能低估)"
+            elif ratio > 1.2:
+                verdict = "above industry average (可能高估)"
+            else:
+                verdict = "in line with industry average (估值合理)"
+            lines.append(
+                f"**Valuation Verdict**: PE(TTM) {pe_ttm:.2f} vs industry "
+                f"{avg_pe:.2f} — {ratio:.2f}x, {verdict}"
+            )
+
+    return "\n".join(lines)
 
 
 def get_earnings_estimates(symbol: str) -> str:
