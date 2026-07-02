@@ -1,6 +1,7 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from time import monotonic
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -152,3 +153,60 @@ def sync_analyst_tracker_from_chunk(
         if not active_found:
             tracker.mark_started(spec.key, started_at=current_time)
             active_found = True
+
+
+_REPORT_QUALITY_RELIABLE = "reliable"
+_REPORT_QUALITY_NO_DATA = "no_data"
+_REPORT_QUALITY_SPARSE = "sparse"
+
+
+def validate_report_quality(report_key: str, report_text: str) -> str:
+    """Classify an analyst report's data quality.
+
+    Returns one of:
+    - ``"reliable"`` — report has >= 50 words and no NO_DATA_AVAILABLE sentinel.
+    - ``"no_data"`` — report is empty or contains the no-data sentinel.
+    - ``"sparse"`` — report exists but has fewer than 50 words.
+    """
+    if not report_text or not report_text.strip():
+        return _REPORT_QUALITY_NO_DATA
+
+    if "NO_DATA_AVAILABLE" in report_text:
+        return _REPORT_QUALITY_NO_DATA
+
+    word_count = len(report_text.split())
+    if word_count < 50:
+        return _REPORT_QUALITY_SPARSE
+
+    return _REPORT_QUALITY_RELIABLE
+
+
+def build_data_quality_summary(
+    state: Mapping[str, Any],
+    specs: list[AnalystNodeSpec],
+) -> str:
+    """Build a data quality summary block from all analyst reports in state."""
+    lines: list[str] = ["## Data Quality Summary", ""]
+    lines.append("| Analyst | Quality |")
+    lines.append("|---------|---------|")
+
+    unreliable_count = 0
+    for spec in specs:
+        report_text = state.get(spec.report_key, "")
+        quality = validate_report_quality(spec.report_key, report_text)
+        label = spec.agent_node
+        emoji = {"reliable": "✅", "no_data": "❌", "sparse": "⚠️"}.get(quality, "❓")
+        lines.append(f"| {label} | {emoji} {quality} |")
+        if quality != "reliable":
+            unreliable_count += 1
+
+    lines.append("")
+    if unreliable_count > 0:
+        lines.append(
+            f"**{unreliable_count} of {len(specs)} analyst reports have data "
+            "quality issues. Treat conclusions from affected reports with caution.**"
+        )
+    else:
+        lines.append("**All analyst reports have reliable data.**")
+
+    return "\n".join(lines)
