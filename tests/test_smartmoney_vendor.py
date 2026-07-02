@@ -132,6 +132,64 @@ def _create_full_test_db(path):
             PRIMARY KEY (ts_code, report_date)
         );
         INSERT INTO shareholder_count VALUES ('600519','2026-06-19',100000,-2.5,5000);
+
+        CREATE TABLE quarterly_financials (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts_code TEXT NOT NULL,
+            report_period TEXT NOT NULL,
+            revenue REAL,
+            net_profit REAL,
+            operating_cashflow REAL,
+            roe REAL,
+            gross_margin REAL,
+            net_margin REAL,
+            revenue_growth REAL,
+            profit_growth REAL,
+            debt_ratio REAL,
+            eps REAL,
+            bps REAL,
+            UNIQUE(ts_code, report_period)
+        );
+        INSERT INTO quarterly_financials
+            (id, ts_code, report_period, revenue, net_profit, operating_cashflow,
+             roe, gross_margin, net_margin, revenue_growth, profit_growth,
+             debt_ratio, eps, bps)
+        VALUES
+            (1,'600519','2026-03-31',5.47e10,2.72e10,2.69e10,
+             10.57,89.76,52.22,6.34,1.47,
+             12.12,21.76,216.32);
+
+        CREATE TABLE sector_industry (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            industry_name TEXT NOT NULL,
+            trade_date DATE NOT NULL,
+            avg_pe REAL,
+            avg_pb REAL,
+            avg_ps REAL,
+            avg_roe REAL,
+            avg_revenue_growth REAL,
+            avg_profit_growth REAL,
+            total_market_cap REAL,
+            fund_inflow_rank INTEGER,
+            UNIQUE(industry_name, trade_date)
+        );
+        INSERT INTO sector_industry
+            (id, industry_name, trade_date, avg_pe, avg_pb, avg_ps, total_market_cap)
+        VALUES
+            (1,'白酒','2026-07-01',22.15,2.74,4.43,3.13e11);
+
+        CREATE TABLE historical_valuation (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts_code TEXT NOT NULL,
+            trade_date DATE NOT NULL,
+            pe_ttm REAL,
+            pb REAL,
+            ps_ttm REAL,
+            dividend_yield REAL,
+            UNIQUE(ts_code, trade_date)
+        );
+        INSERT INTO historical_valuation VALUES (1,'600519','2026-07-01',18.03,5.51,8.51,NULL);
+        INSERT INTO historical_valuation VALUES (2,'600519','2026-06-30',17.92,5.47,8.45,4.39);
     """)
     conn.commit()
     conn.close()
@@ -522,12 +580,6 @@ class RuntimeErrorStubsTests(unittest.TestCase):
             get_northbound_hold("600519.SS")
         self.assertIn("Northbound holdings", str(ctx.exception))
 
-    def test_get_industry_valuation_raises(self):
-        from tradingagents.dataflows.smartmoney_vendor import get_industry_valuation
-        with self.assertRaises(RuntimeError) as ctx:
-            get_industry_valuation("600519.SS")
-        self.assertIn("Industry valuation", str(ctx.exception))
-
     def test_get_news_raises(self):
         from tradingagents.dataflows.smartmoney_vendor import get_news
         with self.assertRaises(RuntimeError) as ctx:
@@ -546,23 +598,142 @@ class RuntimeErrorStubsTests(unittest.TestCase):
             get_macro_indicators()
         self.assertIn("Macro indicators", str(ctx.exception))
 
-    def test_get_balance_sheet_raises(self):
+
+@pytest.mark.unit
+class GetBalanceSheetFromDbTests(unittest.TestCase):
+    """get_balance_sheet now reads from quarterly_financials table."""
+
+    def test_returns_data(self):
         from tradingagents.dataflows.smartmoney_vendor import get_balance_sheet
-        with self.assertRaises(RuntimeError) as ctx:
-            get_balance_sheet("600519.SS")
-        self.assertIn("Balance sheet", str(ctx.exception))
 
-    def test_get_cashflow_raises(self):
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = get_balance_sheet("600519.SS")
+                self.assertIn("资产负债率", result)
+                self.assertIn("12.12", result)
+                self.assertIn("每股净资产", result)
+                self.assertIn("216.32", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_raises_on_no_data(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_balance_sheet
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path), self.assertRaises(RuntimeError) as ctx:
+                get_balance_sheet("999999.SS")
+            self.assertIn("Balance sheet", str(ctx.exception))
+        finally:
+            os.unlink(db_path)
+
+
+@pytest.mark.unit
+class GetCashflowFromDbTests(unittest.TestCase):
+    """get_cashflow now reads from quarterly_financials table."""
+
+    def test_returns_data(self):
         from tradingagents.dataflows.smartmoney_vendor import get_cashflow
-        with self.assertRaises(RuntimeError) as ctx:
-            get_cashflow("600519.SS")
-        self.assertIn("Cashflow statement", str(ctx.exception))
 
-    def test_get_income_statement_raises(self):
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = get_cashflow("600519.SS")
+                self.assertIn("经营活动现金流净额", result)
+                self.assertIn("26,900,000,000", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_raises_on_no_data(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_cashflow
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path), self.assertRaises(RuntimeError) as ctx:
+                get_cashflow("999999.SS")
+            self.assertIn("Cashflow", str(ctx.exception))
+        finally:
+            os.unlink(db_path)
+
+
+@pytest.mark.unit
+class GetIncomeStatementFromDbTests(unittest.TestCase):
+    """get_income_statement now reads from quarterly_financials table."""
+
+    def test_returns_data(self):
         from tradingagents.dataflows.smartmoney_vendor import get_income_statement
-        with self.assertRaises(RuntimeError) as ctx:
-            get_income_statement("600519.SS")
-        self.assertIn("Income statement", str(ctx.exception))
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = get_income_statement("600519.SS")
+                self.assertIn("营业总收入", result)
+                self.assertIn("54,700,000,000", result)
+                self.assertIn("毛利率", result)
+                self.assertIn("89.76", result)
+                self.assertIn("基本每股收益", result)
+                self.assertIn("21.76", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_raises_on_no_data(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_income_statement
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path), self.assertRaises(RuntimeError) as ctx:
+                get_income_statement("999999.SS")
+            self.assertIn("Income statement", str(ctx.exception))
+        finally:
+            os.unlink(db_path)
+
+
+@pytest.mark.unit
+class GetIndustryValuationFromDbTests(unittest.TestCase):
+    """get_industry_valuation now reads from sector_industry + historical_valuation."""
+
+    def test_returns_data(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_industry_valuation
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = get_industry_valuation("600519.SS")
+                self.assertIn("白酒", result)
+                self.assertIn("18.03", result)  # pe_ttm
+                self.assertIn("5.51", result)  # pb
+                self.assertIn("22.15", result)  # industry avg_pe
+                self.assertIn("2.74", result)  # industry avg_pb
+        finally:
+            os.unlink(db_path)
+
+    def test_raises_on_no_data(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_industry_valuation
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path), self.assertRaises(RuntimeError) as ctx:
+                get_industry_valuation("999999.SS")
+            self.assertIn("Industry valuation", str(ctx.exception))
+        finally:
+            os.unlink(db_path)
 
 
 @pytest.mark.unit
