@@ -35,7 +35,18 @@ def create_fundamentals_analyst(llm):
             + " Also use `get_earnings_estimates` to understand forward-looking consensus expectations for revenue, EPS, and profit growth. Compare estimates with historical actuals to identify expectation gaps."
             + " Use `get_shareholder_count` to assess筹码集中度 (declining count suggests institutional accumulation; rising count suggests retail influx)."
             + " Use `get_dividend_history` to evaluate shareholder return policy and dividend yield trends."
-            + get_language_instruction(),
+            + (
+                "\n\n## Missing Data Protocol\n"
+                "If any tool call returns NO_DATA_AVAILABLE or an empty result, "
+                "explicitly state that the data dimension is unavailable. "
+                "Never fabricate numbers, infer missing values, or extrapolate "
+                "from partial data. "
+                "Set your confidence level to low when data is insufficient "
+                "(fewer than 3 data points or empty returns). "
+                "Add a data_availability marker per data dimension in your "
+                "report: ✅ (data available), ⚠️ (data partial/sparse), "
+                "❌ (data unavailable)."
+            ) + get_language_instruction(),
         )
 
         prompt = ChatPromptTemplate.from_messages(

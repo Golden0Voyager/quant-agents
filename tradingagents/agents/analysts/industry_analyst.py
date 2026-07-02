@@ -31,7 +31,18 @@ def create_industry_analyst(llm):
             "Highlight any valuation anomalies or regime shifts. Provide specific, actionable "
             "insights with supporting evidence to help traders make informed decisions."
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
-            + get_language_instruction()
+            + (
+                "\n\n## Missing Data Protocol\n"
+                "If any tool call returns NO_DATA_AVAILABLE or an empty result, "
+                "explicitly state that the data dimension is unavailable. "
+                "Never fabricate numbers, infer missing values, or extrapolate "
+                "from partial data. "
+                "Set your confidence level to low when data is insufficient "
+                "(fewer than 3 data points or empty returns). "
+                "Add a data_availability marker per data dimension in your "
+                "report: ✅ (data available), ⚠️ (data partial/sparse), "
+                "❌ (data unavailable)."
+            ) + get_language_instruction()
         )
 
         prompt = ChatPromptTemplate.from_messages(
