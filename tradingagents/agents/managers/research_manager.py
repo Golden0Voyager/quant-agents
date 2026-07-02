@@ -6,6 +6,7 @@ from tradingagents.agents.schemas import ResearchPlan, render_research_plan
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
+    get_or_build_data_quality_summary,
 )
 from tradingagents.agents.utils.structured import (
     bind_structured,
@@ -18,6 +19,7 @@ def create_research_manager(llm):
 
     def research_manager_node(state) -> dict:
         instrument_context = get_instrument_context_from_state(state)
+        data_quality_summary = get_or_build_data_quality_summary(state)
         history = state["investment_debate_state"].get("history", "")
         analysis_date = state.get("trade_date", "unknown")
 
@@ -27,6 +29,9 @@ def create_research_manager(llm):
 ⚠️ Temporal integrity: The current analysis date is {analysis_date}. All data points, events, and financial figures you cite MUST have occurred on or before this date. Do not reference future events, future financial results, or future announcements.
 
 {instrument_context}
+
+**Data Quality of Analyst Reports:**
+{data_quality_summary}
 
 ---
 
