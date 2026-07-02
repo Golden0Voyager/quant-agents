@@ -143,10 +143,12 @@ jobs:
           mkdir -p reports/combined
           # Merge both report directories into combined/
           for dir in reports/my reports/erin; do
-            for batch_dir in "$dir"/batch_*/; do
+            # Match YYYYMMDD_batch_<suffix>/ (actual cli output dir layout)
+            for batch_dir in "$dir"/[0-9]*_batch_*/; do
               [ -d "$batch_dir" ] || continue
               # Copy batch run: flatten into combined/<ticker>/
               for ticker_dir in "$batch_dir"*/; do
+                [ -d "$ticker_dir" ] || continue
                 ticker=$(basename "$ticker_dir")
                 cp -r "$ticker_dir" "reports/combined/$ticker" 2>/dev/null || true
               done
@@ -155,48 +157,19 @@ jobs:
           echo "Combined reports:"
           ls reports/combined/
           # Pick the latest batch dir for summary generation
-          LATEST_MY=$(ls -td reports/my/batch_*/ 2>/dev/null | head -1)
-          LATEST_ERIN=$(ls -td reports/erin/batch_*/ 2>/dev/null | head -1)
+          LATEST_MY=$(ls -td reports/my/[0-9]*_batch_*/ 2>/dev/null | head -1)
+          LATEST_ERIN=$(ls -td reports/erin/[0-9]*_batch_*/ 2>/dev/null | head -1)
           echo "LATEST_MY=$LATEST_MY"
           echo "LATEST_ERIN=$LATEST_ERIN"
 
       - name: Generate combined summary
         run: |
-          DATE=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
-          echo "# 每日分析结论 - $DATE" > /tmp/feishu_summary.md
-          echo "" >> /tmp/feishu_summary.md
-
-          for batch_dir in reports/my reports/erin; do
-            LATEST=$(ls -td "$batch_dir"/batch_*/ 2>/dev/null | head -1)
-            for ticker_dir in "$LATEST"*/; do
-              [ -d "$ticker_dir" ] || continue
-              ticker_name=$(basename "$ticker_dir")
-              decision_file="$ticker_dir/reports/final_trade_decision.md"
-
-              if [ -f "$decision_file" ]; then
-                RATING=$(grep -m1 "Rating" "$decision_file" | sed 's/.*\*\*Rating\*\*: *//' | tr -d '*')
-                ENTRY=$(grep -m1 "Entry" "$decision_file" | grep -v "Entry Price" | sed 's/.*\*\*Entry\*\*: *//' | tr -d '*')
-                STOP=$(grep -m1 "Stop" "$decision_file" | grep -v "Stop Loss" | sed 's/.*\*\*Stop\*\*: *//' | tr -d '*')
-                TARGET=$(grep -m1 "Price Target" "$decision_file" | sed 's/.*\*\*Price Target\*\*: *//' | tr -d '*')
-                SIZE=$(grep -m1 "Size" "$decision_file" | sed 's/.*\*\*Size\*\*: *//' | tr -d '*')
-                SUMMARY_LINE=$(grep -m1 "Executive Summary" "$decision_file" | sed 's/.*\*\*Executive Summary\*\*: *//' | tr -d '*')
-
-                echo "**${ticker_name}**" >> /tmp/feishu_summary.md
-                echo "- 评级: ${RATING:-—}" >> /tmp/feishu_summary.md
-                echo "- 入场: ${ENTRY:-—}" >> /tmp/feishu_summary.md
-                echo "- 止损: ${STOP:-—}" >> /tmp/feishu_summary.md
-                echo "- 目标: ${TARGET:-—}" >> /tmp/feishu_summary.md
-                echo "- 仓位: ${SIZE:-—}" >> /tmp/feishu_summary.md
-                if [ -n "$SUMMARY_LINE" ]; then
-                  echo "- 理由: ${SUMMARY_LINE:0:100}..." >> /tmp/feishu_summary.md
-                fi
-                echo "" >> /tmp/feishu_summary.md
-              fi
-            done
-          done
-
-          echo "Summary saved to /tmp/feishu_summary.md"
-          cat /tmp/feishu_summary.md >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+          uv run python scripts/notify_feishu.py \
+            --my-dir reports/my \
+            --erin-dir reports/erin \
+            --summary-only 2>/dev/null \
+            > /tmp/feishu_summary.md
+          cat /tmp/feishu_summary.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
 
       - name: Create GitHub Release with combined reports
         if: success()
@@ -333,18 +306,9 @@ jobs:
                 report_file="$ticker_dir/complete_report.md"
 
                 if [ -f "$report_file" ]; then
-                  docx_file="${report_file%.md}.docx"
-                  pandoc "$report_file" -f markdown -t docx -o "$docx_file" 2>/dev/null
-
-                  if [ -f "$docx_file" ]; then
-                    upload_file="$docx_file"
-                    upload_name="${ticker_name}_${DATE}.docx"
-                    file_type="doc"
-                  else
-                    upload_file="$report_file"
-                    upload_name="${ticker_name}_${DATE}.md"
-                    file_type="stream"
-                  fi
+                  upload_file="$report_file"
+                  upload_name="${ticker_name}_${DATE}.md"
+                  file_type="stream"
 
                   FILE_KEY=$(curl -s -X POST "https://open.feishu.cn/open-apis/im/v1/files" \
                     -H "Authorization: Bearer $TOKEN" \
@@ -365,7 +329,6 @@ jobs:
                     echo "Sent: $upload_name"
                   fi
 
-                  rm -f "$docx_file"
                   sleep 0.3
                 fi
               done
