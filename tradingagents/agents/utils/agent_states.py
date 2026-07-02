@@ -79,3 +79,4 @@ class AgentState(MessagesState):
     past_context: Annotated[str, "Memory log context injected at run start (same-ticker decisions + cross-ticker lessons)"]
     holdings_context: Annotated[dict, "Current holdings for position-aware analysis"]
     transactions_context: Annotated[list, "Transaction history for trade-aware analysis"]
+    data_quality_summary: Annotated[str, "Report of data availability and reliability per analyst"]
