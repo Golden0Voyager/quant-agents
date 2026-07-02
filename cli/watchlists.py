@@ -40,6 +40,10 @@ def load_watchlist(name: str) -> list[str]:
 
 
 def list_watchlists() -> list[str]:
-    """Return a list of saved watchlist names."""
+    """Return a list of saved watchlist names, with 'my' prioritized first."""
     directory = _ensure_dir()
-    return sorted([p.stem for p in directory.glob("*.txt")])
+    names = sorted([p.stem for p in directory.glob("*.txt")])
+    if "my" in names:
+        names.remove("my")
+        names.insert(0, "my")
+    return names

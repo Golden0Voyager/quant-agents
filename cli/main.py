@@ -1524,8 +1524,8 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
 
     stats_handler = StatsCallbackHandler()
 
-    selected_set = {analyst.value.value for analyst in selections["analysts"]}
-    selected_analyst_keys = [a for a in ANALYST_ORDER if a in selected_set]
+    selected_set = {analyst.value for analyst in selections["analysts"]}
+    selected_analyst_keys = [a[1].value for a in ANALYST_ORDER if a[1].value in selected_set]
     analyst_execution_plan = build_analyst_execution_plan(
         selected_analyst_keys,
         concurrency_limit=config["analyst_concurrency_limit"],

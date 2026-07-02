@@ -164,7 +164,7 @@ def select_analysts(
     choices = []
     for display, value in ANALYST_ORDER:
         if value in available_analysts:
-            choices.append(questionary.Choice(display, value=value))
+            choices.append(questionary.Choice(display, value=value, checked=True))
         else:
             reason = skip_reasons.get(value, "Not applicable")
             choices.append(
@@ -173,10 +173,9 @@ def select_analysts(
                 )
             )
 
-    questionary.checkbox(
+    selected = questionary.checkbox(
         "Select Your [Analysts Team]:",
         choices=choices,
-        default=list(available_analysts),
         instruction="\n- Press Space to select/unselect analysts\n- Press 'a' to select/unselect all\n- Press Enter when done",
         validate=lambda x: len(x) > 0 or "You must select at least one analyst.",
         style=questionary.Style(
@@ -190,11 +189,11 @@ def select_analysts(
         ),
     ).ask()
 
-    if not choices:
+    if not selected:
         console.print("\n[red]No analysts selected. Exiting...[/red]")
         exit(1)
 
-    return choices
+    return selected
 
 
 def select_research_depth() -> int:
