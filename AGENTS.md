@@ -105,3 +105,7 @@ The canonical triage labels use their default names: `needs-triage`, `needs-info
 ### Domain docs
 
 Single-context layout — one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Git workflow
+
+Three-tier rule for `origin` / `upstream` / local refs with `--force-with-lease` only on `origin`. **Never force-push `upstream`.** See `docs/contributing/git-workflow.md`.
