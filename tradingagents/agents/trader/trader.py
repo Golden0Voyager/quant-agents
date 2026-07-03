@@ -12,6 +12,7 @@ from tradingagents.agents.schemas import TraderProposal, render_trader_proposal
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
+    get_or_build_data_quality_summary,
 )
 from tradingagents.agents.utils.structured import (
     bind_structured,
@@ -117,6 +118,7 @@ def create_trader(llm):
 
         market_report = state.get("market_report", "")
         snapshot_block = _build_verified_snapshot_block(ticker, trade_date, market_report=market_report)
+        data_quality_summary = get_or_build_data_quality_summary(state)
 
         messages = [
             {
@@ -146,6 +148,9 @@ def create_trader(llm):
                     f"---\n\n"
                     f"Verified Market Snapshot (source of truth for entry / stop / ATR):\n\n"
                     f"{snapshot_block}\n\n"
+                    f"---\n"
+                    f"**Data Quality of Analyst Reports:**\n"
+                    f"{data_quality_summary}\n"
                     f"---\n\n"
                     f"Required response fields:\n"
                     f"- Entry Price: a specific price level quoted from the snapshot above, "

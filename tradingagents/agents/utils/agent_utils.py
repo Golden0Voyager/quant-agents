@@ -249,4 +249,16 @@ def create_msg_delete():
     return delete_messages
 
 
+def get_or_build_data_quality_summary(state: Mapping[str, Any]) -> str:
+    """Return existing data_quality_summary, or build it from analyst reports in state."""
+    existing = state.get("data_quality_summary")
+    if isinstance(existing, str) and existing.strip():
+        return existing
+
+    from tradingagents.graph.analyst_execution import ANALYST_NODE_SPECS, build_data_quality_summary
+
+    specs = list(ANALYST_NODE_SPECS.values())
+    return build_data_quality_summary(state, specs)
+
+
 

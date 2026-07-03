@@ -64,7 +64,18 @@ Volume-Based Indicators:
             "Before writing the final report, call get_verified_market_snapshot for this ticker and the current date, and treat it as the source of truth for any exact OHLCV, price-level, or indicator-value claim. If another tool's output conflicts with the verified snapshot, flag the discrepancy rather than inventing a reconciled number. Do not claim historical validation, support/resistance bounces, or exact percentage moves unless they are directly supported by tool output with concrete dates and prices."
             "Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."""
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
-            + get_language_instruction()
+            + (
+                "\n\n## Missing Data Protocol\n"
+                "If any tool call returns NO_DATA_AVAILABLE or an empty result, "
+                "explicitly state that the data dimension is unavailable. "
+                "Never fabricate numbers, infer missing values, or extrapolate "
+                "from partial data. "
+                "Set your confidence level to low when data is insufficient "
+                "(fewer than 3 data points or empty returns). "
+                "Add a data_availability marker per data dimension in your "
+                "report: ✅ (data available), ⚠️ (data partial/sparse), "
+                "❌ (data unavailable)."
+            ) + get_language_instruction()
         )
 
         prompt = ChatPromptTemplate.from_messages(

@@ -17,6 +17,7 @@ from tradingagents.agents.schemas import PortfolioDecision, render_pm_decision
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
+    get_or_build_data_quality_summary,
 )
 from tradingagents.agents.utils.structured import (
     bind_structured,
@@ -101,6 +102,7 @@ def create_portfolio_manager(llm):
             f"requested date ({trade_date}). Treat any Trader-quoted entry / "
             "stop as suspect and prefer leaving them null."
         )
+        data_quality_summary = get_or_build_data_quality_summary(state)
 
         prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
 
@@ -127,6 +129,11 @@ def create_portfolio_manager(llm):
 **Verified Market Snapshot** (source of truth for any price level):
 
 {snapshot_block}
+
+---
+
+**Data Quality of Analyst Reports:**
+{data_quality_summary}
 
 ---
 

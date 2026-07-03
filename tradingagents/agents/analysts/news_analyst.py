@@ -36,7 +36,18 @@ def create_news_analyst(llm):
         system_message = ticker_guard + (
             f"You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(query, start_date, end_date) for {asset_label}-specific or targeted news searches, get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news, get_macro_indicators(indicator) for quantitative macro data (pmi, cpi, m2, social_finance), and get_research_reports(ticker) for broker analyst ratings, target prices, and institutional opinions. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
-            + get_language_instruction()
+            + (
+                "\n\n## Missing Data Protocol\n"
+                "If any tool call returns NO_DATA_AVAILABLE or an empty result, "
+                "explicitly state that the data dimension is unavailable. "
+                "Never fabricate numbers, infer missing values, or extrapolate "
+                "from partial data. "
+                "Set your confidence level to low when data is insufficient "
+                "(fewer than 3 data points or empty returns). "
+                "Add a data_availability marker per data dimension in your "
+                "report: ✅ (data available), ⚠️ (data partial/sparse), "
+                "❌ (data unavailable)."
+            ) + get_language_instruction()
         )
 
         prompt = ChatPromptTemplate.from_messages(
