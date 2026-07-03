@@ -6,6 +6,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_macro_indicators,
     get_news,
+    get_prediction_markets,
     get_research_reports,
     sanitize_company_name_in_report,
 )
@@ -24,6 +25,7 @@ def create_news_analyst(llm):
             get_news,
             get_global_news,
             get_macro_indicators,
+            get_prediction_markets,
             get_research_reports,
         ]
 
@@ -34,7 +36,7 @@ def create_news_analyst(llm):
         ) if company_name else ""
 
         system_message = ticker_guard + (
-            f"You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(query, start_date, end_date) for {asset_label}-specific or targeted news searches, get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news, get_macro_indicators(indicator) for quantitative macro data (pmi, cpi, m2, social_finance), and get_research_reports(ticker) for broker analyst ratings, target prices, and institutional opinions. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
+            f"You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(query, start_date, end_date) for {asset_label}-specific or targeted news searches, get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news, get_macro_indicators(indicator, curr_date, look_back_days) for quantitative macro data (pmi, cpi, m2, social_finance, or FRED series like 'fed_funds_rate', '10y_treasury', 'unemployment'), get_prediction_markets(topic, limit) for live market-implied probabilities of forward-looking events (e.g. 'Fed rate cut', 'recession 2026', geopolitical or sector events), and get_research_reports(ticker) for broker analyst ratings, target prices, and institutional opinions. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
             + (
                 "\n\n## Missing Data Protocol\n"

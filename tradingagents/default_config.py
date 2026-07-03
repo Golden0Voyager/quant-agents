@@ -107,9 +107,12 @@ DEFAULT_CONFIG = _apply_env_overrides({
     ],
     # Data vendor configuration
     # Category-level configuration (default for all tools in category).
-    # Note: A-share tickers (.SS/.SZ/.BJ) auto-route to smartmoney_db first,
-    # then akshare, then yfinance as last resort.
+    # The configured value is the exact vendor chain — requests are NOT silently
+    # routed to vendors you didn't choose. For ordered fallback, list several,
+    # e.g. "yfinance,alpha_vantage". "default" uses all available vendors.
     #
+    # Note: A-share tickers (.SS/.SZ/.BJ) auto-route to smartmoney_db first,
+    # then akshare, then yfinance as last resort (determined at runtime).
     # 2026-05-20: 优先依赖 AkShare 作为 A 股外部数据源，yfinance 仅作为最后兜底。
     # 如需完全禁用 yfinance fallback，可设置环境变量 DISABLE_YFINANCE_FALLBACK=1。
     "data_vendors": {
@@ -117,6 +120,8 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "technical_indicators": "smartmoney_db,akshare,yfinance",
         "fundamental_data": "smartmoney_db,akshare,yfinance",
         "news_data": "akshare,yfinance",  # news not stored locally
+        "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)
+        "prediction_markets": "polymarket",  # Options: polymarket (keyless)
     },
     # Tool-level configuration (takes precedence over category-level)
     "tool_vendors": {

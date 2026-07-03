@@ -38,6 +38,7 @@ from tradingagents.agents.utils.news_data_tools import (  # noqa: F401
     get_research_reports,
     get_restricted_release,
 )
+from tradingagents.agents.utils.prediction_markets_tools import get_prediction_markets  # noqa: F401
 from tradingagents.agents.utils.technical_indicators_tools import get_indicators  # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -83,9 +84,14 @@ def resolve_instrument_identity(ticker: str) -> dict:
     recognise the ticker, we return ``{}`` and the caller falls back to
     ticker-only context rather than failing before analysis starts. Cached so
     the lookup happens at most once per ticker per process.
+
+    The symbol is normalized first (e.g. ``XAUUSD`` -> ``GC=F``) so identity
+    resolves for the same instrument the price path actually fetches (#983).
     """
+    from tradingagents.dataflows.symbol_utils import normalize_symbol
+
     try:
-        info = yf.Ticker(ticker.upper()).info or {}
+        info = yf.Ticker(normalize_symbol(ticker)).info or {}
     except Exception as exc:  # noqa: BLE001 — fail open, never block the run
         logger.debug("Could not resolve instrument identity for %s: %s", ticker, exc)
         return {}

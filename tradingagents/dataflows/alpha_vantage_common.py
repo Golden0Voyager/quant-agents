@@ -6,15 +6,21 @@ from io import StringIO
 import pandas as pd
 import requests
 
+from .errors import VendorNotConfiguredError, VendorRateLimitError
+
 API_BASE_URL = "https://www.alphavantage.co/query"
 
+# Network timeout (seconds) so a stalled Alpha Vantage request can't hang the
+# CLI/agents indefinitely (#990).
+REQUEST_TIMEOUT = 30
 
-class AlphaVantageNotConfiguredError(ValueError):
+
+class AlphaVantageNotConfiguredError(VendorNotConfiguredError):
     """Raised when Alpha Vantage is selected but no API key is configured.
 
-    Subclasses ValueError for backward compatibility with callers that
-    already catch ValueError, while letting the routing layer distinguish a
-    "vendor unavailable" condition from a genuine data error.
+    A VendorNotConfiguredError (and thus still a ValueError), so the routing
+    layer's "vendor unavailable" handling and existing ValueError callers both
+    keep working.
     """
     pass
 
@@ -49,8 +55,8 @@ def format_datetime_for_api(date_input) -> str:
     else:
         raise ValueError(f"Date must be string or datetime object, got {type(date_input)}")
 
-class AlphaVantageRateLimitError(Exception):
-    """Exception raised when Alpha Vantage API rate limit is exceeded."""
+class AlphaVantageRateLimitError(VendorRateLimitError):
+    """Raised when the Alpha Vantage API rate limit is exceeded."""
     pass
 
 def _make_api_request(function_name: str, params: dict) -> dict | str:
@@ -77,22 +83,31 @@ def _make_api_request(function_name: str, params: dict) -> dict | str:
         # Remove entitlement if it's None or empty
         api_params.pop("entitlement", None)
 
-    response = requests.get(API_BASE_URL, params=api_params)
+    response = requests.get(API_BASE_URL, params=api_params, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
 
     response_text = response.text
 
-    # Check if response is JSON (error responses are typically JSON)
+    # Error responses are JSON; data responses are usually CSV (or data-keyed
+    # JSON). A non-JSON body is normal data.
     try:
         response_json = json.loads(response_text)
-        # Check for rate limit error
-        if "Information" in response_json:
-            info_message = response_json["Information"]
-            if "rate limit" in info_message.lower() or "api key" in info_message.lower():
-                raise AlphaVantageRateLimitError(f"Alpha Vantage rate limit exceeded: {info_message}")
     except json.JSONDecodeError:
-        # Response is not JSON (likely CSV data), which is normal
-        pass
+        return response_text
+
+    # Alpha Vantage reports problems via "Information" / "Note". Classify so a
+    # genuine rate limit and an invalid/missing key aren't conflated (#991):
+    # rate-limit phrasing is checked first because those notices also mention
+    # "API key" ("your API key ... 25 requests per day").
+    notice = response_json.get("Information") or response_json.get("Note")
+    if notice:
+        low = notice.lower()
+        if any(m in low for m in ("rate limit", "requests per day", "call frequency", "premium")):
+            raise AlphaVantageRateLimitError(f"Alpha Vantage rate limit exceeded: {notice}")
+        if "api key" in low or "apikey" in low:
+            # Reuse the existing "not configured" error so a bad key surfaces as
+            # a real, actionable failure rather than a mislabeled rate limit (#991).
+            raise AlphaVantageNotConfiguredError(f"Alpha Vantage API key invalid or missing: {notice}")
 
     return response_text
 

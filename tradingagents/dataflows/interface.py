@@ -1,196 +1,89 @@
 import logging
 
-logger = logging.getLogger(__name__)
-
 # Import from vendor-specific modules
 from .akshare_common import is_a_share_ticker
 from .akshare_vendor import (
     get_balance_sheet as get_akshare_balance_sheet,
-)
-from .akshare_vendor import (
     get_block_trade as get_akshare_block_trade,
-)
-from .akshare_vendor import (
     get_cashflow as get_akshare_cashflow,
-)
-from .akshare_vendor import (
     get_company_announcements as get_akshare_company_announcements,
-)
-from .akshare_vendor import (
     get_dividend_history as get_akshare_dividend_history,
-)
-from .akshare_vendor import (
     get_dragon_tiger as get_akshare_dragon_tiger,
-)
-from .akshare_vendor import (
     get_earnings_estimates as get_akshare_earnings_estimates,
-)
-from .akshare_vendor import (
     get_fund_flow as get_akshare_fund_flow,
-)
-from .akshare_vendor import (
     get_fundamentals as get_akshare_fundamentals,
-)
-from .akshare_vendor import (
     get_income_statement as get_akshare_income_statement,
-)
-from .akshare_vendor import (
     get_indicators as get_akshare_indicators,
-)
-from .akshare_vendor import (
     get_industry_valuation as get_akshare_industry_valuation,
-)
-from .akshare_vendor import (
     get_insider_transactions as get_akshare_insider_transactions,
-)
-from .akshare_vendor import (
     get_institutional_holdings as get_akshare_institutional_holdings,
-)
-from .akshare_vendor import (
     get_macro_indicators as get_akshare_macro_indicators,
-)
-from .akshare_vendor import (
     get_margin_trading as get_akshare_margin_trading,
-)
-from .akshare_vendor import (
     get_news as get_akshare_news,
-)
-from .akshare_vendor import (
     get_northbound_hold as get_akshare_northbound_hold,
-)
-from .akshare_vendor import (
     get_pledge_ratio as get_akshare_pledge_ratio,
-)
-from .akshare_vendor import (
     get_research_reports as get_akshare_research_reports,
-)
-from .akshare_vendor import (
     get_restricted_release as get_akshare_restricted_release,
-)
-from .akshare_vendor import (
     get_sector_fund_flow as get_akshare_sector_fund_flow,
-)
-from .akshare_vendor import (
     get_shareholder_count as get_akshare_shareholder_count,
-)
-from .akshare_vendor import (
     get_stock_data as get_akshare_stock_data,
 )
 from .alpha_vantage import (
     get_balance_sheet as get_alpha_vantage_balance_sheet,
-)
-from .alpha_vantage import (
     get_cashflow as get_alpha_vantage_cashflow,
-)
-from .alpha_vantage import (
     get_fundamentals as get_alpha_vantage_fundamentals,
-)
-from .alpha_vantage import (
     get_global_news as get_alpha_vantage_global_news,
-)
-from .alpha_vantage import (
     get_income_statement as get_alpha_vantage_income_statement,
-)
-from .alpha_vantage import (
     get_indicator as get_alpha_vantage_indicator,
-)
-from .alpha_vantage import (
     get_insider_transactions as get_alpha_vantage_insider_transactions,
-)
-from .alpha_vantage import (
     get_news as get_alpha_vantage_news,
-)
-from .alpha_vantage import (
     get_stock as get_alpha_vantage_stock,
 )
-from .alpha_vantage_common import AlphaVantageRateLimitError
 
 # Configuration and routing logic
 from .config import get_config
+from .errors import (
+    NoMarketDataError,
+    VendorNotConfiguredError,
+    VendorRateLimitError,
+)
+from .fred import get_macro_data as get_fred_macro_data
+from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
 from .smartmoney_vendor import (
     get_balance_sheet as get_smartmoney_balance_sheet,
-)
-from .smartmoney_vendor import (
     get_block_trade as get_smartmoney_block_trade,
-)
-from .smartmoney_vendor import (
     get_cashflow as get_smartmoney_cashflow,
-)
-from .smartmoney_vendor import (
     get_company_announcements as get_smartmoney_company_announcements,
-)
-from .smartmoney_vendor import (
     get_dragon_tiger as get_smartmoney_dragon_tiger,
-)
-from .smartmoney_vendor import (
     get_earnings_estimates as get_smartmoney_earnings_estimates,
-)
-from .smartmoney_vendor import (
     get_fund_flow as get_smartmoney_fund_flow,
-)
-from .smartmoney_vendor import (
     get_fundamentals as get_smartmoney_fundamentals,
-)
-from .smartmoney_vendor import (
     get_income_statement as get_smartmoney_income_statement,
-)
-from .smartmoney_vendor import (
     get_indicators as get_smartmoney_indicators,
-)
-from .smartmoney_vendor import (
     get_industry_valuation as get_smartmoney_industry_valuation,
-)
-from .smartmoney_vendor import (
     get_insider_transactions as get_smartmoney_insider_transactions,
-)
-from .smartmoney_vendor import (
     get_institutional_holdings as get_smartmoney_institutional_holdings,
-)
-from .smartmoney_vendor import (
     get_macro_indicators as get_smartmoney_macro_indicators,
-)
-from .smartmoney_vendor import (
     get_margin_trading as get_smartmoney_margin_trading,
-)
-from .smartmoney_vendor import (
     get_news as get_smartmoney_news,
-)
-from .smartmoney_vendor import (
     get_northbound_hold as get_smartmoney_northbound_hold,
-)
-from .smartmoney_vendor import (
     get_restricted_release as get_smartmoney_restricted_release,
-)
-from .smartmoney_vendor import (
     get_sector_fund_flow as get_smartmoney_sector_fund_flow,
-)
-from .smartmoney_vendor import (
     get_shareholder_count as get_smartmoney_shareholder_count,
-)
-from .smartmoney_vendor import (
     get_stock_data as get_smartmoney_stock_data,
 )
-from .symbol_utils import NoMarketDataError
 from .y_finance import (
     get_balance_sheet as get_yfinance_balance_sheet,
-)
-from .y_finance import (
     get_cashflow as get_yfinance_cashflow,
-)
-from .y_finance import (
     get_fundamentals as get_yfinance_fundamentals,
-)
-from .y_finance import (
     get_income_statement as get_yfinance_income_statement,
-)
-from .y_finance import (
     get_insider_transactions as get_yfinance_insider_transactions,
-)
-from .y_finance import (
     get_stock_stats_indicators_window,
     get_YFin_data_online,
 )
 from .yfinance_news import get_global_news_yfinance, get_news_yfinance
+
+logger = logging.getLogger(__name__)
 
 # Tools organized by category
 TOOLS_CATEGORIES = {
@@ -227,7 +120,6 @@ TOOLS_CATEGORIES = {
             "get_restricted_release",
             "get_institutional_holdings",
             "get_northbound_hold",
-            "get_macro_indicators",
         ]
     },
     "governance_risk": {
@@ -247,11 +139,25 @@ TOOLS_CATEGORIES = {
         "tools": [
             "get_research_reports",
         ]
+    },
+    "macro_data": {
+        "description": "Macroeconomic indicators (rates, inflation, labor, growth)",
+        "tools": [
+            "get_macro_indicators",
+        ]
+    },
+    "prediction_markets": {
+        "description": "Market-implied probabilities for forward-looking events",
+        "tools": [
+            "get_prediction_markets",
+        ]
     }
 }
 
 VENDOR_LIST = [
     "yfinance",
+    "fred",
+    "polymarket",
     "alpha_vantage",
     "akshare",
     "smartmoney_db",
@@ -366,6 +272,7 @@ VENDOR_METHODS = {
     "get_macro_indicators": {
         "smartmoney_db": get_smartmoney_macro_indicators,
         "akshare": get_akshare_macro_indicators,
+        "fred": get_fred_macro_data,
     },
     # governance_risk (v2.2)
     "get_pledge_ratio": {
@@ -378,6 +285,10 @@ VENDOR_METHODS = {
     # research_opinion (v2.2)
     "get_research_reports": {
         "akshare": get_akshare_research_reports,
+    },
+    # prediction_markets
+    "get_prediction_markets": {
+        "polymarket": get_polymarket_prediction_markets,
     },
 }
 
@@ -429,12 +340,23 @@ def route_to_vendor(method: str, *args, **kwargs):
         else:
             primary_vendors = ["akshare"] + [v for v in primary_vendors if v != "akshare"]
 
-    # Build fallback chain: primary vendors first, then remaining available vendors
     all_available_vendors = list(VENDOR_METHODS[method].keys())
-    fallback_vendors = primary_vendors.copy()
-    for vendor in all_available_vendors:
-        if vendor not in fallback_vendors:
-            fallback_vendors.append(vendor)
+
+    # The configured vendor list IS the chain: we do NOT silently fall back to
+    # vendors the user did not choose (#988/#289) — that returned data from an
+    # unexpected source and caused cross-vendor inconsistencies. For multi-vendor
+    # fallback, list them in order, e.g. data_vendors="yfinance,alpha_vantage".
+    # The "default" sentinel (no explicit config) uses all available vendors.
+    explicit = [v for v in primary_vendors if v and v != "default"]
+    if explicit:
+        vendor_chain = [v for v in explicit if v in VENDOR_METHODS[method]]
+        if not vendor_chain:
+            raise ValueError(
+                f"Configured vendor(s) {explicit} not available for '{method}'. "
+                f"Available: {all_available_vendors}."
+            )
+    else:
+        vendor_chain = all_available_vendors
 
     last_no_data: NoMarketDataError | None = None
     first_error: Exception | None = None
@@ -442,10 +364,7 @@ def route_to_vendor(method: str, *args, **kwargs):
     # Track whether we are serving an A-share ticker for targeted logging
     is_ashare = isinstance(symbol, str) and is_a_share_ticker(symbol)
 
-    for vendor in fallback_vendors:
-        if vendor not in VENDOR_METHODS[method]:
-            continue
-
+    for vendor in vendor_chain:
         vendor_impl = VENDOR_METHODS[method][vendor]
         impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
 
@@ -461,10 +380,16 @@ def route_to_vendor(method: str, *args, **kwargs):
                     method,
                 )
             return result
-        except AlphaVantageRateLimitError:
-            continue  # Rate limits: try the next vendor
+        except VendorRateLimitError:
+            logger.warning("Vendor %r rate-limited for %s; trying next vendor.", vendor, method)
+            continue
+        except VendorNotConfiguredError as e:
+            logger.warning("Vendor %r not configured for %s; trying next vendor.", vendor, method)
+            if first_error is None:
+                first_error = e
+            continue
         except NoMarketDataError as e:
-            last_no_data = e  # No data here; another vendor may have it
+            last_no_data = e  # No data here; another configured vendor may have it
             continue
         except Exception as exc:
             # For A-share tickers, elevate AkShare failure from debug -> warning
@@ -478,18 +403,9 @@ def route_to_vendor(method: str, *args, **kwargs):
                     exc,
                 )
             else:
-                logger.debug(
-                    "Vendor '%s' failed for method='%s' symbol='%s': %s(%s)",
-                    vendor,
-                    method,
-                    symbol,
-                    type(exc).__name__,
-                    exc,
-                )
-            # A fallback vendor failing for an incidental reason (e.g. no API
-            # key configured) must not crash the call when another vendor
-            # already determined the symbol simply has no data. Remember the
-            # first error so a genuine primary-vendor failure still surfaces.
+                # Don't let one vendor's failure crash the call when another can
+                # serve it, but never swallow silently (#989).
+                logger.warning("Vendor %r failed for %s: %s", vendor, method, exc)
             if first_error is None:
                 first_error = exc
             continue  # Try next vendor in fallback chain
@@ -499,21 +415,26 @@ def route_to_vendor(method: str, *args, **kwargs):
     # empty string, so the agent reports "unavailable" instead of inventing a
     # value. This takes precedence over incidental fallback errors.
     if last_no_data is not None:
+        if first_error is not None:
+            # A vendor also hit a real error; surface it in logs so the no-data
+            # verdict can't hide a broken primary (network/auth/etc.).
+            logger.warning(
+                "Returning NO_DATA for %s, but a vendor errored earlier: %s",
+                method, first_error,
+            )
         sym = last_no_data.symbol
         canonical = last_no_data.canonical
-        detail = last_no_data.detail
         resolved = "" if canonical == sym else f" (resolved to '{canonical}')"
-        detail_suffix = f" Reason: {detail}." if detail else ""
-        # Build the routing chain string so the agent (and user) can see
-        # which vendors were attempted and in what order.
+        reason = f" ({last_no_data.detail})" if last_no_data.detail else ""
         tried = " → ".join(
-            v for v in fallback_vendors if v in VENDOR_METHODS[method]
+            v for v in vendor_chain if v in VENDOR_METHODS[method]
         )
         return (
-            f"NO_DATA_AVAILABLE: No market data found for '{sym}'{resolved} from "
-            f"any configured vendor. Routing chain: {tried}.{detail_suffix} "
-            f"The symbol may be invalid, delisted, or not covered. "
-            f"Do not estimate or fabricate values — report that data is unavailable."
+            f"NO_DATA_AVAILABLE: No usable market data for '{sym}'{resolved} from "
+            f"any configured vendor{reason}. Routing chain: {tried}. "
+            f"The symbol may be invalid, delisted, not covered, or the vendor "
+            f"returned stale data. Do not estimate or fabricate values — report "
+            f"that data is unavailable for this symbol."
         )
 
     # No vendor returned data and none reported clean "no data" — surface the
