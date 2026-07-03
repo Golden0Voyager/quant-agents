@@ -8,7 +8,7 @@ import json
 import shutil
 import threading
 import time
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from rich.console import Console
@@ -149,6 +149,44 @@ class BatchRunner:
             return f"{name}_{ticker}"
         return ticker
 
+    @staticmethod
+    def _is_outside_trading_hours() -> bool:
+        """Check if A-share market is currently closed.
+
+        Returns True during weekends, before open (00:00-09:29 CST),
+        and after close (15:00-24:00 CST) on weekdays.
+        """
+        now = datetime.now(UTC) + timedelta(hours=8)
+        if now.weekday() >= 5:
+            return True
+        t = now.hour * 100 + now.minute
+        return t < 930 or t >= 1500
+
+    @staticmethod
+    def _get_last_trading_day() -> datetime:
+        """Return the CST datetime of the most recent trading day's 15:00 close.
+
+        Returns the previous trading day's 15:00 CST when called before open
+        or during weekends; returns today's 15:00 CST when called after close
+        on a trading day.
+        """
+        now = datetime.now(UTC) + timedelta(hours=8)
+        wd = now.weekday()
+        hm = now.hour * 100 + now.minute
+
+        if wd == 5:
+            last = now - timedelta(days=1)
+        elif wd == 6:
+            last = now - timedelta(days=2)
+        elif wd == 0 and hm < 930:
+            last = now - timedelta(days=3)
+        elif 1 <= wd <= 4 and hm < 930:
+            last = now - timedelta(days=1)
+        else:
+            last = now
+
+        return last.replace(hour=15, minute=0, second=0, microsecond=0)
+
     def _is_already_completed(self, ticker: str) -> bool:
         """Return True if a matching report already exists for the target date.
 
@@ -206,6 +244,37 @@ class BatchRunner:
                     path = batch_dir / cand / "complete_report.md"
                     if _has_matching_report(path):
                         return path
+
+        # ── Phase 2: Pre-market / after-hours fallback ────────────────────
+        # If the market is currently closed (weekend, before-open, after-close),
+        # try locating a report from the LAST trading day.  Only accept it when
+        # the file was modified at or after 15:00 CST (market close) — reports
+        # generated during trading hours may use incomplete data.
+        if self._is_outside_trading_hours():
+            last_close = self._get_last_trading_day()
+            last_date = last_close.strftime("%Y-%m-%d")
+            if last_date != target_date:
+                last_close_ts = last_close.timestamp()
+
+                def _has_post_close_report(path: Path) -> bool:
+                    if not path.exists() or path.stat().st_size == 0:
+                        return False
+                    report_date = self._parse_report_analysis_date(path)
+                    if report_date != last_date:
+                        return False
+                    return path.stat().st_mtime >= last_close_ts
+
+                for cand in candidates:
+                    path = self.output_dir / cand / "complete_report.md"
+                    if _has_post_close_report(path):
+                        return path
+
+                if reports_dir.exists():
+                    for batch_dir in reports_dir.glob("batch_*"):
+                        for cand in candidates:
+                            path = batch_dir / cand / "complete_report.md"
+                            if _has_post_close_report(path):
+                                return path
 
         return None
 
