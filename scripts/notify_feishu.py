@@ -220,7 +220,7 @@ def _upload_file(token: str, file_path: Path, file_name: str, file_type: str) ->
 def _send_file_message(token: str, chat_id: str, file_key: str) -> bool:
     """把 file_key 发送到 chat."""
     status, body = _post_json(
-        f"https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
+        "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
         {
             "receive_id": chat_id,
             "msg_type": "file",

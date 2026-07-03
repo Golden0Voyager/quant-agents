@@ -1569,6 +1569,28 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
                 console.print(Markdown(report_content))
                 return
 
+    # Phase 2: Pre-market / after-hours fallback — reuse last trading day's
+    # post-close report if the market hasn't opened since.
+    if BatchRunner._is_outside_trading_hours():
+        last_close = BatchRunner._get_last_trading_day()
+        last_date = last_close.strftime("%Y-%m-%d")
+        if last_date != selections["analysis_date"]:
+            last_report_dir = Path(config["results_dir"]) / ticker_dir_name / last_date
+            last_report = last_report_dir / "complete_report.md"
+            if last_report.exists() and last_report.stat().st_size > 0:
+                report_date = BatchRunner._parse_report_analysis_date(last_report)
+                if report_date == last_date and last_report.stat().st_mtime >= last_close.timestamp():
+                    import questionary
+                    skip = questionary.confirm(
+                        f"检测到 {selections['ticker']} 在 {last_date} 收盘后已有分析报告，"
+                        f"是否跳过分析直接查看？",
+                        default=True,
+                    ).ask()
+                    if skip:
+                        report_content = last_report.read_text(encoding="utf-8")
+                        console.print(Markdown(report_content))
+                        return
+
     def save_message_decorator(obj, func_name):
         func = getattr(obj, func_name)
         @wraps(func)
