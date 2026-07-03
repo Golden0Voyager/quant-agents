@@ -167,6 +167,7 @@ def _load_ohlcv_from_akshare(
         import akshare as ak
 
         from tradingagents.dataflows.akshare_common import (
+            _akshare_retry,
             is_a_share_ticker,
             no_proxy,
             to_akshare_symbol,
@@ -183,12 +184,16 @@ def _load_ohlcv_from_akshare(
         ak_end = end_date.replace("-", "")
 
         with no_proxy():
-            df = ak.stock_zh_a_hist(
-                symbol=code,
-                period="daily",
-                start_date=ak_start,
-                end_date=ak_end,
-                adjust="qfq",
+            df = _akshare_retry(
+                lambda: ak.stock_zh_a_hist(
+                    symbol=code,
+                    period="daily",
+                    start_date=ak_start,
+                    end_date=ak_end,
+                    adjust="qfq",
+                ),
+                max_retries=3,
+                base_delay=2.0,
             )
 
         if df is None or df.empty:
