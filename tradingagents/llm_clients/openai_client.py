@@ -226,6 +226,7 @@ _PROVIDER_BASE_URL = {
     "agnes":      "https://apihub.agnes-ai.com/v1",
     "modelscope": "https://api-inference.modelscope.cn/v1",
     "nvidia":     "https://integrate.api.nvidia.com/v1",
+}
 
 @dataclass(frozen=True)
 class ProviderSpec:
@@ -284,7 +285,6 @@ OPENAI_COMPATIBLE_PROVIDERS: dict[str, ProviderSpec] = {
     "openai_compatible": ProviderSpec(
         require_base_url=True, key_optional=True, chat_class=LocalCompatibleChatOpenAI
     ),
-}
 }
 
 
