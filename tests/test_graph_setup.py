@@ -28,16 +28,18 @@ class GraphSetupConstructorTests(unittest.TestCase):
         deep = _mock_llm()
         tools = _mock_tool_nodes()
         cl = MagicMock()
-        gs = GraphSetup(quick, deep, tools, cl, analyst_concurrency_limit=2)
+        gs = GraphSetup(quick, deep, tools, cl)
         self.assertIs(gs.quick_thinking_llm, quick)
         self.assertIs(gs.deep_thinking_llm, deep)
         self.assertIs(gs.tool_nodes, tools)
         self.assertIs(gs.conditional_logic, cl)
-        self.assertEqual(gs.analyst_concurrency_limit, 2)
 
-    def test_default_concurrency(self):
+    def test_constructs_with_defaults(self):
         gs = GraphSetup(_mock_llm(), _mock_llm(), _mock_tool_nodes(), MagicMock())
-        self.assertEqual(gs.analyst_concurrency_limit, 1)
+        self.assertIsNotNone(gs.quick_thinking_llm)
+        self.assertIsNotNone(gs.deep_thinking_llm)
+        self.assertIsNotNone(gs.tool_nodes)
+        self.assertIsNotNone(gs.conditional_logic)
 
 
 @pytest.mark.unit

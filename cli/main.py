@@ -1920,6 +1920,8 @@ def analyze(
         return
 
     # Interactive mode
+    if not holdings and not holdings_sheet and not sync_holdings:
+        holdings = _prompt_sync_holdings_interactive()
     mode = ask_mode()
     if mode == "batch":
         watchlist_name, ticker_list = select_watchlist_interactive()
@@ -1983,6 +1985,61 @@ def analyze(
             run_batch_analysis(tickers, profile_config, checkpoint=checkpoint, output_dir=Path(output_dir) if output_dir else None, holdings=holdings, workers=workers)
         else:
             run_analysis(checkpoint=checkpoint, selections=selections, holdings=holdings)
+
+
+def _prompt_sync_holdings_interactive() -> dict | None:
+    """在交互模式下询问用户是否要同步自选股，返回 holdings dict 或 None。
+
+    仅在配置了 PORTFOLIO_SHEET_ID 时弹出询问，否则静默跳过。
+    """
+    sheet_id = DEFAULT_CONFIG.get("portfolio", {}).get("sheet_id")
+    if not sheet_id:
+        return None
+
+    import questionary
+    do_sync = questionary.confirm(
+        "是否同步自选股数据（持仓 & 交易记录）？",
+        default=False,
+        style=questionary.Style([
+            ("qmark", "fg:cyan bold"),
+            ("question", "fg:yellow bold"),
+            ("answer", "fg:green"),
+            ("pointer", "fg:cyan"),
+            ("highlighted", "fg:cyan"),
+        ]),
+    ).ask()
+    if do_sync is None:
+        return None
+
+    if do_sync:
+        try:
+            _do_sync_holdings(sheet_id, DEFAULT_CONFIG.get("portfolio", {}).get("worksheet", "total"))
+        except typer.Exit:
+            return None
+        except SystemExit:
+            return None
+
+    from tradingagents.portfolio import PortfolioRepository
+    repo = PortfolioRepository()
+    if repo.exists():
+        try:
+            portfolio = repo.load()
+            return {
+                ticker: {
+                    "ticker": ticker,
+                    "shares": h.shares,
+                    "avg_cost": h.avg_cost,
+                    "market_price": h.market_price,
+                    "pnl_pct": h.pnl_pct,
+                    "weight": h.weight,
+                    "grid_strategy": h.grid_strategy,
+                    "name": h.name,
+                }
+                for ticker, h in portfolio.holdings.items()
+            }
+        except Exception:
+            pass
+    return None
 
 
 def _do_sync_holdings(sheet_id: str | None, worksheet: str):

@@ -42,8 +42,8 @@ from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.llm_clients import create_llm_client
-from tradingagents.reporting import write_report_tree
 from tradingagents.llm_clients.retry_utils import RetryConfig
+from tradingagents.reporting import write_report_tree
 
 from .analyst_execution import (
     AnalystWallTimeTracker,

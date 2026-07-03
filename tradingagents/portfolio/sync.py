@@ -160,8 +160,12 @@ class PortfolioSyncService:
         self, row: list[str], indices: dict[str, int]
     ) -> Holding | None:
         """Transform a single row into a Holding, or None if invalid."""
-        max_idx = max(indices.values())
-        if len(row) <= max_idx:
+        _mandatory = ("ticker", "shares", "avg_cost")
+        try:
+            required_max = max(indices[f] for f in _mandatory)
+        except KeyError as exc:
+            raise ValueError(f"Missing mandatory column index: {exc}") from exc
+        if len(row) <= required_max:
             return None
 
         raw_ticker = row[indices["ticker"]].strip()
