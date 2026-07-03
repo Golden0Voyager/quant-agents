@@ -9,6 +9,8 @@ from tradingagents.llm_clients.openai_client import (
     DeepSeekChatOpenAI,
     NormalizedChatOpenAI,
     OpenAIClient,
+    _input_to_messages,
+    _is_native_openai_base_url,
     _resolve_provider_base_url,
 )
 from tradingagents.llm_clients.retry_utils import RetryConfig
@@ -84,6 +86,15 @@ class OpenAIClientGetLlmTests(unittest.TestCase):
         client = OpenAIClient("", provider="openai")
         with self.assertRaises(ValueError):
             client.get_llm()
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True)
+    @patch("tradingagents.llm_clients.openai_client.NormalizedChatOpenAI")
+    def test_passes_through_user_kwargs(self, mock_chat):
+        """Line 307: passthrough kwargs are forwarded to ChatOpenAI."""
+        client = OpenAIClient("gpt-4", provider="openai", timeout=30)
+        client.get_llm()
+        _, kwargs = mock_chat.call_args
+        self.assertEqual(kwargs.get("timeout"), 30)
 
 
 @pytest.mark.unit
@@ -353,6 +364,72 @@ class OpenAIClientRetryTests(unittest.TestCase):
 
         self.assertEqual(result, {"answer": 42})
         mock_sleep.assert_called_once_with(0.05)
+
+
+@pytest.mark.unit
+class InputToMessagesTests(unittest.TestCase):
+    """Lines 65-68: _input_to_messages - not patched, tests real function."""
+
+    def test_list_passthrough(self):
+        """List input returns as-is."""
+        result = _input_to_messages(["hello", "world"])
+        self.assertEqual(result, ["hello", "world"])
+
+    def test_to_messages_called(self):
+        """Object with to_messages() method is called."""
+        obj = MagicMock()
+        obj.to_messages.return_value = ["msg"]
+        result = _input_to_messages(obj)
+        self.assertEqual(result, ["msg"])
+        obj.to_messages.assert_called_once()
+
+    def test_fallback_empty_list(self):
+        """Unknown input returns empty list."""
+        result = _input_to_messages(123)
+        self.assertEqual(result, [])
+
+
+@pytest.mark.unit
+class IsNativeOpenaiBaseUrlTests(unittest.TestCase):
+    """Lines 260-263: _is_native_openai_base_url for non-None base_urls."""
+
+    def test_native_without_scheme(self):
+        """base_url without :// that points to api.openai.com."""
+        self.assertTrue(_is_native_openai_base_url("api.openai.com"))
+
+    def test_native_with_scheme(self):
+        """base_url with https:// pointing to api.openai.com."""
+        self.assertTrue(_is_native_openai_base_url("https://api.openai.com/v1"))
+
+    def test_non_native_proxy(self):
+        """Custom proxy URL returns False."""
+        self.assertFalse(_is_native_openai_base_url("https://myproxy.example.com/v1"))
+
+    def test_non_native_no_scheme(self):
+        """Custom host without :// returns False."""
+        self.assertFalse(_is_native_openai_base_url("myproxy.local"))
+
+    def test_none_returns_true(self):
+        """None base_url returns True (native default)."""
+        self.assertTrue(_is_native_openai_base_url(None))
+
+    def test_empty_returns_true(self):
+        """Empty base_url returns True."""
+        self.assertTrue(_is_native_openai_base_url(""))
+
+
+@pytest.mark.unit
+class OpenAIClientMissingApiKeyTests(unittest.TestCase):
+    """Line 307: get_llm raises ValueError when API key env var is unset."""
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_missing_api_key_raises_value_error(self):
+        """Provider in _PROVIDER_BASE_URL but key env var is not set."""
+        client = OpenAIClient("grok-4", provider="xai")
+        with self.assertRaises(ValueError) as ctx:
+            client.get_llm()
+        self.assertIn("API key", str(ctx.exception))
+        self.assertIn("XAI_API_KEY", str(ctx.exception))
 
 
 if __name__ == "__main__":

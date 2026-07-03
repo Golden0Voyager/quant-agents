@@ -14,6 +14,33 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
     """Save a completed run's reports to ``save_path``; return the complete-report path."""
     save_path = Path(save_path)
     save_path.mkdir(parents=True, exist_ok=True)
+
+    # Global company-name sanitization: correct LLM hallucinations before
+    # any report text hits the disk.  Operates on final_state in-place.
+    # Imported here (not at module level) to avoid circular imports between
+    # reporting.py and agent_utils (agent_utils -> trading_graph -> reporting).
+    from tradingagents.agents.utils.agent_utils import sanitize_company_name_in_report
+
+    company_name = final_state.get("company_name", "")
+    _report_keys = [
+        "market_report", "sentiment_report", "news_report", "fundamentals_report",
+        "governance_report", "industry_report",
+        "trader_investment_plan", "final_trade_decision",
+    ]
+    for key in _report_keys:
+        if isinstance(final_state.get(key), str):
+            final_state[key] = sanitize_company_name_in_report(
+                final_state[key], ticker, company_name
+            )
+    for debate_key in ["investment_debate_state", "risk_debate_state"]:
+        debate = final_state.get(debate_key)
+        if isinstance(debate, dict):
+            for sub_key in debate:
+                if isinstance(debate.get(sub_key), str):
+                    debate[sub_key] = sanitize_company_name_in_report(
+                        debate[sub_key], ticker, company_name
+                    )
+
     sections = []
 
     # 1. Analysts
@@ -103,33 +130,13 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
             (portfolio_dir / "decision.md").write_text(risk["judge_decision"], encoding="utf-8")
             sections.append(f"## V. Portfolio Manager Decision\n\n### Portfolio Manager\n{risk['judge_decision']}")
 
-    # Global company-name sanitization: correct LLM hallucinations before
-    # any report text hits the disk.  Operates on final_state in-place.
-    # Imported here (not at module level) to avoid circular imports between
-    # reporting.py and agent_utils (agent_utils → trading_graph → reporting).
-    from tradingagents.agents.utils.agent_utils import sanitize_company_name_in_report
-
-    company_name = final_state.get("company_name", "")
-    _report_keys = [
-        "market_report", "sentiment_report", "news_report", "fundamentals_report",
-        "governance_report", "industry_report",
-        "trader_investment_plan", "final_trade_decision",
-    ]
-    for key in _report_keys:
-        if isinstance(final_state.get(key), str):
-            final_state[key] = sanitize_company_name_in_report(
-                final_state[key], ticker, company_name
-            )
-    for debate_key in ["investment_debate_state", "risk_debate_state"]:
-        debate = final_state.get(debate_key)
-        if isinstance(debate, dict):
-            for sub_key in debate:
-                if isinstance(debate.get(sub_key), str):
-                    debate[sub_key] = sanitize_company_name_in_report(
-                        debate[sub_key], ticker, company_name
-                    )
-
     # Write consolidated report
-    header = f"# Trading Analysis Report: {ticker}\n\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    trade_date = final_state.get("trade_date", "")
+    trade_date_line = f"\nAnalysis Date: {trade_date}" if trade_date else ""
+    header = (
+        f"# Trading Analysis Report: {ticker}\n\n"
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        f"{trade_date_line}\n\n"
+    )
     (save_path / "complete_report.md").write_text(header + "\n\n".join(sections), encoding="utf-8")
     return save_path / "complete_report.md"
