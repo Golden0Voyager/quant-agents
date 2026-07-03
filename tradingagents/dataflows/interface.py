@@ -102,8 +102,13 @@ from .alpha_vantage import (
 from .alpha_vantage import (
     get_stock as get_alpha_vantage_stock,
 )
-from .alpha_vantage_common import AlphaVantageRateLimitError
+from .errors import (
+    NoMarketDataError,
+    VendorNotConfiguredError,
+    VendorRateLimitError,
+)
 from .fred import get_macro_data as get_fred_macro_data
+from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
 
 # Configuration and routing logic
 from .config import get_config
@@ -170,7 +175,6 @@ from .smartmoney_vendor import (
 from .smartmoney_vendor import (
     get_stock_data as get_smartmoney_stock_data,
 )
-from .symbol_utils import NoMarketDataError
 from .y_finance import (
     get_balance_sheet as get_yfinance_balance_sheet,
 )
@@ -255,12 +259,19 @@ TOOLS_CATEGORIES = {
         "tools": [
             "get_macro_indicators",
         ]
+    },
+    "prediction_markets": {
+        "description": "Market-implied probabilities for forward-looking events",
+        "tools": [
+            "get_prediction_markets",
+        ]
     }
 }
 
 VENDOR_LIST = [
     "yfinance",
     "fred",
+    "polymarket",
     "alpha_vantage",
     "akshare",
     "smartmoney_db",
@@ -392,6 +403,10 @@ VENDOR_METHODS = {
     "get_macro_indicators": {
         "fred": get_fred_macro_data,
     },
+    # prediction_markets
+    "get_prediction_markets": {
+        "polymarket": get_polymarket_prediction_markets,
+    },
 }
 
 def get_category_for_method(method: str) -> str:
@@ -482,8 +497,13 @@ def route_to_vendor(method: str, *args, **kwargs):
                     method,
                 )
             return result
-        except AlphaVantageRateLimitError:
+        except VendorRateLimitError:
             logger.warning("Vendor %r rate-limited for %s; trying next vendor.", vendor, method)
+            continue
+        except VendorNotConfiguredError as e:
+            logger.warning("Vendor %r not configured for %s; trying next vendor.", vendor, method)
+            if first_error is None:
+                first_error = e
             continue
         except NoMarketDataError as e:
             last_no_data = e  # No data here; another configured vendor may have it
@@ -521,19 +541,17 @@ def route_to_vendor(method: str, *args, **kwargs):
             )
         sym = last_no_data.symbol
         canonical = last_no_data.canonical
-        detail = last_no_data.detail
         resolved = "" if canonical == sym else f" (resolved to '{canonical}')"
-        detail_suffix = f" Reason: {detail}." if detail else ""
-        # Build the routing chain string so the agent (and user) can see
-        # which vendors were attempted and in what order.
+        reason = f" ({last_no_data.detail})" if last_no_data.detail else ""
         tried = " → ".join(
             v for v in vendor_chain if v in VENDOR_METHODS[method]
         )
         return (
-            f"NO_DATA_AVAILABLE: No market data found for '{sym}'{resolved} from "
-            f"any configured vendor. Routing chain: {tried}.{detail_suffix} "
-            f"The symbol may be invalid, delisted, or not covered. "
-            f"Do not estimate or fabricate values — report that data is unavailable."
+            f"NO_DATA_AVAILABLE: No usable market data for '{sym}'{resolved} from "
+            f"any configured vendor{reason}. Routing chain: {tried}. "
+            f"The symbol may be invalid, delisted, not covered, or the vendor "
+            f"returned stale data. Do not estimate or fabricate values — report "
+            f"that data is unavailable for this symbol."
         )
 
     # No vendor returned data and none reported clean "no data" — surface the

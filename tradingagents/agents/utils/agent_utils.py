@@ -38,6 +38,7 @@ from tradingagents.agents.utils.news_data_tools import (  # noqa: F401
     get_research_reports,
     get_restricted_release,
 )
+from tradingagents.agents.utils.prediction_markets_tools import get_prediction_markets  # noqa: F401
 from tradingagents.agents.utils.technical_indicators_tools import get_indicators  # noqa: F401
 
 logger = logging.getLogger(__name__)

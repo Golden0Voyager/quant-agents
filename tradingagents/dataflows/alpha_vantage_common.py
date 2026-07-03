@@ -6,6 +6,8 @@ from io import StringIO
 import pandas as pd
 import requests
 
+from .errors import VendorNotConfiguredError, VendorRateLimitError
+
 API_BASE_URL = "https://www.alphavantage.co/query"
 
 # Network timeout (seconds) so a stalled Alpha Vantage request can't hang the
@@ -13,12 +15,12 @@ API_BASE_URL = "https://www.alphavantage.co/query"
 REQUEST_TIMEOUT = 30
 
 
-class AlphaVantageNotConfiguredError(ValueError):
+class AlphaVantageNotConfiguredError(VendorNotConfiguredError):
     """Raised when Alpha Vantage is selected but no API key is configured.
 
-    Subclasses ValueError for backward compatibility with callers that
-    already catch ValueError, while letting the routing layer distinguish a
-    "vendor unavailable" condition from a genuine data error.
+    A VendorNotConfiguredError (and thus still a ValueError), so the routing
+    layer's "vendor unavailable" handling and existing ValueError callers both
+    keep working.
     """
     pass
 
@@ -53,8 +55,8 @@ def format_datetime_for_api(date_input) -> str:
     else:
         raise ValueError(f"Date must be string or datetime object, got {type(date_input)}")
 
-class AlphaVantageRateLimitError(Exception):
-    """Exception raised when Alpha Vantage API rate limit is exceeded."""
+class AlphaVantageRateLimitError(VendorRateLimitError):
+    """Raised when the Alpha Vantage API rate limit is exceeded."""
     pass
 
 def _make_api_request(function_name: str, params: dict) -> dict | str:
