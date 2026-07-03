@@ -105,6 +105,8 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
 
     # Global company-name sanitization: correct LLM hallucinations before
     # any report text hits the disk.  Operates on final_state in-place.
+    # Imported here (not at module level) to avoid circular imports between
+    # reporting.py and agent_utils (agent_utils → trading_graph → reporting).
     from tradingagents.agents.utils.agent_utils import sanitize_company_name_in_report
 
     company_name = final_state.get("company_name", "")

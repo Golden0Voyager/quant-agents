@@ -260,6 +260,7 @@ class ProviderSpec:
 # China accounts cannot share credentials (#758).
 # Includes both upstream-supported providers and our local custom providers
 # (sensenova, mimo, agnes, modelscope).
+# TODO: migrate get_llm() to use this registry so _PROVIDER_BASE_URL can be removed.
 OPENAI_COMPATIBLE_PROVIDERS: dict[str, ProviderSpec] = {
     "openai":     ProviderSpec(use_responses_api=True),
     "xai":        ProviderSpec(base_url="https://api.x.ai/v1"),
@@ -357,7 +358,6 @@ class OpenAIClient(BaseLLMClient):
         if self.provider in _PROVIDER_BASE_URL:
             llm_kwargs["base_url"] = self.base_url or _resolve_provider_base_url(self.provider)
             api_key_env = get_api_key_env(self.provider)
-<<<<<<< HEAD
             if api_key_env:
                 api_key = os.environ.get(api_key_env)
                 if api_key:
@@ -370,25 +370,6 @@ class OpenAIClient(BaseLLMClient):
                     )
             else:
                 llm_kwargs["api_key"] = "ollama"
-=======
-            api_key = os.environ.get(api_key_env) if api_key_env else None
-            if api_key:
-                llm_kwargs["api_key"] = api_key
-            elif spec.key_optional:
-                llm_kwargs["api_key"] = spec.placeholder_key
-            elif api_key_env:
-                raise ValueError(
-                    f"API key for provider '{self.provider}' is not set. "
-                    f"Please set the {api_key_env} environment variable "
-                    f"(e.g. add {api_key_env}=your_key to your .env file)."
-                )
-
-            # The Responses API only exists on native OpenAI; if the user points
-            # the openai provider at a custom base_url (proxy/gateway/local), it
-            # only speaks Chat Completions, so keep Responses off there (#1024).
-            if spec.use_responses_api and _is_native_openai_base_url(base_url):
-                llm_kwargs["use_responses_api"] = True
->>>>>>> 3cddf1e (fix(llm): use the OpenAI Responses API only for native endpoints)
         elif self.base_url:
             llm_kwargs["base_url"] = self.base_url
 
@@ -404,7 +385,12 @@ class OpenAIClient(BaseLLMClient):
 
         # Native OpenAI: use Responses API for consistent behavior across
         # all model families. Third-party providers use Chat Completions.
-        if self.provider == "openai":
+        # The Responses API only exists on native OpenAI; if the user points
+        # the openai provider at a custom base_url (proxy/gateway/local), it
+        # only speaks Chat Completions, so keep Responses off there (#1024).
+        if self.provider == "openai" and _is_native_openai_base_url(
+            self.base_url or _resolve_provider_base_url("openai")
+        ):
             llm_kwargs["use_responses_api"] = True
 
         # Provider-specific quirks live in their own subclasses so the
