@@ -149,7 +149,7 @@ class DeepSeekPayloadEdgeCases(unittest.TestCase):
         mock_payload = {
             "messages": [{"role": "assistant", "content": "ok", "reasoning_content": "existing"}]
         }
-        mock_msg = MagicMock()
+        mock_msg = AIMessage(content="ok")
         mock_msg.id = "msg-1"
         with patch.object(NormalizedChatOpenAI, "_get_request_payload", return_value=mock_payload), \
              patch("tradingagents.llm_clients.openai_client._input_to_messages", return_value=[mock_msg]):
@@ -160,7 +160,7 @@ class DeepSeekPayloadEdgeCases(unittest.TestCase):
         """Lines 110-111: cache hit via message id."""
         self.client._reasoning_cache["msg-42"] = "cached thinking"
         mock_payload = {"messages": [{"role": "assistant", "content": "ok"}]}
-        mock_msg = MagicMock()
+        mock_msg = AIMessage(content="ok")
         mock_msg.id = "msg-42"
         with patch.object(NormalizedChatOpenAI, "_get_request_payload", return_value=mock_payload), \
              patch("tradingagents.llm_clients.openai_client._input_to_messages", return_value=[mock_msg]):
@@ -173,7 +173,7 @@ class DeepSeekPayloadEdgeCases(unittest.TestCase):
         mock_payload = {
             "messages": [{"role": "assistant", "content": "", "tool_calls": [{"id": "call_1"}]}]
         }
-        mock_msg = MagicMock()
+        mock_msg = AIMessage(content="", tool_calls=[{"id": "call_1", "name": "test", "args": {}}])
         mock_msg.id = None
         with patch.object(NormalizedChatOpenAI, "_get_request_payload", return_value=mock_payload), \
              patch("tradingagents.llm_clients.openai_client._input_to_messages", return_value=[mock_msg]):

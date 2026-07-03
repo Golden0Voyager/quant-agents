@@ -1,5 +1,7 @@
 import os
+from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
@@ -46,6 +48,23 @@ class NormalizedChatOpenAI(ChatOpenAI):
         # value. The schema is still bound as a tool — exactly what
         # DeepSeek's official tool-calling examples do.
         if method == "function_calling" and not caps.supports_tool_choice:
+            kwargs.setdefault("tool_choice", None)
+        return super().with_structured_output(schema, method=method, **kwargs)
+
+
+class LocalCompatibleChatOpenAI(NormalizedChatOpenAI):
+    """OpenAI-compatible client for arbitrary local servers (LM Studio, vLLM,
+    llama.cpp via the generic ``openai_compatible`` provider).
+
+    Their tool-calling support varies, and many reject the object-form
+    ``tool_choice`` langchain sends for function-calling structured output. Bind
+    the schema as a tool but don't force tool_choice, so structured output works
+    across local servers regardless of the model ID's capabilities (#1057).
+    """
+
+    def with_structured_output(self, schema, *, method=None, **kwargs):
+        resolved = method or get_capabilities(self.model_name).preferred_structured_method
+        if resolved == "function_calling":
             kwargs.setdefault("tool_choice", None)
         return super().with_structured_output(schema, method=method, **kwargs)
 
@@ -102,7 +121,7 @@ class DeepSeekChatOpenAI(NormalizedChatOpenAI):
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
         outgoing = payload.get("messages", [])
         for message_dict, message in zip(outgoing, _input_to_messages(input_), strict=False):
-            if message_dict.get("role") != "assistant":
+            if not isinstance(message, AIMessage):
                 continue
             if "reasoning_content" in message_dict:
                 continue
@@ -208,7 +227,66 @@ _PROVIDER_BASE_URL = {
     "agnes":      "https://apihub.agnes-ai.com/v1",
     "modelscope": "https://api-inference.modelscope.cn/v1",
     "nvidia":     "https://integrate.api.nvidia.com/v1",
+}
 
+@dataclass(frozen=True)
+class ProviderSpec:
+    """Declarative config for one OpenAI-compatible provider.
+
+    The OpenAI-compatible family (OpenAI, xAI, DeepSeek, Qwen, GLM, MiniMax,
+    OpenRouter, Ollama, and any user endpoint) all speak the same Chat
+    Completions API and differ only by these fields — so one row here replaces
+    the former per-provider base-URL dict, auth handling, and client-class
+    branches. Native Anthropic / Google use their own clients (genuinely
+    different APIs) and are intentionally NOT in this registry.
+
+    The API-key env var stays in ``api_key_env.PROVIDER_API_KEY_ENV`` (the single
+    source consulted by both this client and the CLI prompt); only behavior that
+    is provider-specific (base URL, key optionality, wire-format quirks via
+    ``chat_class``) lives here.
+    """
+
+    chat_class: type = NormalizedChatOpenAI   # provider quirks live in the subclass
+    base_url: str | None = None            # default endpoint (None -> SDK default)
+    base_url_env: str | None = None        # env var that overrides base_url (e.g. OLLAMA_BASE_URL)
+    key_optional: bool = False                # don't require/prompt; send a placeholder if unset
+    placeholder_key: str = "EMPTY"            # sent when no key is available (keyless local servers)
+    require_base_url: bool = False            # error if no base_url is resolved (generic endpoint)
+    use_responses_api: bool = False           # native OpenAI Responses API
+
+
+# Single source of truth for the OpenAI-compatible provider family. Dual-region
+# providers (qwen/glm/minimax) keep separate endpoints because international and
+# China accounts cannot share credentials (#758).
+# Includes both upstream-supported providers and our local custom providers
+# (sensenova, mimo, agnes, modelscope).
+# TODO: migrate get_llm() to use this registry so _PROVIDER_BASE_URL can be removed.
+OPENAI_COMPATIBLE_PROVIDERS: dict[str, ProviderSpec] = {
+    "openai":     ProviderSpec(use_responses_api=True),
+    "xai":        ProviderSpec(base_url="https://api.x.ai/v1"),
+    "deepseek":   ProviderSpec(base_url="https://api.deepseek.com", chat_class=DeepSeekChatOpenAI),
+    "qwen":       ProviderSpec(base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
+    "qwen-cn":    ProviderSpec(base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"),
+    "glm":        ProviderSpec(base_url="https://api.z.ai/api/paas/v4/"),
+    "glm-cn":     ProviderSpec(base_url="https://open.bigmodel.cn/api/paas/v4/"),
+    "minimax":    ProviderSpec(base_url="https://api.minimax.io/v1", chat_class=MinimaxChatOpenAI),
+    "minimax-cn": ProviderSpec(base_url="https://api.minimaxi.com/v1", chat_class=MinimaxChatOpenAI),
+    "openrouter": ProviderSpec(base_url="https://openrouter.ai/api/v1"),
+    "mistral":    ProviderSpec(base_url="https://api.mistral.ai/v1"),
+    "kimi":       ProviderSpec(base_url="https://api.moonshot.ai/v1"),
+    "groq":       ProviderSpec(base_url="https://api.groq.com/openai/v1"),
+    "nvidia":     ProviderSpec(base_url="https://integrate.api.nvidia.com/v1"),
+    "ollama":     ProviderSpec(base_url="http://localhost:11434/v1", base_url_env="OLLAMA_BASE_URL",
+                               key_optional=True, placeholder_key="ollama"),
+    # Local custom providers (A-Share fork)
+    "sensenova":  ProviderSpec(base_url="https://token.sensenova.cn/v1"),
+    "mimo":       ProviderSpec(base_url="https://token-plan-cn.xiaomimimo.com/v1"),
+    "agnes":      ProviderSpec(base_url="https://apihub.agnes-ai.com/v1"),
+    "modelscope": ProviderSpec(base_url="https://api-inference.modelscope.cn/v1"),
+    # Generic endpoint: user supplies base_url; key optional (keyless local).
+    "openai_compatible": ProviderSpec(
+        require_base_url=True, key_optional=True, chat_class=LocalCompatibleChatOpenAI
+    ),
 }
 
 
@@ -226,6 +304,22 @@ def _resolve_provider_base_url(provider: str) -> str | None:
         if env_url:
             return env_url
     return _PROVIDER_BASE_URL.get(provider)
+
+
+def _is_native_openai_base_url(base_url: str | None) -> bool:
+    """True when ``base_url`` is unset or points at api.openai.com.
+
+    The Responses API (/v1/responses) only exists on native OpenAI. A custom
+    base_url on the ``openai`` provider (a proxy, gateway, or local server)
+    speaks only Chat Completions, so the Responses API must stay off there even
+    though the provider spec enables it (#1024).
+    """
+    if not base_url:
+        return True
+    if "://" not in base_url:
+        base_url = "https://" + base_url
+    host = urlparse(base_url).hostname or ""
+    return host == "api.openai.com" or host.endswith(".openai.com")
 
 
 class OpenAIClient(BaseLLMClient):
@@ -291,7 +385,12 @@ class OpenAIClient(BaseLLMClient):
 
         # Native OpenAI: use Responses API for consistent behavior across
         # all model families. Third-party providers use Chat Completions.
-        if self.provider == "openai":
+        # The Responses API only exists on native OpenAI; if the user points
+        # the openai provider at a custom base_url (proxy/gateway/local), it
+        # only speaks Chat Completions, so keep Responses off there (#1024).
+        if self.provider == "openai" and _is_native_openai_base_url(
+            self.base_url or _resolve_provider_base_url("openai")
+        ):
             llm_kwargs["use_responses_api"] = True
 
         # Provider-specific quirks live in their own subclasses so the

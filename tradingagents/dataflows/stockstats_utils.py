@@ -32,8 +32,10 @@ def yf_retry(func, max_retries=3, base_delay=2.0):
             return func()
         except YFRateLimitError:
             if attempt < max_retries:
-                delay = base_delay * (2 ** attempt)
-                logger.warning(f"Yahoo Finance rate limited, retrying in {delay:.0f}s (attempt {attempt + 1}/{max_retries})")
+                delay = base_delay * (2**attempt)
+                logger.warning(
+                    f"Yahoo Finance rate limited, retrying in {delay:.0f}s (attempt {attempt + 1}/{max_retries})"
+                )
                 time.sleep(delay)
             else:
                 raise
@@ -167,6 +169,7 @@ def _load_ohlcv_from_akshare(
         import akshare as ak
 
         from tradingagents.dataflows.akshare_common import (
+            _akshare_retry,
             is_a_share_ticker,
             no_proxy,
             to_akshare_symbol,
@@ -183,12 +186,16 @@ def _load_ohlcv_from_akshare(
         ak_end = end_date.replace("-", "")
 
         with no_proxy():
-            df = ak.stock_zh_a_hist(
-                symbol=code,
-                period="daily",
-                start_date=ak_start,
-                end_date=ak_end,
-                adjust="qfq",
+            df = _akshare_retry(
+                lambda: ak.stock_zh_a_hist(
+                    symbol=code,
+                    period="daily",
+                    start_date=ak_start,
+                    end_date=ak_end,
+                    adjust="qfq",
+                ),
+                max_retries=3,
+                base_delay=2.0,
             )
 
         if df is None or df.empty:
@@ -255,14 +262,16 @@ def load_ohlcv(symbol: str, curr_date: str, lookback_years: int = 5) -> pd.DataF
     if data is None:
         downloaded = None
         try:
-            downloaded = yf_retry(lambda: yf.download(
-                canonical,
-                start=start_str,
-                end=end_str,
-                multi_level_index=False,
-                progress=False,
-                auto_adjust=True,
-            ))
+            downloaded = yf_retry(
+                lambda: yf.download(
+                    canonical,
+                    start=start_str,
+                    end=end_str,
+                    multi_level_index=False,
+                    progress=False,
+                    auto_adjust=True,
+                )
+            )
             downloaded = _ensure_date_column(downloaded.reset_index())
             if downloaded.empty or "Close" not in downloaded.columns:
                 downloaded = None
@@ -282,9 +291,7 @@ def load_ohlcv(symbol: str, curr_date: str, lookback_years: int = 5) -> pd.DataF
                 downloaded = _load_ohlcv_from_akshare(canonical, start_str, end_str)
 
         if downloaded is None or downloaded.empty or "Close" not in downloaded.columns:
-            raise NoMarketDataError(
-                symbol, canonical, "Yahoo Finance returned no rows"
-            )
+            raise NoMarketDataError(symbol, canonical, "Yahoo Finance returned no rows")
         downloaded.to_csv(data_file, index=False, encoding="utf-8")
         data = downloaded
 
@@ -318,12 +325,8 @@ class StockstatsUtils:
     @staticmethod
     def get_stock_stats(
         symbol: Annotated[str, "ticker symbol for the company"],
-        indicator: Annotated[
-            str, "quantitative indicators based off of the stock data for the company"
-        ],
-        curr_date: Annotated[
-            str, "curr date for retrieving stock price data, YYYY-mm-dd"
-        ],
+        indicator: Annotated[str, "quantitative indicators based off of the stock data for the company"],
+        curr_date: Annotated[str, "curr date for retrieving stock price data, YYYY-mm-dd"],
     ):
         data = load_ohlcv(symbol, curr_date)
         df = wrap(data).copy()

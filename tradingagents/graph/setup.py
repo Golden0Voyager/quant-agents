@@ -21,14 +21,12 @@ class GraphSetup:
         deep_thinking_llm: Any,
         tool_nodes: dict[str, ToolNode],
         conditional_logic: ConditionalLogic,
-        analyst_concurrency_limit: int = 1,
     ):
         """Initialize with required components."""
         self.quick_thinking_llm = quick_thinking_llm
         self.deep_thinking_llm = deep_thinking_llm
         self.tool_nodes = tool_nodes
         self.conditional_logic = conditional_logic
-        self.analyst_concurrency_limit = analyst_concurrency_limit
 
     def setup_graph(
         self, selected_analysts=None
@@ -46,10 +44,7 @@ class GraphSetup:
         """
         if selected_analysts is None:
             selected_analysts = ["market", "social", "news", "fundamentals"]
-        plan = build_analyst_execution_plan(
-            selected_analysts,
-            concurrency_limit=self.analyst_concurrency_limit,
-        )
+        plan = build_analyst_execution_plan(selected_analysts)
 
         analyst_factories = {
             "market": lambda: create_market_analyst(self.quick_thinking_llm),

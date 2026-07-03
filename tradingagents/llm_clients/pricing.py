@@ -66,6 +66,8 @@ PRICING: dict[str, dict[str, Price]] = {
     # https://docs.qwencloud.com/developer-guides/getting-started/pricing.
     "qwen": {
         "qwen3.7-max":   (2.50, 7.50),
+        "qwen3.7-plus":  (0.50, 2.00),
+        "qwen3.6-max":   (2.00, 6.00),
         "qwen3.6-plus":  (0.40, 1.60),
         "qwen3.6-flash": (0.25, 1.50),
         "qwen3.5-plus":  (0.40, 1.60),
@@ -73,6 +75,8 @@ PRICING: dict[str, dict[str, Price]] = {
     },
     "qwen-cn": {
         "qwen3.7-max":   (2.50, 7.50),
+        "qwen3.7-plus":  (0.50, 2.00),
+        "qwen3.6-max":   (2.00, 6.00),
         "qwen3.6-plus":  (0.40, 1.60),
         "qwen3.6-flash": (0.25, 1.50),
         "qwen3.5-plus":  (0.40, 1.60),
@@ -83,6 +87,7 @@ PRICING: dict[str, dict[str, Price]] = {
     # the 5.x line at the time of writing; we mirror Z.AI's tier-2
     # (Coding Plan) defaults. Verify before billing critical work.
     "glm": {
+        "glm-5.2":     (1.20, 4.80),
         "glm-5.1":     (1.00, 4.00),
         "glm-5":       (1.00, 4.00),
         "glm-5-turbo": (0.50, 2.00),
@@ -90,6 +95,7 @@ PRICING: dict[str, dict[str, Price]] = {
         "glm-4.5-air": (0.10, 0.40),
     },
     "glm-cn": {
+        "glm-5.2":     (1.20, 4.80),
         "glm-5.1":     (1.00, 4.00),
         "glm-5":       (1.00, 4.00),
         "glm-5-turbo": (0.50, 2.00),
@@ -100,6 +106,7 @@ PRICING: dict[str, dict[str, Price]] = {
     # Plan tier-2 rates from platform.minimax.io are the closest public
     # reference; the actual on-demand rates may differ.
     "minimax": {
+        "MiniMax-M3":              (1.50, 6.00),
         "MiniMax-M2.7":            (1.20, 4.80),
         "MiniMax-M2.7-highspeed":  (0.60, 2.40),
         "MiniMax-M2.5":            (0.60, 2.40),
@@ -109,6 +116,7 @@ PRICING: dict[str, dict[str, Price]] = {
         "MiniMax-M2":              (0.15, 0.60),
     },
     "minimax-cn": {
+        "MiniMax-M3":              (1.50, 6.00),
         "MiniMax-M2.7":            (1.20, 4.80),
         "MiniMax-M2.7-highspeed":  (0.60, 2.40),
         "MiniMax-M2.5":            (0.60, 2.40),
@@ -155,12 +163,14 @@ PRICING: dict[str, dict[str, Price]] = {
     # xAI Grok: list price USD/M tokens. Verified 2026-06 against
     # https://docs.x.ai/docs/models.
     "xai": {
-        "grok-4.3":                  (5.00, 15.00),
-        "grok-build-0.1":            (5.00, 15.00),
-        "grok-4-fast-reasoning":     (0.20, 0.50),
-        "grok-4-fast-non-reasoning": (0.20, 0.50),
-        "grok-4-0709":               (5.00, 15.00),
-        "grok-4.20-0309-reasoning":  (5.00, 15.00),
+        "grok-4.3":                          (5.00, 15.00),
+        "grok-build-0.1":                    (5.00, 15.00),
+        "grok-4-fast-reasoning":             (0.20, 0.50),
+        "grok-4-fast-non-reasoning":         (0.20, 0.50),
+        "grok-4-0709":                       (5.00, 15.00),
+        "grok-4.20-0309-reasoning":          (5.00, 15.00),
+        "grok-4.20-0309-non-reasoning":      (2.00, 6.00),
+        "grok-4.20-multi-agent-0309":        (5.00, 15.00),
     },
     # Kimi (Moonshot AI) Coding Plan. Verified 2026-06 against
     # https://platform.kimi.ai/docs/pricing/chat-k26.

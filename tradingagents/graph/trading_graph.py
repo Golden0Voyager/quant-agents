@@ -43,6 +43,7 @@ from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.llm_clients import create_llm_client
 from tradingagents.llm_clients.retry_utils import RetryConfig
+from tradingagents.reporting import write_report_tree
 
 from .analyst_execution import (
     AnalystWallTimeTracker,
@@ -126,7 +127,6 @@ class TradingAgentsGraph:
             self.deep_thinking_llm,
             self.tool_nodes,
             self.conditional_logic,
-            analyst_concurrency_limit=self.config.get("analyst_concurrency_limit", 1),
         )
 
         self.propagator = Propagator(
@@ -503,6 +503,21 @@ class TradingAgentsGraph:
                 self._checkpointer_ctx = None
                 self.graph = self.workflow.compile()
 
+    def save_reports(self, final_state, ticker, save_path=None) -> Path:
+        """Write the markdown report tree for a completed run, like the CLI does.
+
+        Programmatic callers get the same on-disk reports the CLI produces. Pass
+        an explicit ``save_path`` or let it default under ``results_dir``.
+        """
+        if save_path is None:
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            save_path = (
+                Path(self.config["results_dir"])
+                / "reports"
+                / f"{safe_ticker_component(ticker)}_{stamp}"
+            )
+        return write_report_tree(final_state, ticker, save_path)
+
     def _run_graph(self, company_name, trade_date, asset_type: str = "stock", confirmed_name: str | None = None):
         """Execute the graph and write the resulting state to disk and memory log."""
         # Initialize state — inject memory log context for PM and the
@@ -536,6 +551,7 @@ class TradingAgentsGraph:
         # Wall-time tracker for per-analyst elapsed times.
         plan = build_analyst_execution_plan(self.selected_analysts)
         tracker = AnalystWallTimeTracker(plan)
+        last_printed = None
 
         for chunk in self.graph.stream(init_agent_state, **stream_args):
             t_now = _time.perf_counter()
@@ -555,8 +571,15 @@ class TradingAgentsGraph:
                         if state_update.get(spec.report_key):
                             tracker.mark_completed(spec.key, completed_at=t_now)
             t_prev = t_now
+            # Nodes after the trader don't append to messages, so the
+            # same trailing message repeats across chunks. Print it only
+            # when it changes (#1027, upstream 709fe2b).
             if self.debug and merged_state.get("messages"):
-                merged_state["messages"][-1].pretty_print()
+                msg = merged_state["messages"][-1]
+                signature = (type(msg).__name__, getattr(msg, "content", None))
+                if signature != last_printed:
+                    msg.pretty_print()
+                    last_printed = signature
 
         final_state = merged_state
         self.node_timings = timings

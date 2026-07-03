@@ -37,6 +37,7 @@ from tradingagents.graph.analyst_execution import (
     sync_analyst_tracker_from_chunk,
 )
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.reporting import write_report_tree
 
 console = Console()
 
@@ -896,161 +897,8 @@ def select_profile_interactive() -> dict:
 
 
 def save_report_to_disk(final_state, ticker: str, save_path: Path):
-    """Save complete analysis report to disk with organized subfolders."""
-    save_path.mkdir(parents=True, exist_ok=True)
-
-    # ------------------------------------------------------------------
-    # Global company-name sanitization: correct LLM hallucinations before
-    # any report text hits the disk.  Operates on final_state in-place.
-    # ------------------------------------------------------------------
-    from tradingagents.agents.utils.agent_utils import sanitize_company_name_in_report
-
-    company_name = final_state.get("company_name", "")
-    _report_keys = [
-        "market_report",
-        "sentiment_report",
-        "news_report",
-        "fundamentals_report",
-        "governance_report",
-        "industry_report",
-        "trader_investment_plan",
-        "final_trade_decision",
-    ]
-    for key in _report_keys:
-        if isinstance(final_state.get(key), str):
-            final_state[key] = sanitize_company_name_in_report(
-                final_state[key], ticker, company_name
-            )
-    for debate_key in ["investment_debate_state", "risk_debate_state"]:
-        debate = final_state.get(debate_key)
-        if isinstance(debate, dict):
-            for sub_key in debate:
-                if isinstance(debate.get(sub_key), str):
-                    debate[sub_key] = sanitize_company_name_in_report(
-                        debate[sub_key], ticker, company_name
-                    )
-
-    sections = []
-
-    _titles = {
-        "header": "Trading Analysis Report",
-        "generated": "Generated",
-        "analyst_team": "I. Analyst Team Reports",
-        "research_team": "II. Research Team Decision",
-        "trading_team": "III. Trading Team Plan",
-        "risk_team": "IV. Risk Management Team Decision",
-        "portfolio": "V. Portfolio Manager Decision",
-    }
-    _file_titles = {
-        "fundamentals": "Fundamentals",
-        "market": "Market",
-        "news": "News",
-        "sentiment": "Sentiment",
-        "governance": "Governance",
-        "industry": "Industry",
-        "bull": "Bull Researcher",
-        "bear": "Bear Researcher",
-        "manager": "Research Manager",
-        "trader": "Trader",
-        "aggressive": "Aggressive Analyst",
-        "conservative": "Conservative Analyst",
-        "neutral": "Neutral Analyst",
-        "decision": "Decision",
-    }
-
-    # 1. Analysts
-    analysts_dir = save_path / "1_analysts"
-    analyst_parts = []
-    if final_state.get("market_report"):
-        analysts_dir.mkdir(exist_ok=True)
-        (analysts_dir / "market.md").write_text(final_state["market_report"], encoding="utf-8")
-        analyst_parts.append((_file_titles["market"], final_state["market_report"]))
-    if final_state.get("sentiment_report"):
-        analysts_dir.mkdir(exist_ok=True)
-        (analysts_dir / "sentiment.md").write_text(final_state["sentiment_report"], encoding="utf-8")
-        analyst_parts.append((_file_titles["sentiment"], final_state["sentiment_report"]))
-    if final_state.get("news_report"):
-        analysts_dir.mkdir(exist_ok=True)
-        (analysts_dir / "news.md").write_text(final_state["news_report"], encoding="utf-8")
-        analyst_parts.append((_file_titles["news"], final_state["news_report"]))
-    if final_state.get("fundamentals_report"):
-        analysts_dir.mkdir(exist_ok=True)
-        (analysts_dir / "fundamentals.md").write_text(final_state["fundamentals_report"], encoding="utf-8")
-        analyst_parts.append((_file_titles["fundamentals"], final_state["fundamentals_report"]))
-    if final_state.get("governance_report"):
-        analysts_dir.mkdir(exist_ok=True)
-        (analysts_dir / "governance.md").write_text(final_state["governance_report"], encoding="utf-8")
-        analyst_parts.append((_file_titles["governance"], final_state["governance_report"]))
-    if final_state.get("industry_report"):
-        analysts_dir.mkdir(exist_ok=True)
-        (analysts_dir / "industry.md").write_text(final_state["industry_report"], encoding="utf-8")
-        analyst_parts.append((_file_titles["industry"], final_state["industry_report"]))
-    if analyst_parts:
-        content = "\n\n".join(f"### {name}\n{text}" for name, text in analyst_parts)
-        sections.append(f"## {_titles['analyst_team']}\n\n{content}")
-
-    # 2. Research
-    if final_state.get("investment_debate_state"):
-        research_dir = save_path / "2_research"
-        debate = final_state["investment_debate_state"]
-        research_parts = []
-        if debate.get("bull_history"):
-            research_dir.mkdir(exist_ok=True)
-            (research_dir / "bull.md").write_text(debate["bull_history"], encoding="utf-8")
-            research_parts.append((_file_titles["bull"], debate["bull_history"]))
-        if debate.get("bear_history"):
-            research_dir.mkdir(exist_ok=True)
-            (research_dir / "bear.md").write_text(debate["bear_history"], encoding="utf-8")
-            research_parts.append((_file_titles["bear"], debate["bear_history"]))
-        if debate.get("judge_decision"):
-            research_dir.mkdir(exist_ok=True)
-            (research_dir / "manager.md").write_text(debate["judge_decision"], encoding="utf-8")
-            research_parts.append((_file_titles["manager"], debate["judge_decision"]))
-        if research_parts:
-            content = "\n\n".join(f"### {name}\n{text}" for name, text in research_parts)
-            sections.append(f"## {_titles['research_team']}\n\n{content}")
-
-    # 3. Trading
-    if final_state.get("trader_investment_plan"):
-        trading_dir = save_path / "3_trading"
-        trading_dir.mkdir(exist_ok=True)
-        (trading_dir / "trader.md").write_text(final_state["trader_investment_plan"], encoding="utf-8")
-        sections.append(f"## {_titles['trading_team']}\n\n### {_file_titles['trader']}\n{final_state['trader_investment_plan']}")
-
-    # 4. Risk Management
-    if final_state.get("risk_debate_state"):
-        risk_dir = save_path / "4_risk"
-        risk = final_state["risk_debate_state"]
-        risk_parts = []
-        if risk.get("aggressive_history"):
-            risk_dir.mkdir(exist_ok=True)
-            (risk_dir / "aggressive.md").write_text(risk["aggressive_history"], encoding="utf-8")
-            risk_parts.append((_file_titles["aggressive"], risk["aggressive_history"]))
-        if risk.get("conservative_history"):
-            risk_dir.mkdir(exist_ok=True)
-            (risk_dir / "conservative.md").write_text(risk["conservative_history"], encoding="utf-8")
-            risk_parts.append((_file_titles["conservative"], risk["conservative_history"]))
-        if risk.get("neutral_history"):
-            risk_dir.mkdir(exist_ok=True)
-            (risk_dir / "neutral.md").write_text(risk["neutral_history"], encoding="utf-8")
-            risk_parts.append((_file_titles["neutral"], risk["neutral_history"]))
-        if risk_parts:
-            content = "\n\n".join(f"### {name}\n{text}" for name, text in risk_parts)
-            sections.append(f"## {_titles['risk_team']}\n\n{content}")
-
-        # 5. Portfolio Manager
-        if risk.get("judge_decision"):
-            portfolio_dir = save_path / "5_portfolio"
-            portfolio_dir.mkdir(exist_ok=True)
-            (portfolio_dir / "decision.md").write_text(risk["judge_decision"], encoding="utf-8")
-            sections.append(f"## {_titles['portfolio']}\n\n### {_file_titles['decision']}\n{risk['judge_decision']}")
-
-    # Write consolidated report
-    trade_date = final_state.get("trade_date", "")
-    header = f"# {_titles['header']}: {ticker}\n\n{_titles['generated']}: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\nAnalysis Date: {trade_date}\n\n"
-    (save_path / "complete_report.md").write_text(header + "\n\n".join(sections), encoding="utf-8")
-
-    return save_path / "complete_report.md"
+    """Save the complete analysis report to disk (shared CLI/API writer)."""
+    return write_report_tree(final_state, ticker, save_path)
 
 
 def _split_translation_chunks(text: str, max_chunk_size: int = 8000) -> list[str]:
@@ -1525,10 +1373,7 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
 
     selected_set = {analyst.value for analyst in selections["analysts"]}
     selected_analyst_keys = [a[1].value for a in ANALYST_ORDER if a[1].value in selected_set]
-    analyst_execution_plan = build_analyst_execution_plan(
-        selected_analyst_keys,
-        concurrency_limit=config["analyst_concurrency_limit"],
-    )
+    analyst_execution_plan = build_analyst_execution_plan(selected_analyst_keys)
     analyst_wall_time_tracker = AnalystWallTimeTracker(analyst_execution_plan)
 
     graph = TradingAgentsGraph(
@@ -2075,6 +1920,8 @@ def analyze(
         return
 
     # Interactive mode
+    if not holdings and not holdings_sheet and not sync_holdings:
+        holdings = _prompt_sync_holdings_interactive()
     mode = ask_mode()
     if mode == "batch":
         watchlist_name, ticker_list = select_watchlist_interactive()
@@ -2138,6 +1985,61 @@ def analyze(
             run_batch_analysis(tickers, profile_config, checkpoint=checkpoint, output_dir=Path(output_dir) if output_dir else None, holdings=holdings, workers=workers)
         else:
             run_analysis(checkpoint=checkpoint, selections=selections, holdings=holdings)
+
+
+def _prompt_sync_holdings_interactive() -> dict | None:
+    """在交互模式下询问用户是否要同步自选股，返回 holdings dict 或 None。
+
+    仅在配置了 PORTFOLIO_SHEET_ID 时弹出询问，否则静默跳过。
+    """
+    sheet_id = DEFAULT_CONFIG.get("portfolio", {}).get("sheet_id")
+    if not sheet_id:
+        return None
+
+    import questionary
+    do_sync = questionary.confirm(
+        "是否同步自选股数据（持仓 & 交易记录）？",
+        default=False,
+        style=questionary.Style([
+            ("qmark", "fg:cyan bold"),
+            ("question", "fg:yellow bold"),
+            ("answer", "fg:green"),
+            ("pointer", "fg:cyan"),
+            ("highlighted", "fg:cyan"),
+        ]),
+    ).ask()
+    if do_sync is None:
+        return None
+
+    if do_sync:
+        try:
+            _do_sync_holdings(sheet_id, DEFAULT_CONFIG.get("portfolio", {}).get("worksheet", "total"))
+        except typer.Exit:
+            return None
+        except SystemExit:
+            return None
+
+    from tradingagents.portfolio import PortfolioRepository
+    repo = PortfolioRepository()
+    if repo.exists():
+        try:
+            portfolio = repo.load()
+            return {
+                ticker: {
+                    "ticker": ticker,
+                    "shares": h.shares,
+                    "avg_cost": h.avg_cost,
+                    "market_price": h.market_price,
+                    "pnl_pct": h.pnl_pct,
+                    "weight": h.weight,
+                    "grid_strategy": h.grid_strategy,
+                    "name": h.name,
+                }
+                for ticker, h in portfolio.holdings.items()
+            }
+        except Exception:
+            pass
+    return None
 
 
 def _do_sync_holdings(sheet_id: str | None, worksheet: str):

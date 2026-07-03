@@ -24,7 +24,7 @@ class TestGoogleApiKeyStandardization(unittest.TestCase):
         for msg, kwargs, expected_key in test_cases:
             with self.subTest(msg=msg):
                 mock_chat.reset_mock()
-                client = GoogleClient("gemini-2.5-flash", **kwargs)
+                client = GoogleClient("gemini-3.5-flash", **kwargs)
                 client.get_llm()
                 call_kwargs = mock_chat.call_args[1]
                 self.assertEqual(call_kwargs.get("google_api_key"), expected_key)
@@ -100,7 +100,7 @@ class GoogleClientEdgeTests(unittest.TestCase):
         with patch.object(mod, "NormalizedChatGoogleGenerativeAI", lambda **kwargs: captured.__setitem__("kwargs", kwargs)):
             client = GoogleClient(model="gemini-2.5-pro", thinking_level="high", google_api_key="test")
             client.get_llm()
-        self.assertEqual(captured["kwargs"]["thinking_budget"], -1)
+        self.assertEqual(captured["kwargs"]["thinking_level"], "high")
 
     def test_thinking_level_gemini_25_low_sets_budget(self):
         import tradingagents.llm_clients.google_client as mod
@@ -110,7 +110,7 @@ class GoogleClientEdgeTests(unittest.TestCase):
         with patch.object(mod, "NormalizedChatGoogleGenerativeAI", lambda **kwargs: captured.__setitem__("kwargs", kwargs)):
             client = GoogleClient(model="gemini-2.5-flash", thinking_level="low", google_api_key="test")
             client.get_llm()
-        self.assertEqual(captured["kwargs"]["thinking_budget"], 0)
+        self.assertEqual(captured["kwargs"]["thinking_level"], "low")
 
     def test_get_llm_missing_model_raises(self):
         from tradingagents.llm_clients.google_client import GoogleClient
@@ -190,7 +190,7 @@ class TestGoogleClient(unittest.TestCase):
 
     @patch("tradingagents.llm_clients.google_client.NormalizedChatGoogleGenerativeAI")
     def test_thinking_level_gemini25_high_to_budget(self, mock_chat):
-        """Line 58: Gemini 2.5 with 'high' maps to thinking_budget = -1."""
+        """Gemini 2.5 retired: 'high' passes through as thinking_level."""
         from tradingagents.llm_clients.google_client import GoogleClient
 
         client = GoogleClient(
@@ -198,11 +198,11 @@ class TestGoogleClient(unittest.TestCase):
         )
         client.get_llm()
         call_kwargs = mock_chat.call_args[1]
-        self.assertEqual(call_kwargs["thinking_budget"], -1)
+        self.assertEqual(call_kwargs["thinking_level"], "high")
 
     @patch("tradingagents.llm_clients.google_client.NormalizedChatGoogleGenerativeAI")
     def test_thinking_level_gemini25_low_to_budget_zero(self, mock_chat):
-        """Line 58: Gemini 2.5 with 'low' maps to thinking_budget = 0."""
+        """Gemini 2.5 retired: 'low' passes through as thinking_level."""
         from tradingagents.llm_clients.google_client import GoogleClient
 
         client = GoogleClient(
@@ -210,7 +210,7 @@ class TestGoogleClient(unittest.TestCase):
         )
         client.get_llm()
         call_kwargs = mock_chat.call_args[1]
-        self.assertEqual(call_kwargs["thinking_budget"], 0)
+        self.assertEqual(call_kwargs["thinking_level"], "low")
 
     @patch("tradingagents.llm_clients.google_client.NormalizedChatGoogleGenerativeAI")
     def test_thinking_level_none_skips(self, mock_chat):
