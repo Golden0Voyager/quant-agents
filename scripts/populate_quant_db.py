@@ -18,13 +18,13 @@ Usage:
     # Dry-run — show what would be done without writing
     uv run python scripts/populate_quant_db.py --dry-run --all
 """
+
 from __future__ import annotations
 
 import argparse
 import logging
 import sqlite3
 import sys
-from datetime import datetime, timedelta
 
 import pandas as pd
 
@@ -52,9 +52,7 @@ def _get_connection() -> sqlite3.Connection:
 
 def _tscodes_with_daily_bars(conn: sqlite3.Connection) -> list[str]:
     """Return ts_code values that have data in daily_bars."""
-    df = pd.read_sql_query(
-        "SELECT DISTINCT ts_code FROM daily_bars ORDER BY ts_code", conn
-    )
+    df = pd.read_sql_query("SELECT DISTINCT ts_code FROM daily_bars ORDER BY ts_code", conn)
     return df["ts_code"].tolist()
 
 
@@ -110,19 +108,16 @@ def _populate_institutional_holdings(
     # Group by report date (截至日期) and derive institutional metrics
     written = 0
     for report_date, group in df.groupby("截至日期"):
-        top10_count = len(group)
         total_hold_pct = group["持股比例"].sum() if "持股比例" in group.columns else None
         # Count institution-type holders by name pattern
         inst_keywords = "基金|社保|保险|QFII|香港中央结算|中国证券金融|中央汇金|养老"
         inst_mask = group["股东名称"].str.contains(inst_keywords, na=False)
         inst_count = int(inst_mask.sum())
         inst_hold_pct = group.loc[inst_mask, "持股比例"].sum() if inst_count > 0 else None
-        total_shares_raw = group["股东总数"].iloc[0] if "股东总数" in group.columns else None
 
         if dry_run:
             logger.info(
-                "  [dry-run] would insert: %s, %s, institutions=%d, "
-                "top10_ratio=%s, total_hold_pct=%s",
+                "  [dry-run] would insert: %s, %s, institutions=%d, top10_ratio=%s, total_hold_pct=%s",
                 code,
                 report_date,
                 inst_count,
@@ -228,12 +223,8 @@ def _populate_dragon_tiger(
             # Aggregate per-date — the LHB detail has multiple broker entries
             try:
                 net_buy = detail_df["净额"].sum() if "净额" in detail_df.columns else None
-                buy_amt = (
-                    detail_df["买入金额"].sum() if "买入金额" in detail_df.columns else None
-                )
-                sell_amt = (
-                    detail_df["卖出金额"].sum() if "卖出金额" in detail_df.columns else None
-                )
+                buy_amt = detail_df["买入金额"].sum() if "买入金额" in detail_df.columns else None
+                sell_amt = detail_df["卖出金额"].sum() if "卖出金额" in detail_df.columns else None
             except Exception:
                 net_buy = buy_amt = sell_amt = None
 
@@ -263,9 +254,7 @@ def _populate_dragon_tiger(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Populate empty quant_core.db tables from akshare"
-    )
+    parser = argparse.ArgumentParser(description="Populate empty quant_core.db tables from akshare")
     parser.add_argument("tickers", nargs="*", help="One or more tickers (e.g. 002027.SZ)")
     parser.add_argument(
         "--all",
