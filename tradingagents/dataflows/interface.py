@@ -1,107 +1,47 @@
 import logging
-from typing import Annotated
 
 # Import from vendor-specific modules
 from .akshare_common import is_a_share_ticker
 from .akshare_vendor import (
     get_balance_sheet as get_akshare_balance_sheet,
-)
-from .akshare_vendor import (
     get_block_trade as get_akshare_block_trade,
-)
-from .akshare_vendor import (
     get_cashflow as get_akshare_cashflow,
-)
-from .akshare_vendor import (
     get_company_announcements as get_akshare_company_announcements,
-)
-from .akshare_vendor import (
     get_dividend_history as get_akshare_dividend_history,
-)
-from .akshare_vendor import (
     get_dragon_tiger as get_akshare_dragon_tiger,
-)
-from .akshare_vendor import (
     get_earnings_estimates as get_akshare_earnings_estimates,
-)
-from .akshare_vendor import (
     get_fund_flow as get_akshare_fund_flow,
-)
-from .akshare_vendor import (
     get_fundamentals as get_akshare_fundamentals,
-)
-from .akshare_vendor import (
     get_income_statement as get_akshare_income_statement,
-)
-from .akshare_vendor import (
     get_indicators as get_akshare_indicators,
-)
-from .akshare_vendor import (
     get_industry_valuation as get_akshare_industry_valuation,
-)
-from .akshare_vendor import (
     get_insider_transactions as get_akshare_insider_transactions,
-)
-from .akshare_vendor import (
     get_institutional_holdings as get_akshare_institutional_holdings,
-)
-from .akshare_vendor import (
     get_macro_indicators as get_akshare_macro_indicators,
-)
-from .akshare_vendor import (
     get_margin_trading as get_akshare_margin_trading,
-)
-from .akshare_vendor import (
     get_news as get_akshare_news,
-)
-from .akshare_vendor import (
     get_northbound_hold as get_akshare_northbound_hold,
-)
-from .akshare_vendor import (
     get_pledge_ratio as get_akshare_pledge_ratio,
-)
-from .akshare_vendor import (
     get_research_reports as get_akshare_research_reports,
-)
-from .akshare_vendor import (
     get_restricted_release as get_akshare_restricted_release,
-)
-from .akshare_vendor import (
     get_sector_fund_flow as get_akshare_sector_fund_flow,
-)
-from .akshare_vendor import (
     get_shareholder_count as get_akshare_shareholder_count,
-)
-from .akshare_vendor import (
     get_stock_data as get_akshare_stock_data,
 )
 from .alpha_vantage import (
     get_balance_sheet as get_alpha_vantage_balance_sheet,
-)
-from .alpha_vantage import (
     get_cashflow as get_alpha_vantage_cashflow,
-)
-from .alpha_vantage import (
     get_fundamentals as get_alpha_vantage_fundamentals,
-)
-from .alpha_vantage import (
     get_global_news as get_alpha_vantage_global_news,
-)
-from .alpha_vantage import (
     get_income_statement as get_alpha_vantage_income_statement,
-)
-from .alpha_vantage import (
     get_indicator as get_alpha_vantage_indicator,
-)
-from .alpha_vantage import (
     get_insider_transactions as get_alpha_vantage_insider_transactions,
-)
-from .alpha_vantage import (
     get_news as get_alpha_vantage_news,
-)
-from .alpha_vantage import (
     get_stock as get_alpha_vantage_stock,
 )
+
+# Configuration and routing logic
+from .config import get_config
 from .errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
@@ -109,88 +49,35 @@ from .errors import (
 )
 from .fred import get_macro_data as get_fred_macro_data
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
-
-# Configuration and routing logic
-from .config import get_config
 from .smartmoney_vendor import (
     get_balance_sheet as get_smartmoney_balance_sheet,
-)
-from .smartmoney_vendor import (
     get_block_trade as get_smartmoney_block_trade,
-)
-from .smartmoney_vendor import (
     get_cashflow as get_smartmoney_cashflow,
-)
-from .smartmoney_vendor import (
     get_company_announcements as get_smartmoney_company_announcements,
-)
-from .smartmoney_vendor import (
     get_dragon_tiger as get_smartmoney_dragon_tiger,
-)
-from .smartmoney_vendor import (
     get_earnings_estimates as get_smartmoney_earnings_estimates,
-)
-from .smartmoney_vendor import (
     get_fund_flow as get_smartmoney_fund_flow,
-)
-from .smartmoney_vendor import (
     get_fundamentals as get_smartmoney_fundamentals,
-)
-from .smartmoney_vendor import (
     get_income_statement as get_smartmoney_income_statement,
-)
-from .smartmoney_vendor import (
     get_indicators as get_smartmoney_indicators,
-)
-from .smartmoney_vendor import (
     get_industry_valuation as get_smartmoney_industry_valuation,
-)
-from .smartmoney_vendor import (
     get_insider_transactions as get_smartmoney_insider_transactions,
-)
-from .smartmoney_vendor import (
     get_institutional_holdings as get_smartmoney_institutional_holdings,
-)
-from .smartmoney_vendor import (
     get_macro_indicators as get_smartmoney_macro_indicators,
-)
-from .smartmoney_vendor import (
     get_margin_trading as get_smartmoney_margin_trading,
-)
-from .smartmoney_vendor import (
     get_news as get_smartmoney_news,
-)
-from .smartmoney_vendor import (
     get_northbound_hold as get_smartmoney_northbound_hold,
-)
-from .smartmoney_vendor import (
     get_restricted_release as get_smartmoney_restricted_release,
-)
-from .smartmoney_vendor import (
     get_sector_fund_flow as get_smartmoney_sector_fund_flow,
-)
-from .smartmoney_vendor import (
     get_shareholder_count as get_smartmoney_shareholder_count,
-)
-from .smartmoney_vendor import (
     get_stock_data as get_smartmoney_stock_data,
 )
 from .y_finance import (
     get_balance_sheet as get_yfinance_balance_sheet,
-)
-from .y_finance import (
     get_cashflow as get_yfinance_cashflow,
-)
-from .y_finance import (
     get_fundamentals as get_yfinance_fundamentals,
-)
-from .y_finance import (
     get_income_statement as get_yfinance_income_statement,
-)
-from .y_finance import (
     get_insider_transactions as get_yfinance_insider_transactions,
-)
-from .y_finance import (
     get_stock_stats_indicators_window,
     get_YFin_data_online,
 )
@@ -233,7 +120,6 @@ TOOLS_CATEGORIES = {
             "get_restricted_release",
             "get_institutional_holdings",
             "get_northbound_hold",
-            "get_macro_indicators",
         ]
     },
     "governance_risk": {
@@ -386,6 +272,7 @@ VENDOR_METHODS = {
     "get_macro_indicators": {
         "smartmoney_db": get_smartmoney_macro_indicators,
         "akshare": get_akshare_macro_indicators,
+        "fred": get_fred_macro_data,
     },
     # governance_risk (v2.2)
     "get_pledge_ratio": {
@@ -398,10 +285,6 @@ VENDOR_METHODS = {
     # research_opinion (v2.2)
     "get_research_reports": {
         "akshare": get_akshare_research_reports,
-    },
-    # macro_data
-    "get_macro_indicators": {
-        "fred": get_fred_macro_data,
     },
     # prediction_markets
     "get_prediction_markets": {

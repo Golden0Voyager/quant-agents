@@ -206,23 +206,14 @@ class RedditFetchSubredditTests(unittest.TestCase):
     def test_json_success_path_returns_formatted_posts(self):
         from tradingagents.dataflows.reddit import fetch_reddit_posts
 
-        payload = json.dumps({
-            "data": {
-                "children": [
-                    {"data": {"title": "AAPL is great", "score": 100, "num_comments": 20,
-                              "created_utc": 1700000000, "selftext": "Really good quarter"}},
-                    {"data": {"title": "Bearish on AAPL", "score": 50, "num_comments": 10,
-                              "created_utc": 1700000000, "selftext": ""}},
-                ]
-            }
-        }).encode("utf-8")
+        mock_posts = [
+            {"title": "AAPL is great", "score": 100, "num_comments": 20,
+             "created_utc": 1700000000, "selftext": "Really good quarter"},
+            {"title": "Bearish on AAPL", "score": 50, "num_comments": 10,
+             "created_utc": 1700000000, "selftext": ""},
+        ]
 
-        mock_resp = MagicMock()
-        mock_resp.__enter__.return_value = mock_resp
-        mock_resp.read.return_value = payload
-
-        with patch("tradingagents.dataflows.reddit.urlopen", return_value=mock_resp), \
-             patch("tradingagents.dataflows.reddit.time.gmtime", return_value=(2024, 11, 14, 16, 53, 20, 3, 319, 0)), \
+        with patch("tradingagents.dataflows.reddit._fetch_subreddit", return_value=mock_posts), \
              patch("tradingagents.dataflows.reddit.time.sleep"):
             result = fetch_reddit_posts("AAPL", subreddits=("stocks",), limit_per_sub=5,
                                         inter_request_delay=0)
