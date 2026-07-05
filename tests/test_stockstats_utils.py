@@ -7,9 +7,11 @@ Merged from:
 
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -501,6 +503,39 @@ class LoadOhlcvFromAkshareTests(unittest.TestCase):
         with patch("builtins.__import__", side_effect=_mock_import):
             result = _load_ohlcv_from_akshare("000001.SZ", "2026-01-01", "2026-01-10")
             self.assertIsNone(result)
+
+
+# ===========================================================================
+# Empty downloads must not be cached (cache poisoning guard).
+# Merged from tests/test_no_data_handling.py::TestLoadOhlcvNoPoison — without
+# this guard, an empty vendor response would write through the cache and
+# silently mask subsequent no-data calls.
+# ===========================================================================
+
+
+@pytest.mark.unit
+class LoadOhlcvNoPoisonCacheTests(_TempDirMixin, unittest.TestCase):
+    """load_ohlcv must not cache an empty download."""
+
+    def test_empty_download_raises_and_does_not_cache(self):
+        empty = pd.DataFrame()
+        with mock.patch(
+            "tradingagents.dataflows.stockstats_utils.get_config",
+            return_value={"data_cache_dir": str(self._tmp)},
+        ), mock.patch.object(su.yf, "download", return_value=empty), \
+             self.assertRaises(NoMarketDataError):
+            su.load_ohlcv("FAKE", "2026-01-01")
+        # Nothing should have been written to the cache.
+        self.assertEqual(os.listdir(str(self._tmp)), [])
+
+        # A second call must re-attempt the fetch (no poisoned cache served).
+        with mock.patch(
+            "tradingagents.dataflows.stockstats_utils.get_config",
+            return_value={"data_cache_dir": str(self._tmp)},
+        ), mock.patch.object(su.yf, "download", return_value=empty) as dl2:
+            with self.assertRaises(NoMarketDataError):
+                su.load_ohlcv("FAKE", "2026-01-01")
+            self.assertTrue(dl2.called)
 
 
 if __name__ == "__main__":

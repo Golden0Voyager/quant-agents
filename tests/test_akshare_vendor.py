@@ -149,6 +149,76 @@ class TestBlockTradeStaticReturn(TestCase):
         assert "akshare" in result
 
 
+class _TqdmTracker:
+    """A simple callable base class that records __init__ kwargs."""
+    last_init_kwargs: dict | None = None
+
+    def __init__(self, iterable=None, desc=None, *args, **kwargs):
+        _TqdmTracker.last_init_kwargs = kwargs
+        _TqdmTracker.last_init_kwargs["desc"] = desc
+
+
+@pytest.mark.unit
+class TestPatchedGetTqdm(TestCase):
+    """Cover _patched_get_tqdm (lines 37-53) — tqdm progress bar customization."""
+
+    def setUp(self):
+        _TqdmTracker.last_init_kwargs = None
+
+    def test_enable_true_returns_subclass(self):
+        from tradingagents.dataflows.akshare_vendor import _patched_get_tqdm
+        with patch(
+            "tradingagents.dataflows.akshare_vendor._original_get_tqdm",
+            return_value=_TqdmTracker,
+        ):
+            result = _patched_get_tqdm(True)
+        # Returns a subclass of the original tqdm class
+        assert issubclass(result, _TqdmTracker)
+        assert result.__name__ == "_AkshareTqdm"
+
+    def test_enable_false_returns_original_directly(self):
+        from tradingagents.dataflows.akshare_vendor import _patched_get_tqdm
+        with patch(
+            "tradingagents.dataflows.akshare_vendor._original_get_tqdm",
+            return_value=_TqdmTracker,
+        ):
+            result = _patched_get_tqdm(False)
+        # Returns the original class directly, no subclass
+        assert result is _TqdmTracker
+
+    def test_instance_sets_desc_from_context(self):
+        from tradingagents.dataflows.akshare_vendor import (
+            _akshare_task_context,
+            _patched_get_tqdm,
+        )
+        with patch(
+            "tradingagents.dataflows.akshare_vendor._original_get_tqdm",
+            return_value=_TqdmTracker,
+        ):
+            TqdmCls = _patched_get_tqdm(True)
+
+            with _akshare_task_context("📊 test task"):
+                instance = TqdmCls()
+                assert instance is not None
+
+        assert _TqdmTracker.last_init_kwargs is not None
+        assert _TqdmTracker.last_init_kwargs.get("desc") == "📊 test task"
+
+    def test_instance_uses_default_kwargs(self):
+        from tradingagents.dataflows.akshare_vendor import _patched_get_tqdm
+        with patch(
+            "tradingagents.dataflows.akshare_vendor._original_get_tqdm",
+            return_value=_TqdmTracker,
+        ):
+            TqdmCls = _patched_get_tqdm(True)
+            TqdmCls(iterable=range(3))
+
+        assert _TqdmTracker.last_init_kwargs is not None
+        assert _TqdmTracker.last_init_kwargs.get("leave") is False
+        assert _TqdmTracker.last_init_kwargs.get("ncols") == 100
+        assert "bar_format" in _TqdmTracker.last_init_kwargs
+
+
 # ---------------------------------------------------------------------------
 # get_stock_data
 # ---------------------------------------------------------------------------
@@ -841,6 +911,38 @@ class TestGetMarginTrading(TestCase):
             }])
             result = akshare_vendor.get_margin_trading("600519.SS")
         assert "No margin-trading data found for 600519.SS" in result
+
+    def test_szse_no_data_returns_message(self):
+        """Cover SZSE empty-data path (line 793)."""
+        from tradingagents.dataflows import akshare_vendor
+        with (
+            patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak,
+            patch("tradingagents.dataflows.akshare_vendor.to_akshare_symbol",
+                  side_effect=lambda s, style: {"bare": "300454", "prefix": "sz"}.get(style, "sz")),
+        ):
+            mock_ak.tool_trade_date_hist_sina.return_value = pd.DataFrame(
+                {"trade_date": ["2026-05-14"]}
+            )
+            mock_ak.stock_margin_detail_szse.return_value = pd.DataFrame()
+            result = akshare_vendor.get_margin_trading("300454.SZ")
+        assert "No margin-trading data for SZSE" in result
+
+    def test_all_fields_missing_shows_na(self):
+        """Cover _get() return 'N/A' fallback (line 817) — row without financial fields."""
+        from tradingagents.dataflows import akshare_vendor
+        with (
+            patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak,
+            patch("tradingagents.dataflows.akshare_vendor.to_akshare_symbol",
+                  side_effect=lambda s, style: {"bare": "600519", "prefix": "sh"}.get(style, "sh")),
+        ):
+            mock_ak.tool_trade_date_hist_sina.return_value = pd.DataFrame(
+                {"trade_date": ["2026-05-14"]}
+            )
+            mock_ak.stock_margin_detail_sse.return_value = pd.DataFrame([{
+                "标的证券代码": "600519",  # Only stock code, no financial fields
+            }])
+            result = akshare_vendor.get_margin_trading("600519.SS")
+        assert "N/A" in result
 
 
 # ---------------------------------------------------------------------------

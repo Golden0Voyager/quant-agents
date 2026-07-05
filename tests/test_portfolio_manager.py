@@ -90,6 +90,15 @@ class ExtractSnapshotCloseTests(unittest.TestCase):
         snapshot = "| Close | 1e999 |"
         self.assertIsNone(_extract_snapshot_close(snapshot))
 
+    def test_returns_none_when_float_raises_value_error(self):
+        """Covers lines 47-48: except ValueError branch.
+
+        The regex only matches valid float strings, so ValueError is
+        unreachable under normal execution.  Mock ``float`` to force it.
+        """
+        with patch("builtins.float", side_effect=ValueError("mock")):
+            self.assertIsNone(_extract_snapshot_close("| Close | 152.35 |"))
+
 
 # ---------------------------------------------------------------------------
 # create_portfolio_manager

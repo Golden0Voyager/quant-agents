@@ -1,9 +1,11 @@
 """Unit tests for tradingagents/dataflows/stocktwits.py."""
 from __future__ import annotations
 
+import http.client
 import json
 import unittest
 from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError
 
 import pytest
 
@@ -48,14 +50,6 @@ class StocktwitsFetchTests(unittest.TestCase):
         mock_resp.read.return_value = data or b'{"messages": []}'
         return patch("tradingagents.dataflows.stocktwits.urlopen", return_value=mock_resp)
 
-    def test_http_error_returns_unavailable(self):
-        from urllib.error import HTTPError
-
-        with self._mock_urlopen(side_effect=HTTPError("url", 404, "Not Found", {}, None)):
-            result = fetch_stocktwits_messages("AAPL")
-        self.assertIn("stocktwits unavailable", result)
-        self.assertIn("HTTPError", result)
-
     def test_url_error_returns_unavailable(self):
         from urllib.error import URLError
 
@@ -70,11 +64,40 @@ class StocktwitsFetchTests(unittest.TestCase):
         self.assertIn("stocktwits unavailable", result)
         self.assertIn("JSONDecodeError", result)
 
-    def test_timeout_error_returns_unavailable(self):
-        with self._mock_urlopen(side_effect=TimeoutError("timed out")):
-            result = fetch_stocktwits_messages("AAPL")
-        self.assertIn("stocktwits unavailable", result)
-        self.assertIn("TimeoutError", result)
+    def _urlopen_response_with_read_raising(self, exc):
+        """A urlopen return value whose ``.read()`` raises ``exc``.
+
+        ``http.client.IncompleteRead`` is raised inside ``.read()`` —
+        *after* ``urlopen()`` returns successfully — so it cannot be
+        modelled by ``urlopen=side_effect=exc`` (#1024).
+        """
+
+        class _Resp:
+            def __enter__(inner):
+                return inner
+
+            def __exit__(inner, *exc_info):
+                return False
+
+            def read(inner):
+                raise exc
+
+        return _Resp()
+
+    def test_incomplete_read_returns_placeholder(self):
+        """#1024: ``http.client.IncompleteRead`` fires inside ``.read()``
+        after a successful ``urlopen()`` — must still surface as the
+        ``<stocktwits unavailable …>`` placeholder, not crash.
+        """
+        with patch(
+            "tradingagents.dataflows.stocktwits.urlopen",
+            return_value=self._urlopen_response_with_read_raising(
+                http.client.IncompleteRead(b"")
+            ),
+        ):
+            result = fetch_stocktwits_messages("NVDA")
+        self.assertIn("unavailable", result.lower())
+        self.assertTrue(result.startswith("<stocktwits unavailable"))
 
     def test_empty_messages_returns_no_messages(self):
         with self._mock_urlopen(data=b'{"messages": []}'):
@@ -185,3 +208,45 @@ class TestStocktwitsEdgeCases(unittest.TestCase):
 
             result = fetch_stocktwits_messages("AAPL", limit=5)
         self.assertIn("Bullish", result)
+
+
+# -----------------------------------------------------------------------------
+# Module-level pytest cases for transport-level errors raised by ``urlopen()``
+# itself. Kept outside ``unittest.TestCase`` so ``@pytest.mark.parametrize``
+# can supply the exception per test-id — unittest's TestCase descriptor
+# binding rejects extra positional args, raising TypeError on pytest invoke.
+# The ``fetch_stocktwits_messages`` placement (side_effect=urlopen) is
+# distinct from ``test_incomplete_read_returns_placeholder`` above, which
+# raises inside ``.read()`` (#1024).
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected_class_name"),
+    [
+        pytest.param(
+            HTTPError("url", 404, "Not Found", {}, None),
+            "HTTPError",
+            id="http-error-404",
+        ),
+        pytest.param(
+            TimeoutError("timed out"),
+            "TimeoutError",
+            id="timeout-error",
+        ),
+    ],
+)
+def test_urlopen_transport_errors_return_unavailable(exc, expected_class_name):
+    """urlopen raises HTTPError / TimeoutError →
+    ``<stocktwits unavailable …>`` with the exception class name.
+    """
+    with patch(
+        "tradingagents.dataflows.stocktwits.urlopen", side_effect=exc
+    ):
+        result = fetch_stocktwits_messages("AAPL")
+    assert "stocktwits unavailable" in result
+    assert expected_class_name in result
+
+
+if __name__ == "__main__":
+    unittest.main()

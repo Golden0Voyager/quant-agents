@@ -295,6 +295,22 @@ class TestTradingMemoryLogCore:
         assert log.load_entries() == []
         assert log.get_past_context("NVDA") == ""
 
+    # get_past_context: both limits reached simultaneously
+
+    def test_both_same_and_cross_limits_reached(self, tmp_path):
+        """Line 83: break when both n_same and n_cross limits are reached."""
+        log = make_log(tmp_path)
+        # 7 same-ticker + 5 cross-ticker entries
+        for i in range(7):
+            _resolve_entry(log, "NVDA", f"2026-01-{i+1:02d}", DECISION_BUY, f"NVDA {i}.")
+        for i in range(5):
+            _resolve_entry(log, "AAPL", f"2026-02-{i+1:02d}", DECISION_SELL, f"AAPL {i}.")
+        ctx = log.get_past_context("NVDA", n_same=5, n_cross=3)
+        nvda_count = sum(1 for i in range(7) if f"NVDA {i}." in ctx)
+        aapl_count = sum(1 for i in range(5) if f"AAPL {i}." in ctx)
+        assert nvda_count == 5, f"expected 5 NVDA entries, got {nvda_count}"
+        assert aapl_count == 3, f"expected 3 AAPL entries, got {aapl_count}"
+
     # Rotation: opt-in cap on resolved entries
 
     def test_rotation_disabled_by_default(self, tmp_path):
@@ -439,6 +455,18 @@ class TestDeferredReflection:
     def test_update_noop_when_no_log_path(self):
         log = TradingMemoryLog(config=None)
         log.update_with_outcome("NVDA", "2026-01-10", 0.05, 0.02, 5, "Reflection")
+
+    def test_update_noop_when_no_pending_match(self, tmp_path):
+        """Line 162: update_with_outcome with no matching pending entry returns early."""
+        log = make_log(tmp_path)
+        log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
+        log.update_with_outcome("NVDA", "2026-01-10", 0.05, 0.02, 5, "Reflection")
+        # Now the entry is resolved; try updating again — no pending match
+        log.update_with_outcome("NVDA", "2026-01-10", 0.10, 0.04, 5, "Second reflection")
+        entries = log.load_entries()
+        assert len(entries) == 1
+        # First reflection should be preserved (second update was noop)
+        assert entries[0]["reflection"] == "Reflection"
 
     def test_formatting_roundtrip_after_update(self, tmp_path):
         """All fields intact and blank line between tag and DECISION preserved after update."""
@@ -630,6 +658,45 @@ class TestDeferredReflection:
         messages = mock_llm.invoke.call_args[0][0]
         human_content = next(content for role, content in messages if role == "human")
         assert "Alpha vs SPY:" in human_content
+
+    # batch_update_with_outcomes — edge cases
+
+    def test_batch_update_empty_updates_noop(self, tmp_path):
+        """Line 177: batch_update_with_outcomes with empty updates returns early."""
+        log = make_log(tmp_path)
+        log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
+        log.batch_update_with_outcomes([])
+        entries = log.load_entries()
+        assert len(entries) == 1
+        assert entries[0]["pending"] is True
+
+    def test_batch_update_noop_when_no_log_path(self):
+        """Line 177: batch_update_with_outcomes with no log path returns early."""
+        log = TradingMemoryLog(config=None)
+        log.batch_update_with_outcomes([
+            {"ticker": "NVDA", "trade_date": "2026-01-10",
+             "raw_return": 0.05, "alpha_return": 0.02, "holding_days": 5,
+             "reflection": "n/a"},
+        ])
+        # No crash is the assertion
+
+    # _parse_entry — edge cases
+
+    def test_parse_entry_empty_lines_returns_none(self):
+        """Line 268: _parse_entry with empty input returns None."""
+        result = TradingMemoryLog._parse_entry(None, "")
+        assert result is None
+
+    def test_parse_entry_bad_tag_returns_none(self):
+        """Line 271: _parse_entry with missing brackets returns None."""
+        result = TradingMemoryLog._parse_entry(None, "no brackets here")
+        assert result is None
+
+    def test_parse_entry_short_tag_returns_none(self):
+        """Line 274: _parse_entry with fewer than 4 fields returns None."""
+        result = TradingMemoryLog._parse_entry(None, "[date | ticker]")
+        assert result is None
+
 
     # TradingAgentsGraph._resolve_pending_entries
 
@@ -831,6 +898,29 @@ class TestPortfolioManagerInjection:
         result = log.get_past_context("NVDA", n_cross=3)
         cross_count = sum(result.count(f"{t} lesson.") for t in tickers)
         assert cross_count == 3
+
+    # _format_reflection_only — edge cases
+
+    def test_format_reflection_only_long_decision_truncated(self, tmp_path):
+        """Lines 305-307: decision longer than 300 chars gets truncated with '...'."""
+        log = make_log(tmp_path)
+        _resolve_entry(log, "NVDA", "2026-01-05", DECISION_BUY, "")
+        # _format_reflection_only is called internally by get_past_context
+        # for cross-ticker entries via _format_reflection_only
+        log.store_decision("AAPL", "2026-01-10", "Rating: Buy\n" + "A" * 350)
+        log.update_with_outcome("AAPL", "2026-01-10", 0.05, 0.02, 5, "")
+        ctx = log.get_past_context("NVDA")
+        assert "..." in ctx
+
+    def test_format_reflection_only_short_decision_unchanged(self, tmp_path):
+        """Lines 305-307: decision under 300 chars is not truncated."""
+        log = make_log(tmp_path)
+        _resolve_entry(log, "NVDA", "2026-01-05", DECISION_BUY, "")
+        log.store_decision("AAPL", "2026-01-10", "Rating: Sell\n" + "B" * 50)
+        log.update_with_outcome("AAPL", "2026-01-10", 0.05, 0.02, 5, "")
+        ctx = log.get_past_context("NVDA")
+        assert "..." not in ctx
+
 
     # Full A->B->C integration cycle
 

@@ -80,3 +80,23 @@ class TestBuildDataQualitySummary:
         specs = list(ANALYST_NODE_SPECS.values())
         summary = build_data_quality_summary(state, specs)
         assert "❌" in summary or "no_data" in summary.lower()
+
+    def test_all_reliable_shows_positive_message(self):
+        """When every analyst report is reliable (>= 50 words, no sentinel),
+        the else-branch at line 205 appends the 'all reliable' message."""
+        reliable = "word " * 51  # 51 words, well above the 50-word threshold
+        state = {
+            "market_report": reliable,
+            "sentiment_report": reliable,
+            "news_report": reliable,
+            "fundamentals_report": reliable,
+            "governance_report": reliable,
+            "industry_report": reliable,
+        }
+        specs = list(ANALYST_NODE_SPECS.values())
+        summary = build_data_quality_summary(state, specs)
+        assert "**All analyst reports have reliable data.**" in summary
+        assert "0 of 6" not in summary  # the unreliable-count format is not used
+        assert "✅ reliable" in summary
+        assert "❌" not in summary
+        assert "⚠️" not in summary
