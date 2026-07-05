@@ -44,7 +44,10 @@ class TestRouteToVendor:
                 "get_fundamentals", "AAPL", "2026-05-14"
             )
         assert result == "YFINANCE_RESULT"
-        fake_ak.assert_called_once()
+        # PR #18: interface.py now filters smartmoney_db/akshare out of the
+        # vendor chain for non-A-share tickers, so akshare is never called
+        # for AAPL. The yfinance result is still returned via the filtered chain.
+        fake_ak.assert_not_called()
         fake_yf.assert_called_once()
 
     def test_a_share_falls_back_to_yfinance_on_rate_limit(self):

@@ -391,7 +391,10 @@ class TestLlmRetry:
             llm_retry(fn, retry_config=RetryConfig(max_retries=1, base_delay=0.1))
         mock_logger.warning.assert_called_once()
         msg = mock_logger.warning.call_args[0][0]
-        assert "retrying" in msg
+        # PR #18: see test_llm_retry.py::test_logs_retry_attempts comment for
+        # context. Use "retry" rather than "retrying" to match new format
+        # "llm transient error ... — last retry (attempt N/M, wait Xs)".
+        assert "retry" in msg
 
     @patch("tradingagents.llm_clients.retry_utils.time.sleep")
     def test_backoff_delay_increases_with_attempts(
