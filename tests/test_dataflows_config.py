@@ -59,3 +59,22 @@ class DataflowsConfigIsolationTests(unittest.TestCase):
         fresh = get_config()
         self.assertEqual(fresh["tool_vendors"]["get_stock_data"], "alpha_vantage")
         self.assertEqual(fresh["tool_vendors"]["get_news"], "alpha_vantage")
+
+    def test_get_config_calls_initialize_when_config_is_none(self):
+        """get_config should call initialize_config when _config is None."""
+        from unittest.mock import patch
+
+        import tradingagents.default_config as default_config
+        from tradingagents.dataflows.config import get_config
+
+        with patch("tradingagents.dataflows.config._config", None):
+            result = get_config()
+
+        self.assertEqual(
+            result["data_vendors"]["core_stock_apis"],
+            default_config.DEFAULT_CONFIG["data_vendors"]["core_stock_apis"],
+        )
+        self.assertEqual(
+            result["tool_vendors"],
+            default_config.DEFAULT_CONFIG["tool_vendors"],
+        )

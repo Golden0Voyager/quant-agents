@@ -21,12 +21,14 @@ from tradingagents.portfolio import (
     Portfolio,
     PortfolioMetadata,
     PortfolioRepository,
+    Transaction,
     build_pm_prompt,
     build_risk_prompt,
     build_trader_prompt,
     normalize_ticker,
     validate_holding,
 )
+from tradingagents.portfolio.validators import _parse_number
 
 # ---------------------------------------------------------------------------
 # Models
@@ -55,6 +57,61 @@ class TestHolding:
         assert h2.pnl_pct == h.pnl_pct
 
 
+class TestTransaction:
+    def test_to_dict(self):
+        t = Transaction(
+            date="2026-01-15",
+            ticker="600519.SS",
+            name="贵州茅台",
+            price=1500.0,
+            action="买入",
+            shares=100.0,
+        )
+        d = t.to_dict()
+        assert d["date"] == "2026-01-15"
+        assert d["ticker"] == "600519.SS"
+        assert d["price"] == 1500.0
+        assert d["shares"] == 100.0
+
+    def test_to_dict_excludes_none_and_empty(self):
+        t = Transaction(
+            date="2026-01-15",
+            ticker="600519.SS",
+            price=1500.0,
+            action="买入",
+            shares=100.0,
+        )
+        d = t.to_dict()
+        assert "fee" not in d
+        assert "cash_change" not in d
+        assert "tag" not in d
+        assert "name" not in d
+
+    def test_from_dict(self):
+        data = {
+            "date": "2026-01-15",
+            "ticker": "600519.SS",
+            "price": 1500.0,
+            "action": "买入",
+            "shares": 100.0,
+            "fee": 5.0,
+            "cash_change": -150005.0,
+            "tag": "手动建仓",
+        }
+        t = Transaction.from_dict(data)
+        assert t.date == "2026-01-15"
+        assert t.ticker == "600519.SS"
+        assert t.price == 1500.0
+        assert t.fee == 5.0
+        assert t.cash_change == -150005.0
+        assert t.tag == "手动建仓"
+
+    def test_from_dict_filters_invalid_keys(self):
+        data = {"date": "2026-01-15", "ticker": "A", "price": 10.0, "action": "买入", "shares": 1.0, "nonexistent": "should be ignored"}
+        t = Transaction.from_dict(data)
+        assert not hasattr(t, "nonexistent")
+
+
 class TestPortfolio:
     def test_total_invested(self):
         p = Portfolio(
@@ -64,6 +121,32 @@ class TestPortfolio:
             }
         )
         assert p.total_invested() == 2000.0
+
+    def test_total_market_value_with_market_price(self):
+        p = Portfolio(
+            holdings={
+                "A": Holding(ticker="A", shares=100, avg_cost=10.0, market_price=12.0),
+                "B": Holding(ticker="B", shares=200, avg_cost=5.0, market_price=6.0),
+            }
+        )
+        assert p.total_market_value() == 2400.0
+
+    def test_total_market_value_falls_back_to_avg_cost(self):
+        p = Portfolio(
+            holdings={
+                "A": Holding(ticker="A", shares=100, avg_cost=10.0),
+            }
+        )
+        assert p.total_market_value() == 1000.0
+
+    def test_total_pnl(self):
+        p = Portfolio(
+            holdings={
+                "A": Holding(ticker="A", shares=100, avg_cost=10.0, market_price=12.0),
+            }
+        )
+        # invested = 1000, market_value = 1200, pnl = 200
+        assert p.total_pnl() == 200.0
 
     def test_to_dict_roundtrip(self):
         p = Portfolio(
@@ -102,10 +185,36 @@ class TestNormalizeTicker:
         assert normalize_ticker("-") is None
 
 
+class TestParseNumber:
+    def test_int_input(self):
+        assert _parse_number(42) == 42.0
+
+    def test_float_input(self):
+        assert _parse_number(3.14) == 3.14
+
+    def test_cleans_thousand_separators(self):
+        assert _parse_number("1,234.56") == 1234.56
+
+    def test_cleans_chinese_comma(self):
+        assert _parse_number("1，234.56") == 1234.56
+
+    def test_cleans_currency_symbols(self):
+        assert _parse_number("$100.50") == 100.50
+        assert _parse_number("¥200.00") == 200.00
+
+    def test_invalid_type_raises(self):
+        with pytest.raises(ValueError, match="Cannot parse number"):
+            _parse_number([1, 2, 3])
+
+
 class TestValidateHolding:
     def test_valid_holding(self):
         h = Holding(ticker="A", shares=100, avg_cost=10.0)
         assert validate_holding(h) is h
+
+    def test_empty_ticker(self):
+        h = Holding(ticker="", shares=100, avg_cost=10.0)
+        assert validate_holding(h) is None
 
     def test_invalid_shares(self):
         h = Holding(ticker="A", shares=0, avg_cost=10.0)
@@ -114,6 +223,32 @@ class TestValidateHolding:
     def test_invalid_cost(self):
         h = Holding(ticker="A", shares=100, avg_cost=-1.0)
         assert validate_holding(h) is None
+
+
+class TestDeduplicateHoldings:
+    def test_deduplicates_by_ticker_keeping_last(self):
+        from tradingagents.portfolio.validators import deduplicate_holdings
+
+        holdings = [
+            Holding(ticker="A", shares=100, avg_cost=10.0),
+            Holding(ticker="B", shares=200, avg_cost=5.0),
+            Holding(ticker="A", shares=150, avg_cost=12.0),  # replaces first A
+        ]
+        result = deduplicate_holdings(holdings)
+        assert len(result) == 2
+        assert result["A"].shares == 150.0
+        assert result["B"].shares == 200.0
+
+    def test_skips_holdings_with_empty_ticker(self):
+        from tradingagents.portfolio.validators import deduplicate_holdings
+
+        holdings = [
+            Holding(ticker="A", shares=100, avg_cost=10.0),
+            Holding(ticker="", shares=0, avg_cost=0.0),
+        ]
+        result = deduplicate_holdings(holdings)
+        assert len(result) == 1
+        assert "A" in result
 
 
 # ---------------------------------------------------------------------------

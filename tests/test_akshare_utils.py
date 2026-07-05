@@ -181,3 +181,136 @@ class TestSafeFloat:
 
     def test_bad_str(self):
         assert safe_float("--") is None
+
+
+# ---------------------------------------------------------------------------
+# akshare_common — _akshare_retry
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+class TestAkshareRetry:
+    def test_success_first_attempt(self):
+        """Line 72: function succeeds on first call — no retry."""
+        from tradingagents.dataflows.akshare_common import _akshare_retry
+
+        result = _akshare_retry(lambda: "success")
+        assert result == "success"
+
+    def test_success_after_retry(self):
+        """Lines 73-83: function fails twice then succeeds — retries with delay."""
+        from tradingagents.dataflows.akshare_common import _akshare_retry
+
+        calls = []
+        def flaky():
+            calls.append(1)
+            if len(calls) < 3:
+                raise ConnectionError("transient error")
+            return "success"
+
+        with patch("tradingagents.dataflows.akshare_common.time.sleep") as mock_sleep:
+            result = _akshare_retry(flaky)
+
+        assert result == "success"
+        assert len(calls) == 3
+        assert mock_sleep.call_count == 2
+
+    def test_all_retries_exhausted(self):
+        """Line 85: all retries exhausted — re-raises the error."""
+        from tradingagents.dataflows.akshare_common import _akshare_retry
+
+        def always_fails():
+            raise ConnectionError("persistent error")
+
+        with patch("tradingagents.dataflows.akshare_common.time.sleep"), \
+             pytest.raises(ConnectionError, match="persistent error"):
+            _akshare_retry(always_fails)
+
+    def test_exponential_backoff_delay(self):
+        """Line 75: delay increases exponentially: 1s, 2s, 4s."""
+        from tradingagents.dataflows.akshare_common import _akshare_retry
+
+        calls = []
+        def flaky():
+            calls.append(1)
+            if len(calls) <= 2:
+                raise TimeoutError("timeout")
+            return "done"
+
+        with patch("tradingagents.dataflows.akshare_common.time.sleep") as mock_sleep:
+            _akshare_retry(flaky, max_retries=2, base_delay=1.0)
+
+        assert mock_sleep.call_count == 2
+        assert mock_sleep.call_args_list[0][0][0] == pytest.approx(1.0)
+        assert mock_sleep.call_args_list[1][0][0] == pytest.approx(2.0)
+
+    def test_requests_exceptions_also_caught(self):
+        """Lines 66-68: requests.exceptions.ConnectionError is also retried."""
+        import requests.exceptions
+
+        from tradingagents.dataflows.akshare_common import _akshare_retry
+
+        calls = []
+        def flaky():
+            calls.append(1)
+            if len(calls) < 2:
+                raise requests.exceptions.ConnectionError("network down")
+            return "ok"
+
+        with patch("tradingagents.dataflows.akshare_common.time.sleep"):
+            result = _akshare_retry(flaky)
+
+        assert result == "ok"
+        assert len(calls) == 2
+
+
+# ---------------------------------------------------------------------------
+# akshare_common — no_proxy context manager
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+class TestNoProxy:
+    def test_cleans_up_env_vars_after_exit(self):
+        """Lines 122-124: env vars restored after context exit."""
+        import os
+
+        from tradingagents.dataflows.akshare_common import no_proxy
+        os.environ["http_proxy"] = "http://127.0.0.1:7890"
+        os.environ["https_proxy"] = "http://127.0.0.1:7890"
+
+        with no_proxy():
+            assert "http_proxy" not in os.environ
+            assert "https_proxy" not in os.environ
+
+        assert os.environ["http_proxy"] == "http://127.0.0.1:7890"
+        assert os.environ["https_proxy"] == "http://127.0.0.1:7890"
+
+        del os.environ["http_proxy"]
+        del os.environ["https_proxy"]
+
+    def test_cleans_up_on_exception(self):
+        """Lines 122-124: env vars restored even on exception inside context."""
+        import os
+
+        from tradingagents.dataflows.akshare_common import no_proxy
+        os.environ["http_proxy"] = "http://proxy:8080"
+
+        try:
+            with no_proxy():
+                assert "http_proxy" not in os.environ
+                raise ValueError("inside error")
+        except ValueError:
+            pass
+
+        assert os.environ["http_proxy"] == "http://proxy:8080"
+        del os.environ["http_proxy"]
+
+    def test_ipv4_filter_inside_context(self):
+        """Lines 122-124: _ipv4_only_getaddrinfo filters to IPv4 within context."""
+        import socket
+
+        from tradingagents.dataflows.akshare_common import no_proxy
+
+        with no_proxy():
+            result = socket.getaddrinfo("127.0.0.1", 80)
+
+        assert all(r[0] == socket.AF_INET for r in result)

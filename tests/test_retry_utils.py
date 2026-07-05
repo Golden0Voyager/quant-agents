@@ -391,7 +391,7 @@ class TestLlmRetry:
             llm_retry(fn, retry_config=RetryConfig(max_retries=1, base_delay=0.1))
         mock_logger.warning.assert_called_once()
         msg = mock_logger.warning.call_args[0][0]
-        assert "retrying" in msg
+        assert "transient error" in msg
 
     @patch("tradingagents.llm_clients.retry_utils.time.sleep")
     def test_backoff_delay_increases_with_attempts(

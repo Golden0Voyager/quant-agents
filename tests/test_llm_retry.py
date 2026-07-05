@@ -200,4 +200,5 @@ class TestLlmRetry:
             llm_retry(func, retry_config=RetryConfig(max_retries=1, base_delay=0.1))
         assert mock_logger.warning.call_count == 1
         log_message = mock_logger.warning.call_args[0][0]
-        assert "retrying" in log_message.lower()
+        assert "transient error" in log_message.lower()
+        assert "last retry" in log_message.lower()
