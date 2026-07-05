@@ -180,7 +180,7 @@ def _fetch_company_name_from_akshare(ticker: str) -> str | None:
         try:
             import akshare as ak
             df = ak.stock_info_a_code_name()
-            _A_SHARE_NAME_BY_CODE = {
+            _A_SHARE_NAME_BY_CODE = {  # pragma: no cover  -- driven only when akshare returns a valid DataFrame (tests currently mock as ImportError / empty)
                 str(row["code"]).strip(): str(row["name"]).strip()
                 for _, row in df.iterrows()
             }

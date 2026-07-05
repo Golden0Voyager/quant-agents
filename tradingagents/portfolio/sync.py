@@ -163,8 +163,8 @@ class PortfolioSyncService:
         _mandatory = ("ticker", "shares", "avg_cost")
         try:
             required_max = max(indices[f] for f in _mandatory)
-        except KeyError as exc:
-            raise ValueError(f"Missing mandatory column index: {exc}") from exc
+        except KeyError as exc:  # pragma: no cover  -- _resolve_column_indices raises on missing mandatory already
+            raise ValueError(f"Missing mandatory column index: {exc}") from exc  # pragma: no cover
         if len(row) <= required_max:
             return None
 

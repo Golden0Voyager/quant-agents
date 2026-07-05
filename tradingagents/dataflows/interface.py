@@ -371,6 +371,32 @@ def route_to_vendor(method: str, *args, **kwargs):
     # Track whether we are serving an A-share ticker for targeted logging
     is_ashare = isinstance(symbol, str) and is_a_share_ticker(symbol)
 
+    # Skip A-share-only vendors for non-A-share tickers. smartmoney_db only
+    # carries local A-share data, and akshare only supports .SS/.SZ/.BJ symbols.
+    # Querying them for HK/US tickers is a wasted DB call + noisy error log.
+    if not is_ashare:
+        filtered = [v for v in vendor_chain if v not in ("smartmoney_db", "akshare")]
+        if not filtered:
+            # All vendors removed — this method has no HK/US-capable fallback.
+            # Return a graceful sentinel instead of crashing the agent.
+            logger.info(
+                "Non-A-share ticker '%s': all configured vendors are A-share-only "
+                "for method='%s'. Returning DATA_UNAVAILABLE.",
+                symbol, method,
+            )
+            return (
+                f"DATA_UNAVAILABLE: No global-market vendor configured for '{method}' "
+                f"with symbol '{symbol}'. This data source is A-share only. "
+                f"Proceed without it; do not fabricate values."
+            )
+        if filtered != vendor_chain:
+            logger.info(
+                "Non-A-share ticker '%s': skipping A-share-only vendors (smartmoney_db, akshare) "
+                "for method='%s'. Chain: %s → %s",
+                symbol, method, vendor_chain, filtered,
+            )
+        vendor_chain = filtered
+
     for vendor in vendor_chain:
         vendor_impl = VENDOR_METHODS[method][vendor]
         impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl

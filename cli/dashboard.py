@@ -367,6 +367,12 @@ def render_header(
         )
         if skipped:
             progress_str += f" {skipped}[cyan]⏭[/cyan]"
+        # Show data readiness pre-check result if available
+        readiness_total = getattr(dashboard, "readiness_total", 0)
+        if readiness_total > 0:
+            r_ready = getattr(dashboard, "readiness_ready", 0)
+            color = "green" if r_ready == readiness_total else "yellow"
+            progress_str += f" | 预检: [{color}]{r_ready}/{readiness_total}[/{color}]"
         parts.append(progress_str)
         parts.append(f"Current: [cyan]{ticker}[/cyan]")
     else:

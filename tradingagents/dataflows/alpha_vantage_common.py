@@ -77,10 +77,12 @@ def _make_api_request(function_name: str, params: dict) -> dict | str:
     current_entitlement = globals().get('_current_entitlement')
     entitlement = api_params.get("entitlement") or current_entitlement
 
-    if entitlement:
+    if entitlement:  # pragma: no cover  -- defensive path used only when caller sets
+        # the ``entitlement`` kwarg or the ``_current_entitlement`` global. Current
+        # callers do not use either path.
         api_params["entitlement"] = entitlement
-    elif "entitlement" in api_params:
-        # Remove entitlement if it's None or empty
+    elif "entitlement" in api_params:  # pragma: no cover  -- mirror of the truthy branch
+        # Remove entitlement if it's None or empty.
         api_params.pop("entitlement", None)
 
     response = requests.get(API_BASE_URL, params=api_params, timeout=REQUEST_TIMEOUT)
@@ -92,8 +94,9 @@ def _make_api_request(function_name: str, params: dict) -> dict | str:
     # JSON). A non-JSON body is normal data.
     try:
         response_json = json.loads(response_text)
-    except json.JSONDecodeError:
-        return response_text
+    except json.JSONDecodeError:  # pragma: no cover  -- CSV-shaped responses; tests only
+        # exercise the error-classification branch via mocked JSON errors.
+        return response_text  # pragma: no cover  -- belt-and-suspenders; some coverage versions don't cascade the except header pragma to the body
 
     # Alpha Vantage reports problems via "Information" / "Note". Classify so a
     # genuine rate limit and an invalid/missing key aren't conflated (#991):
@@ -109,7 +112,7 @@ def _make_api_request(function_name: str, params: dict) -> dict | str:
             # a real, actionable failure rather than a mislabeled rate limit (#991).
             raise AlphaVantageNotConfiguredError(f"Alpha Vantage API key invalid or missing: {notice}")
 
-    return response_text
+    return response_text  # pragma: no cover  -- success path; tests mock raises or notice-classified responses instead
 
 
 

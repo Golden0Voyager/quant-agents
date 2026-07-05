@@ -63,9 +63,9 @@ class BaseLLMClient(ABC):
     @abstractmethod
     def get_llm(self) -> Any:
         """Return the configured LLM instance."""
-        pass
+        pass  # pragma: no cover  -- abstract method body
 
     @abstractmethod
     def validate_model(self) -> bool:
         """Validate that the model is supported by this client."""
-        pass
+        pass  # pragma: no cover  -- abstract method body

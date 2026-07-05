@@ -22,6 +22,15 @@ ANALYST_ORDER = [
     ("Industry Analyst", AnalystType.INDUSTRY),
 ]
 
+ANALYST_DESCRIPTIONS: dict[AnalystType, str] = {
+    AnalystType.MARKET: "行情、技术指标、资金流向",
+    AnalystType.SOCIAL: "StockTwits、Reddit 社交情绪",
+    AnalystType.NEWS: "个股新闻、全球宏观、公告、内幕交易",
+    AnalystType.FUNDAMENTALS: "财务三表、业绩预告、行业估值",
+    AnalystType.GOVERNANCE: "股东、质押、龙虎榜、北向资金",
+    AnalystType.INDUSTRY: "行业景气度、宏观指标（CPI/PMI）",
+}
+
 CRYPTO_SUFFIXES = ("-USD", "-USDT", "-USDC", "-BTC", "-ETH")
 
 
@@ -87,10 +96,13 @@ def filter_analysts_for_asset_type(
 ) -> list[AnalystType]:
     """Drop analysts that don't apply to this asset type or market.
 
-    A-share tickers (``.SS``/``.SZ``/``.BJ``/``.HK``) default to skipping
+    A-share tickers (``.SS``/``.SZ``/``.BJ``) default to skipping
     Sentiment Analyst because StockTwits/Reddit coverage for A-shares is
     effectively zero. Callers that explicitly want Sentiment on an A-share
     can ignore this helper or pass a non-A-share ticker.
+
+    HK stocks (``.HK``) keep the Sentiment Analyst — some HK-listed tech
+    stocks have meaningful coverage on international social platforms.
 
     Crypto drops Fundamentals (no on-chain fundamentals to analyze).
     US/other stocks keep all analysts.
@@ -103,9 +115,9 @@ def filter_analysts_for_asset_type(
 
 
 def _is_ashare_ticker(ticker: str) -> bool:
-    """A-share / HK tickers carry exchange suffixes StockTwits/Reddit don't cover."""
+    """A-share tickers with exchange suffixes that StockTwits/Reddit don't cover."""
     upper = ticker.strip().upper()
-    return upper.endswith((".SS", ".SZ", ".BJ", ".HK"))
+    return upper.endswith((".SS", ".SZ", ".BJ"))
 
 
 def get_analysis_date() -> str:
@@ -159,12 +171,18 @@ def select_analysts(
     if asset_type == AssetType.CRYPTO and AnalystType.FUNDAMENTALS not in available_analysts:
         skip_reasons[AnalystType.FUNDAMENTALS] = "Crypto: no on-chain fundamentals"
     if ticker and _is_ashare_ticker(ticker) and AnalystType.SOCIAL not in available_analysts:
-        skip_reasons[AnalystType.SOCIAL] = "A-share: StockTwits/Reddit zero coverage"
+        suffix = ticker.strip().upper()[-3:]
+        if suffix in (".SS", ".SZ", ".BJ"):
+            skip_reasons[AnalystType.SOCIAL] = "A股: StockTwits/Reddit 无覆盖"
+        else:
+            skip_reasons[AnalystType.SOCIAL] = f"{suffix}: StockTwits/Reddit 无覆盖"
 
     choices = []
     for display, value in ANALYST_ORDER:
         if value in available_analysts:
-            choices.append(questionary.Choice(display, value=value, checked=True))
+            desc = ANALYST_DESCRIPTIONS.get(value, "")
+            label = f"{display}  ({desc})" if desc else display
+            choices.append(questionary.Choice(label, value=value, checked=True))
         else:
             reason = skip_reasons.get(value, "Not applicable")
             choices.append(

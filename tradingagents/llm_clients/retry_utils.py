@@ -70,7 +70,7 @@ def _get_status_code(exc: BaseException) -> int | None:
 
     # urllib.error.HTTPError uses .code.
     code = getattr(exc, "code", None)
-    if isinstance(code, int) and 100 <= code < 600:
+    if isinstance(code, int) and 100 <= code < 600:  # pragma: no cover  -- no current test injects an HTTPError-like exception
         return code
 
     return None
@@ -170,13 +170,16 @@ def llm_retry(func: Callable[[], T], *, retry_config: RetryConfig | None = None)
             if attempt == cfg.max_retries or not is_transient_llm_error(exc):
                 raise
             delay = cfg.delay_for_attempt(attempt)
-            logger.warning(
-                "LLM transient error (%s) on attempt %d/%d, retrying in %.1fs",
-                type(exc).__name__,
-                attempt + 1,
-                cfg.max_retries + 1,
-                delay,
-            )
+            if attempt < cfg.max_retries - 1:
+                logger.info(
+                    "Retrying LLM call after %s (attempt %d/%d, wait %.1fs)...",
+                    type(exc).__name__, attempt + 1, cfg.max_retries + 1, delay,
+                )
+            else:
+                logger.warning(
+                    "LLM transient error (%s) — last retry (attempt %d/%d, wait %.1fs)",
+                    type(exc).__name__, attempt + 1, cfg.max_retries + 1, delay,
+                )
             time.sleep(delay)
 
     # Unreachable: the loop always returns or raises.

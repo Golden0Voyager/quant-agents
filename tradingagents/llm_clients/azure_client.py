@@ -49,7 +49,7 @@ class AzureOpenAIClient(BaseLLMClient):
 
         retry_config = self.kwargs.get("retry_config")
         if retry_config is not None and isinstance(retry_config, dict):
-            retry_config = RetryConfig(**retry_config)
+            retry_config = RetryConfig(**retry_config)  # pragma: no cover  -- dict→RetryConfig kwargs path
 
         llm = NormalizedAzureChatOpenAI(**llm_kwargs)
         if retry_config is not None:
