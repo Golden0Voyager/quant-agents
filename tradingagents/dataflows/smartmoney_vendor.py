@@ -22,9 +22,9 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Shared database path (centralised in ~/Code/data/quant_data/)
+# Shared database path (centralised in ~/Code/quant_data/)
 # ---------------------------------------------------------------------------
-DEFAULT_DB_PATH = os.path.expanduser("~/Code/data/quant_data/quant_core.db")
+DEFAULT_DB_PATH = os.path.expanduser("~/Code/quant_data/quant_core.db")
 _DB_PATH = os.getenv("QUANT_DB_PATH", DEFAULT_DB_PATH)
 
 

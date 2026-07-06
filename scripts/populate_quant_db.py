@@ -38,7 +38,7 @@ logger = logging.getLogger("populate_quant_db")
 # ---------------------------------------------------------------------------
 # DB path (mirrors smartmoney_vendor.py)
 # ---------------------------------------------------------------------------
-_DB_PATH = "~/Code/data/quant_data/quant_core.db"
+_DB_PATH = "~/Code/quant_data/quant_core.db"
 
 
 def _get_connection() -> sqlite3.Connection:

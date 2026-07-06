@@ -1,7 +1,7 @@
 """Portfolio repository: local JSON persistence layer.
 
 Provides read/write/query operations for the portfolio holdings store,
-located alongside other quant data in ~/Code/data/quant_data/.
+located alongside other quant data in ~/Code/quant_data/.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from tradingagents.portfolio.models import Portfolio
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DATA_DIR = os.path.expanduser("~/Code/data/quant_data")
+_DEFAULT_DATA_DIR = os.path.expanduser("~/Code/quant_data")
 _DEFAULT_FILENAME = "tradingagents_portfolio.json"
 
 
