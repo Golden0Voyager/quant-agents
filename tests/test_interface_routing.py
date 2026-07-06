@@ -93,8 +93,8 @@ class TestRouteToVendor:
 
     def test_disable_yfinance_fallback_skips_yfinance_for_ashare(self):
         """With DISABLE_YFINANCE_FALLBACK=1, A-share ticker skips yfinance entirely."""
-        from tradingagents.dataflows import interface
         import os
+        from tradingagents.dataflows import interface
 
         fake_sm = MagicMock(
             side_effect=NoMarketDataError("000001.SZ", "000001.SZ", "Not in local DB")
