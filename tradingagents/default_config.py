@@ -128,7 +128,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     },
     # Portfolio / holdings configuration
     "portfolio": {
-        "data_path": os.path.expanduser("~/Code/data/quant_data/tradingagents_portfolio.json"),
+        "data_path": os.path.expanduser("~/Code/quant_data/tradingagents_portfolio.json"),
         "sheet_id": os.getenv("PORTFOLIO_SHEET_ID"),  # Default Google Sheet ID
         "worksheet": "total",    # Default worksheet/tab name
         "auto_sync": False,      # Auto-sync before analysis if local data is stale
