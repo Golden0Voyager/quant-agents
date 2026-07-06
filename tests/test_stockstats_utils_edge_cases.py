@@ -9,6 +9,7 @@ Existing tests cover ~85%. This file fills remaining gaps:
 
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -306,6 +307,87 @@ class LoadOhlcvYfinanceExceptionTests(_TempDirMixin, unittest.TestCase):
              patch("tradingagents.dataflows.stockstats_utils._ensure_date_column",
                    return_value=empty_df), self.assertRaises(NoMarketDataError):
             load_ohlcv("INVALID", "2026-01-03", lookback_years=5)
+
+    # ------------------------------------------------------------------ #
+    # New tests for A-share fallback order & DISABLE_YFINANCE_FALLBACK    #
+    # (Todo 1 — fail with current code, pass after fallback reorder)     #
+    # ------------------------------------------------------------------ #
+
+    def test_a_share_prefers_smartmoney_then_akshare_then_yfinance(self):
+        """A-share: smartmoney_db returns data -> neither akshare nor yf_retry called.
+        FAILS with current code (yfinance-first order); passes after reorder.
+        """
+        smartmoney_df = pd.DataFrame({
+            "Date": ["2026-01-02", "2026-01-03"],
+            "Open": [99.0, 100.0],
+            "High": [102.0, 103.0],
+            "Low": [98.0, 99.0],
+            "Close": [100.0, 101.0],
+            "Volume": [10000, 11000],
+        })
+
+        with patch("tradingagents.dataflows.stockstats_utils.get_config",
+                   return_value={"data_cache_dir": str(self._tmp)}), \
+             patch("tradingagents.dataflows.stockstats_utils.normalize_symbol",
+                   return_value="000001.SZ"), \
+             patch("tradingagents.dataflows.akshare_common.is_a_share_ticker",
+                   return_value=True), \
+             patch("tradingagents.dataflows.stockstats_utils.yf_retry") as mock_yf, \
+             patch("tradingagents.dataflows.stockstats_utils._load_ohlcv_from_smartmoney_db",
+                   return_value=smartmoney_df), \
+             patch("tradingagents.dataflows.stockstats_utils._load_ohlcv_from_akshare") as mock_akshare:
+            result = load_ohlcv("000001.SZ", "2026-01-03", lookback_years=5)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result), 2)
+        # Current code calls yf_retry FIRST (before smartmoney) -> this assertion FAILS.
+        mock_yf.assert_not_called()
+        mock_akshare.assert_not_called()
+
+    def test_disable_yfinance_fallback_skips_yfinance(self):
+        """DISABLE_YFINANCE_FALLBACK=1 -> yfinance not called when smartmoney/akshare fail.
+        FAILS with current code (env var not implemented); passes after impl.
+        """
+        with patch("tradingagents.dataflows.stockstats_utils.get_config",
+                   return_value={"data_cache_dir": str(self._tmp)}), \
+             patch("tradingagents.dataflows.stockstats_utils.normalize_symbol",
+                   return_value="600519.SS"), \
+             patch("tradingagents.dataflows.akshare_common.is_a_share_ticker",
+                   return_value=True), \
+             patch("tradingagents.dataflows.stockstats_utils.yf_retry") as mock_yf, \
+             patch("tradingagents.dataflows.stockstats_utils._load_ohlcv_from_smartmoney_db",
+                   return_value=None), \
+             patch("tradingagents.dataflows.stockstats_utils._load_ohlcv_from_akshare",
+                   return_value=None), \
+             patch.dict(os.environ, {"DISABLE_YFINANCE_FALLBACK": "1"}):
+            with self.assertRaises(NoMarketDataError):
+                load_ohlcv("600519.SS", "2026-01-03", lookback_years=5)
+            # Current code does NOT check env var -> yf_retry called -> FAILS.
+            mock_yf.assert_not_called()
+
+    def test_yfinance_fallback_failure_does_not_write_cache(self):
+        """yfinance as last A-share fallback fails -> no cache CSV written.
+        Regression: even when yfinance is the final resort and fails, the
+        cache directory must NOT contain a *-YFin-data-*.csv file.
+        """
+        with patch("tradingagents.dataflows.stockstats_utils.get_config",
+                   return_value={"data_cache_dir": str(self._tmp)}), \
+             patch("tradingagents.dataflows.stockstats_utils.normalize_symbol",
+                   return_value="600519.SS"), \
+             patch("tradingagents.dataflows.akshare_common.is_a_share_ticker",
+                   return_value=True), \
+             patch("tradingagents.dataflows.stockstats_utils.yf_retry",
+                   side_effect=YFRateLimitError()), \
+             patch("tradingagents.dataflows.stockstats_utils._load_ohlcv_from_smartmoney_db",
+                   return_value=None), \
+             patch("tradingagents.dataflows.stockstats_utils._load_ohlcv_from_akshare",
+                   return_value=None), \
+             self.assertRaises(NoMarketDataError):
+            load_ohlcv("600519.SS", "2026-01-03", lookback_years=5)
+
+        # Temp dir started empty — no CSV means no cache was written.
+        cached_files = list(self._tmp.glob("*.csv"))
+        self.assertEqual(len(cached_files), 0)
 
 
 # ---------------------------------------------------------------------------
