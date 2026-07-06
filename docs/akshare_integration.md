@@ -2,7 +2,7 @@
 
 ## 概述
 
-Trading_Agents 对 A 股 ticker（`.SS / .SZ / .BJ`）自动启用 akshare 作为首选
+quant_agents 对 A 股 ticker（`.SS / .SZ / .BJ`）自动启用 akshare 作为首选
 数据源，yfinance 仍保留为兜底。本次接入直接解决了
 `docs/financial_data_errors_report.md` 中记录的 10× 单位错误、估值错误、
 公司名幻觉等系统性问题（根因是 yfinance 对 A 股财报字段覆盖差）。
@@ -66,7 +66,7 @@ python scripts/report_auditor.py reports/batch_20260510_120902 --cross-validate
   但若批量审计中 cross-validate 全部失败，建议稍后再跑。
 - akshare 数据多数为收盘后 T+0/T+1 更新；交易日内拿到的财报数据
   可能滞后到上一个报告期。
-- 当前不覆盖 A 股新闻 — Trading_Agents 的 news_data 仍走 yfinance。
+- 当前不覆盖 A 股新闻 — quant_agents 的 news_data 仍走 yfinance。
 
 ## 验证方式
 

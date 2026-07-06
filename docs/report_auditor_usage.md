@@ -66,7 +66,7 @@ Report Auditor 是 Trading Agents 报告生成系统的**数据质量守门员**
 ### 4.1 基本用法
 
 ```bash
-cd /Users/hainingyu/Code/Trading_Agents
+cd /Users/hainingyu/Code/quant_agents
 python3 scripts/report_auditor.py reports/batch_20260510_120902
 ```
 
@@ -248,8 +248,8 @@ def check_new_rule(metrics: FinancialMetrics) -> Optional[AuditIssue]:
 
 ## 八、维护者信息
 
-- **脚本位置**: `Trading_Agents/scripts/report_auditor.py`
-- **报告输出**: `Trading_Agents/reports/audit_output/`
+- **脚本位置**: `scripts/report_auditor.py`
+- **报告输出**: `reports/audit_output/`
 - **最后更新**: 2026-05-11
 
 ---

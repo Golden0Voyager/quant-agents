@@ -1,4 +1,4 @@
-# Trading_Agents 上游合并与功能增强报告
+# quant_agents 上游合并与功能增强报告
 
 **日期**: 2026-06-06
 **作者**: Claude Code (Haining)

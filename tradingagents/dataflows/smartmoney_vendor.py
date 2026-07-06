@@ -1,7 +1,7 @@
 """SmartMoney DB vendor — read A-share data from local SQLite database.
 
 This vendor provides a zero-latency fallback layer for A-share tickers by
-reading from the shared quant_core.db maintained by smartmoney_hunter.
+reading from the shared quant_core.db maintained by quant_hunter.
 
 Placement in the fallback chain:
     quant_core.db → akshare → yfinance
