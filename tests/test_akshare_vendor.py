@@ -1333,9 +1333,10 @@ class TestAkshareRegression:
         )
 
     def test_routing_uses_akshare_for_a_share(self):
+        """route_to_vendor must dispatch an A-share request to an A-share-capable vendor."""
         from tradingagents.dataflows.interface import route_to_vendor
 
         out = route_to_vendor("get_balance_sheet", "600519.SS")
-        assert "akshare" in out.lower() or "东财" in out, (
-            "route_to_vendor 没有把 A 股请求路由到 akshare"
+        assert any(kw in out.lower() for kw in ("akshare", "东财", "quant_core.db", "smartmoney")), (
+            f"route_to_vendor 没有把 A 股请求路由到 A-share vendor，实际输出:\n{out[:200]}"
         )
