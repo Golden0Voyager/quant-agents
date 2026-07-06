@@ -149,6 +149,20 @@ class TestRss429Backoff:
             reddit._fetch_subreddit_rss("NVDA", "stocks", 5, 5.0)
         slept.assert_called_once_with(12.0)
 
+    def test_retry_after_non_numeric_returns_none(self):
+        """Non-numeric Retry-After → ValueError → except returns None.
+        Covers lines 87-88.
+        """
+        err = HTTPError("url", 429, "Too Many Requests", {"Retry-After": "not-a-number"}, None)
+        assert reddit._retry_after_seconds(err) is None
+
+    def test_retry_after_missing_header_returns_none(self):
+        """Missing Retry-After header → no value → returns None.
+        Also covers lines 87-88 (val is None, no exception).
+        """
+        err = HTTPError("url", 429, "Too Many Requests", {}, None)
+        assert reddit._retry_after_seconds(err) is None
+
 
 @pytest.mark.unit
 class TestChunkedTransferErrorsHandled:
@@ -164,6 +178,34 @@ class TestChunkedTransferErrorsHandled:
              patch.object(reddit, "_fetch_subreddit_rss", return_value=[]) as rss:
             reddit._fetch_subreddit_json("NVDA", "stocks", 5, 5.0)
         rss.assert_called_once()
+
+
+@pytest.mark.unit
+class TestFetchSubredditJsonSuccess:
+    """_fetch_subreddit_json success path with valid JSON. Covers lines 164-165."""
+
+    def test_parses_valid_json_response(self):
+        payload = {"data": {"children": [
+            {"data": {"title": "AAPL discussion", "score": 100}},
+            {"data": {"title": "MSFT news", "score": 50}},
+        ]}}
+        mock_resp = MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.read.return_value = json.dumps(payload).encode("utf-8")
+        with patch.object(reddit, "urlopen", return_value=mock_resp):
+            posts = reddit._fetch_subreddit_json("AAPL", "stocks", 5, 5.0)
+        assert len(posts) == 2
+        assert posts[0]["title"] == "AAPL discussion"
+        assert posts[1]["title"] == "MSFT news"
+
+    def test_empty_children_returns_empty_list(self):
+        payload = {"data": {"children": []}}
+        mock_resp = MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.read.return_value = json.dumps(payload).encode("utf-8")
+        with patch.object(reddit, "urlopen", return_value=mock_resp):
+            posts = reddit._fetch_subreddit_json("AAPL", "stocks", 5, 5.0)
+        assert posts == []
 
 
 @pytest.mark.unit
@@ -192,6 +234,33 @@ class TestFormatterHandlesRssPosts:
         assert "1234↑" in out
         assert "56c" in out
         assert "via RSS" not in out
+
+    def test_inter_request_delay_honoured(self):
+        """fetch_reddit_posts sleeps between multiple subreddits. Covers line 207."""
+        posts = [{
+            "title": "AAPL", "score": None, "num_comments": None,
+            "created_utc": reddit._iso_to_timestamp("2026-05-20T14:30:00Z"),
+            "selftext": "", "source": "rss",
+        }]
+        with patch.object(reddit, "_fetch_subreddit", return_value=posts), \
+             patch.object(reddit.time, "sleep") as slept:
+            reddit.fetch_reddit_posts("AAPL", subreddits=("stocks", "investing"),
+                                      inter_request_delay=2.0)
+        slept.assert_called_once_with(2.0)
+
+    def test_long_selftext_truncated(self):
+        """Selftext > 240 chars is truncated with ellipsis. Covers line 233."""
+        long_text = "word " * 100  # 500+ chars
+        posts = [{
+            "title": "Long post", "score": None, "num_comments": None,
+            "created_utc": reddit._iso_to_timestamp("2026-05-20T14:30:00Z"),
+            "selftext": long_text, "source": "rss",
+        }]
+        with patch.object(reddit, "_fetch_subreddit", return_value=posts):
+            out = reddit.fetch_reddit_posts("AAPL", subreddits=("stocks",),
+                                            inter_request_delay=0)
+        assert "body excerpt:" in out
+        assert "…" in out
 
 
 # =========================================================================

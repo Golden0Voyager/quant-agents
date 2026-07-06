@@ -4,6 +4,8 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import pandas as pd
 import pytest
 
+import tradingagents.agents.utils.agent_utils as au
+import tradingagents.graph.trading_graph as tg
 from tradingagents.dataflows.symbol_utils import NoMarketDataError
 from tradingagents.dataflows.y_finance import (
     _get_stock_stats_bulk,
@@ -512,3 +514,126 @@ class GetInsiderTransactionsTests(unittest.TestCase):
                 result = get_insider_transactions("AAPL")
 
         self.assertIn("Error retrieving insider transactions", result)
+
+
+@pytest.mark.unit
+class YfHistoryEndIsExclusiveTests(unittest.TestCase):
+    """yfinance treats ``end`` as exclusive; we must request one extra day
+    so the requested end_date (and the current day) is actually included.
+
+    Regressions for #986 (current-day OHLCV excluded) and #987 (requested
+    end_date row omitted). Merged from tests/test_date_boundaries.py.
+    """
+
+    def test_get_yfin_requests_inclusive_end(self):
+        import tradingagents.dataflows.y_finance as yfin
+        captured = {}
+
+        class _FakeTicker:
+            def __init__(self, symbol):
+                pass
+
+            def history(self, start, end):
+                captured["start"] = start
+                captured["end"] = end
+                idx = pd.to_datetime(["2025-05-08", "2025-05-09"])
+                return pd.DataFrame(
+                    {"Open": [1.0, 2.0], "High": [1.0, 2.0], "Low": [1.0, 2.0],
+                     "Close": [1.0, 2.0], "Volume": [1, 2]},
+                    index=idx,
+                )
+
+        with patch("tradingagents.dataflows.y_finance.yf.Ticker", _FakeTicker):
+            out = yfin.get_YFin_data_online("AAPL", "2025-05-01", "2025-05-09")
+
+        # end is requested one day past end_date so 2025-05-09 is included (#987).
+        self.assertEqual(captured["end"], "2025-05-10")
+        # Header still reflects the requested range, not the internal +1 day.
+        self.assertIn("to 2025-05-09", out)
+
+    def test_load_ohlcv_requests_inclusive_end(self):
+        import tempfile
+
+        import tradingagents.dataflows.stockstats_utils as su
+        from tradingagents.dataflows.config import set_config
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            set_config({"data_cache_dir": tmp_dir})
+            captured = {}
+
+            def fake_download(symbol, start, end, **kwargs):
+                captured["end"] = end
+                idx = pd.to_datetime([pd.Timestamp.today().normalize()])
+                return pd.DataFrame(
+                    {"Open": [100.0], "High": [100.0], "Low": [100.0],
+                     "Close": [100.0], "Volume": [1]},
+                    index=idx,
+                )
+
+            with patch.object(su.yf, "download", fake_download):
+                today = pd.Timestamp.today().strftime("%Y-%m-%d")
+                su.load_ohlcv("AAPL", today)
+
+            expected_end = (pd.Timestamp.today() + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+            self.assertEqual(captured["end"], expected_end)  # tomorrow -> today's row included (#986)
+
+
+@pytest.mark.unit
+class YfSymbolNormalizationAcrossPathsTests(unittest.TestCase):
+    """Symbol normalization must apply on every yfinance path.
+
+    Regressions for #983 (instrument identity), #984 (reflection returns),
+    and the news path. A broker symbol like ``XAUUSD`` must resolve to the
+    same Yahoo symbol (``GC=F``) so identity, realized-return, and news
+    lookups hit the right instrument. Merged from
+    tests/test_symbol_normalization_paths.py.
+    """
+
+    def test_identity_lookup_normalizes_symbol(self):
+        """#983: ``resolve_instrument_identity`` sees the canonical symbol."""
+        seen = {}
+
+        class _FakeTicker:
+            def __init__(self, symbol):
+                seen["symbol"] = symbol
+
+            @property
+            def info(self):
+                return {"longName": "Gold Futures", "quoteType": "FUTURE"}
+
+        with patch.object(au.yf, "Ticker", _FakeTicker):
+            au.resolve_instrument_identity.cache_clear()
+            try:
+                identity = au.resolve_instrument_identity("XAUUSD")
+            finally:
+                au.resolve_instrument_identity.cache_clear()
+
+        self.assertEqual(seen["symbol"], "GC=F")
+        self.assertEqual(identity.get("company_name"), "Gold Futures")
+
+    def test_fetch_returns_normalizes_symbol(self):
+        """#984: _fetch_returns uses the canonical Yahoo symbol, not the
+        broker symbol; benchmark is left untouched.
+        """
+        from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+        queried = []
+
+        class _FakeTicker:
+            def __init__(self, symbol):
+                queried.append(symbol)
+
+            def history(self, *args, **kwargs):
+                return pd.DataFrame(
+                    {"Close": [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0]}
+                )
+
+        with patch.object(tg.yf, "Ticker", _FakeTicker):
+            raw, alpha, days = TradingAgentsGraph._fetch_returns(
+                None, "XAUUSD", "2025-01-02", holding_days=5, benchmark="SPY"
+            )
+
+        self.assertEqual(queried[0], "GC=F")
+        self.assertEqual(queried[1], "SPY")
+        self.assertIsNotNone(raw)
+        self.assertIsNotNone(days)

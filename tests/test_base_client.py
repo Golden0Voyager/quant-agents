@@ -171,5 +171,40 @@ class TestBaseClientEdgeCases(unittest.TestCase):
         self.assertEqual(name, "my-custom-provider")
 
 
+# =========================================================================
+# Model validation tests merged from test_model_validation.py
+# =========================================================================
+
+
+class ModelValidationRegressionTests(unittest.TestCase):
+    """Coverage of BaseLLMClient.warn_if_unknown_model + validators."""
+
+    def test_cli_catalog_models_are_all_validator_approved(self):
+        from tradingagents.llm_clients.model_catalog import get_known_models
+        from tradingagents.llm_clients.validators import validate_model
+
+        for provider, models in get_known_models().items():
+            if provider in ("ollama", "openrouter"):
+                continue
+            for model in models:
+                with self.subTest(provider=provider, model=model):
+                    self.assertTrue(validate_model(provider, model))
+
+    def test_openrouter_and_ollama_accept_custom_models_without_warning(self):
+        for provider in ("openrouter", "ollama"):
+            with self.subTest(provider=provider):
+                client = _ConcreteClient(provider, "custom-model-name")
+                # Override provider since _ConcreteClient(provider, ...) wasn't valid
+                # signature; reuse the warn path with attribute override.
+                client.provider = provider
+                client.model = "custom-model-name"
+
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    client.warn_if_unknown_model()
+
+                self.assertEqual(caught, [])
+
+
 if __name__ == "__main__":
     unittest.main()

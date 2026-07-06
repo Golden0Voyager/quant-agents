@@ -5,6 +5,8 @@ import unittest
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
+import tradingagents.dataflows.yfinance_news as ynews
+
 
 def _epoch(date_str: str) -> int:
     return int(time.mktime(datetime.strptime(date_str, "%Y-%m-%d").timetuple()))
@@ -636,3 +638,134 @@ class GetGlobalNewsYFinanceTests(unittest.TestCase):
             get_global_news_yfinance(self.curr_date)
 
         self.assertEqual(mock_search_patch.call_count, 2)
+
+    def test_all_articles_filtered_out_by_date_window(self):
+        """Line 214: all articles pass dedup but fail _in_news_window."""
+        # Flat articles without providerPublishTime have pub_date=None.
+        # In a historical window (2025-06-20), _in_news_window(None, ...)
+        # returns False, so all are filtered out → kept == 0 → line 214.
+        mock_search_news = [
+            _flat_article(title="Undated Article 1"),
+            _flat_article(title="Undated Article 2"),
+        ]
+        mock_search = MagicMock()
+        mock_search.news = mock_search_news
+
+        with patch(
+            "tradingagents.dataflows.yfinance_news.get_config",
+            return_value=_mock_config(),
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf.Search",
+            return_value=mock_search,
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf_retry",
+            side_effect=lambda f: f(),
+        ):
+            result = get_global_news_yfinance(self.curr_date)
+
+        self.assertEqual(
+            result,
+            "No global news found between 2025-06-13 and 2025-06-20",
+        )
+
+
+# =========================================================================
+# Tests merged from test_news_lookahead.py and test_symbol_normalization_paths.py
+# =========================================================================
+
+
+class FlatArticlePublishTimeTests(unittest.TestCase):
+    """Flat yfinance articles now carry a pub_date parsed from
+    providerPublishTime (#992). Bad timestamps must fail open (#992)."""
+
+    def test_flat_article_publish_time_is_parsed(self):
+        data = ynews._extract_article_data(
+            {"title": "X", "publisher": "P", "link": "l",
+             "providerPublishTime": _epoch("2025-05-09")}
+        )
+        self.assertIsNotNone(data["pub_date"])
+        self.assertEqual(data["pub_date"].strftime("%Y-%m-%d"), "2025-05-09")
+
+    def test_flat_article_invalid_timestamp_handled_gracefully(self):
+        data = ynews._extract_article_data(
+            {"title": "X", "publisher": "P", "link": "l",
+             "providerPublishTime": "not-a-number"}
+        )
+        self.assertIsNone(data["pub_date"])
+
+
+class NewsWindowRegressionTests(unittest.TestCase):
+    """Regressions for #992/993/1007: lookahead guards on global news."""
+
+    def test_window_excludes_future_and_undated_in_backtest(self):
+        start = datetime(2025, 5, 1)
+        end = datetime(2025, 5, 9)
+        inside = datetime(2025, 5, 5)
+        future = datetime(2025, 6, 1)
+        self.assertTrue(ynews._in_news_window(inside, start, end))
+        self.assertFalse(ynews._in_news_window(future, start, end))
+        self.assertFalse(ynews._in_news_window(None, start, end))
+
+    def test_window_keeps_undated_in_live_window(self):
+        start = datetime.now()
+        end = datetime.now()
+        self.assertTrue(ynews._in_news_window(None, start, end))
+
+    def test_global_news_future_flat_article_excluded(self):
+        """#1007: a flat, future-dated global article must not appear."""
+        future_article = {"title": "FUTURE EVENT", "publisher": "P", "link": "l",
+                          "providerPublishTime": _epoch("2025-06-01")}
+        past_article = {"title": "PAST EVENT", "publisher": "P", "link": "l",
+                        "providerPublishTime": _epoch("2025-05-05")}
+
+        class FakeSearch:
+            def __init__(self, *a, **k):
+                self.news = [future_article, past_article]
+
+        with patch("tradingagents.dataflows.yfinance_news.yf.Search", FakeSearch):
+            out = ynews.get_global_news_yfinance("2025-05-09", look_back_days=7, limit=10)
+        self.assertIn("PAST EVENT", out)
+        self.assertNotIn("FUTURE EVENT", out)
+
+    def test_global_news_empty_after_filter_is_informative(self):
+        """#993: everything filtered out -> a clear message, not a blank body."""
+        only_future = {"title": "FUTURE", "publisher": "P", "link": "l",
+                       "providerPublishTime": _epoch("2025-06-01")}
+
+        class FakeSearch:
+            def __init__(self, *a, **k):
+                self.news = [only_future]
+
+        with patch("tradingagents.dataflows.yfinance_news.yf.Search", FakeSearch):
+            out = ynews.get_global_news_yfinance("2025-05-09", look_back_days=7, limit=10)
+        self.assertIn("No global news found", out)
+        self.assertNotIn("###", out)  # no empty article body
+
+
+class YfSymbolNormalizationForNewsTests(unittest.TestCase):
+    """Symbol normalization must propagate to the news path
+    (#983/#984/#1007). Merged from test_symbol_normalization_paths.py.
+    """
+
+    def test_news_lookup_normalizes_symbol(self):
+        seen = {}
+
+        class FakeTicker:
+            def __init__(self, symbol):
+                seen["symbol"] = symbol
+
+            def get_news(self, count):
+                return []
+
+        with patch("tradingagents.dataflows.yfinance_news.yf.Ticker", FakeTicker), \
+             patch("tradingagents.dataflows.yfinance_news.yf_retry", lambda fn: fn()):
+            out = ynews.get_news_yfinance("XAUUSD", "2025-01-01", "2025-01-10")
+
+        self.assertEqual(seen["symbol"], "GC=F")
+        self.assertIn("XAUUSD", out)
+        self.assertIn("GC=F", out)
+
+
+if __name__ == "__main__":
+    unittest.main()
+

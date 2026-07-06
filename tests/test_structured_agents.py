@@ -480,3 +480,46 @@ class TestSentimentAnalystAgent:
         llm.with_structured_output.return_value = structured
         llm.invoke.return_value = MagicMock(content=plain)
         assert create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"] == plain
+
+
+@pytest.mark.unit
+class TestSocialMediaAnalystShim:
+    """Deprecated ``create_social_media_analyst`` backwards-compatibility shim.
+
+    Covers ``sentiment_analyst.py`` lines 210-217.
+    """
+
+    def test_returns_callable(self):
+        from tradingagents.agents.analysts.sentiment_analyst import create_social_media_analyst
+
+        llm = MagicMock()
+        llm.with_structured_output.side_effect = NotImplementedError("provider unsupported")
+        llm.invoke.return_value = MagicMock(content="**Overall Sentiment:** **Bearish**")
+        node = create_social_media_analyst(llm)
+        assert callable(node)
+
+    def test_emits_deprecation_warning(self):
+        from tradingagents.agents.analysts.sentiment_analyst import create_social_media_analyst
+
+        llm = MagicMock()
+        llm.with_structured_output.side_effect = NotImplementedError("provider unsupported")
+        llm.invoke.return_value = MagicMock(content="**Overall Sentiment:** **Bearish**")
+        with pytest.warns(DeprecationWarning, match="create_social_media_analyst is deprecated"):
+            create_social_media_analyst(llm)
+
+    def test_delegates_to_create_sentiment_analyst(self):
+        from tradingagents.agents.analysts.sentiment_analyst import (
+            create_sentiment_analyst,
+            create_social_media_analyst,
+        )
+
+        llm = MagicMock()
+        llm.with_structured_output.side_effect = NotImplementedError("provider unsupported")
+        llm.invoke.return_value = MagicMock(content="**Overall Sentiment:** **Mildly Bullish**")
+        social_node = create_social_media_analyst(llm)
+        sentiment_node = create_sentiment_analyst(llm)
+
+        state = _make_sentiment_state()
+        social_result = social_node(state)
+        sentiment_result = sentiment_node(state)
+        assert social_result["sentiment_report"] == sentiment_result["sentiment_report"]

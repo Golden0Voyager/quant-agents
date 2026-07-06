@@ -43,6 +43,12 @@ class TestNormalizeSymbol(unittest.TestCase):
         self.assertEqual(normalize_symbol("BTCUSD"), "BTC-USD")
         self.assertEqual(normalize_symbol("ETHUSD"), "ETH-USD")
 
+    def test_crypto_pairs_longer_base_get_dash_usd(self):
+        """4+-letter crypto bases (AVAX, LINK, DOGE) hit the second rule (line 102)."""
+        self.assertEqual(normalize_symbol("AVAXUSD"), "AVAX-USD")
+        self.assertEqual(normalize_symbol("LINKUSD"), "LINK-USD")
+        self.assertEqual(normalize_symbol("DOGEUSD"), "DOGE-USD")
+
     def test_six_letter_non_currency_left_alone(self):
         # GOOGLE-style 6-letter tickers that aren't two currency codes
         # must not be mangled into a fake forex pair.

@@ -199,6 +199,70 @@ class AlphaVantageImportTests(unittest.TestCase):
 # =========================================================================
 
 
+@pytest.mark.unit
+class AlphaVantageStockGetStockTests(unittest.TestCase):
+    """Tests for alpha_vantage_stock.get_stock with mocked API."""
+
+    _FAKE_CSV = (
+        "timestamp,open,high,low,close,volume\n"
+        "2026-06-01,100,101,99,100.5,1000\n"
+        "2026-06-15,150,152,149,151,2000\n"
+        "2026-07-01,200,201,199,200.5,3000\n"
+    )
+
+    @patch("tradingagents.dataflows.alpha_vantage_stock._make_api_request")
+    def test_get_stock_compact_range(self, mock_api):
+        """Recent start date (< 100 days ago) uses outputsize=compact."""
+        from tradingagents.dataflows.alpha_vantage_stock import get_stock
+
+        mock_api.return_value = self._FAKE_CSV
+        result = get_stock("IBM", "2026-06-01", "2026-06-30")
+
+        mock_api.assert_called_once()
+        call_args = mock_api.call_args
+        self.assertEqual(call_args[0][0], "TIME_SERIES_DAILY_ADJUSTED")
+        self.assertEqual(call_args[0][1]["symbol"], "IBM")
+        self.assertEqual(call_args[0][1]["outputsize"], "compact")
+        self.assertEqual(call_args[0][1]["datatype"], "csv")
+
+        # Result filtered to date range
+        self.assertIn("2026-06-01", result)
+        self.assertIn("2026-06-15", result)
+        self.assertNotIn("2026-07-01", result)
+
+    @patch("tradingagents.dataflows.alpha_vantage_stock._make_api_request")
+    def test_get_stock_full_range(self, mock_api):
+        """Older start date (>= 100 days ago) uses outputsize=full."""
+        from tradingagents.dataflows.alpha_vantage_stock import get_stock
+
+        mock_api.return_value = self._FAKE_CSV
+        get_stock("IBM", "2026-01-01", "2026-06-30")
+
+        mock_api.assert_called_once()
+        call_args = mock_api.call_args
+        self.assertEqual(call_args[0][1]["outputsize"], "full")
+
+    @patch("tradingagents.dataflows.alpha_vantage_stock._make_api_request")
+    def test_get_stock_empty_response(self, mock_api):
+        """Empty CSV response is passed through."""
+        from tradingagents.dataflows.alpha_vantage_stock import get_stock
+
+        mock_api.return_value = ""
+        result = get_stock("IBM", "2026-06-01", "2026-06-30")
+        self.assertEqual(result, "")
+
+    @patch("tradingagents.dataflows.alpha_vantage_stock._make_api_request")
+    def test_get_stock_api_error_propagates(self, mock_api):
+        """API errors propagate without being swallowed."""
+        from tradingagents.dataflows.alpha_vantage_common import AlphaVantageRateLimitError
+        from tradingagents.dataflows.alpha_vantage_stock import get_stock
+
+        mock_api.side_effect = AlphaVantageRateLimitError("rate limit")
+        with self.assertRaises(AlphaVantageRateLimitError):
+            get_stock("IBM", "2026-06-01", "2026-06-30")
+
+
+
 def _indicator_csv(header_col: str = "SMA") -> str:
     """Return a tiny multi-row CSV emulating the Alpha Vantage shape."""
     return (
@@ -268,14 +332,17 @@ class AlphaVantageCommonMakeRequestTests(unittest.TestCase):
             with self.assertRaises(AlphaVantageRateLimitError):
                 _make_api_request("SMA", {"symbol": "AAPL"})
 
-    def test_rate_limit_detected_api_key(self):
-        from tradingagents.dataflows.alpha_vantage_common import AlphaVantageRateLimitError, _make_api_request
+    def test_invalid_api_key_not_mislabeled_as_rate_limit(self):
+        """#991: AV's invalid-API-key notice must raise NotConfiguredError, not
+        AlphaVantageRateLimitError (a mislabeled rate limit is the bug being fixed).
+        """
+        from tradingagents.dataflows.alpha_vantage_common import AlphaVantageNotConfiguredError, _make_api_request
 
         with patch("tradingagents.dataflows.alpha_vantage_common.get_api_key", return_value="key"), \
              patch("tradingagents.dataflows.alpha_vantage_common.requests.get") as mock_get:
             mock_get.return_value.text = '{"Information": "Invalid API key. Please check your API key."}'
             mock_get.return_value.raise_for_status = lambda: None
-            with self.assertRaises(AlphaVantageRateLimitError):
+            with self.assertRaises(AlphaVantageNotConfiguredError):
                 _make_api_request("SMA", {"symbol": "AAPL"})
 
     def test_json_decode_error_returns_text(self):
@@ -494,10 +561,13 @@ class TestAlphaVantageCommonMakeApiRequest(unittest.TestCase):
         with self._patch_common(), self._patch_get(text=error_json), self.assertRaises(AlphaVantageRateLimitError):
             _make_api_request("SMA", {"symbol": "AAPL"})
 
-    def test_make_request_api_key_message_detected(self):
-        """Lines 90–92: 'api key' in Information message also triggers."""
+    def test_make_request_api_key_message_raises_not_configured(self):
+        """#991: an 'api key' notice raises AlphaVantageNotConfiguredError, not
+        AlphaVantageRateLimitError (the rate-limit branch is only for genuine
+        rate-limit / premium notices).
+        """
         from tradingagents.dataflows.alpha_vantage_common import (
-            AlphaVantageRateLimitError,
+            AlphaVantageNotConfiguredError,
             _make_api_request,
         )
 
@@ -505,7 +575,7 @@ class TestAlphaVantageCommonMakeApiRequest(unittest.TestCase):
             "Information": "Invalid API key. Please check your key."
         })
 
-        with self._patch_common(), self._patch_get(text=error_json), self.assertRaises(AlphaVantageRateLimitError):
+        with self._patch_common(), self._patch_get(text=error_json), self.assertRaises(AlphaVantageNotConfiguredError):
             _make_api_request("SMA", {"symbol": "AAPL"})
 
     def test_make_request_non_json_csv_response_passes(self):
@@ -640,6 +710,56 @@ class TestAlphaVantageIndicator(unittest.TestCase):
                 look_back_days=30,
             )
         self.assertIn("close_50_sma", result.lower())
+
+
+class TestAlphaVantageRequestHardening(unittest.TestCase):
+    """Regressions for #990 (no request timeout -> can hang) and #991
+    (invalid-key responses mislabeled as rate limits).
+
+    Merged from tests/test_alpha_vantage_hardening.py.
+    """
+
+    def test_request_passes_timeout(self):
+        from tradingagents.dataflows import alpha_vantage_common as av
+        captured = {}
+
+        class _FakeResponse:
+            def __init__(self, body):
+                self.text = body
+            def raise_for_status(self):
+                pass
+
+        def fake_get(url, params=None, **kwargs):
+            captured.update(kwargs)
+            return _FakeResponse("Date,Close\n2025-01-02,1.0")
+
+        with patch("tradingagents.dataflows.alpha_vantage_common.requests.get", fake_get):
+            av._make_api_request("TIME_SERIES_DAILY", {"symbol": "AAPL"})
+        self.assertEqual(captured.get("timeout"), av.REQUEST_TIMEOUT)  # #990
+
+    def test_invalid_key_not_mislabeled_as_rate_limit(self):
+        """#991: AV's invalid-key notice mentions 'API key' but must NOT
+        be treated as a transient rate limit.
+        """
+        from tradingagents.dataflows import alpha_vantage_common as av
+
+        class _FakeResponse:
+            def __init__(self, body):
+                self.text = body
+            def raise_for_status(self):
+                pass
+
+        def fake_get(url, params=None, **kwargs):
+            return _FakeResponse(
+                '{"Information": "the parameter apikey is invalid or missing. '
+                'Please claim your free API key on (https://www.alphavantage.co/support/#api-key)."}'
+            )
+
+        with (
+            patch("tradingagents.dataflows.alpha_vantage_common.requests.get", fake_get),
+            self.assertRaises(av.AlphaVantageNotConfiguredError),
+        ):
+            av._make_api_request("TIME_SERIES_DAILY", {"symbol": "AAPL"})
 
 
 if __name__ == "__main__":
