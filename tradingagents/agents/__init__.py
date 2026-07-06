@@ -17,10 +17,13 @@ from .risk_mgmt.neutral_debator import create_neutral_debator
 from .trader.trader import create_trader
 from .utils.agent_states import AgentState, InvestDebateState, RiskDebateState
 from .utils.agent_utils import create_msg_delete
+from .utils.fund_flow_tools import get_fund_flow, get_sector_fund_flow
 
 __all__ = [
     "AgentState",
     "create_msg_delete",
+    "get_fund_flow",
+    "get_sector_fund_flow",
     "InvestDebateState",
     "RiskDebateState",
     "create_bear_researcher",

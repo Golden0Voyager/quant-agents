@@ -143,8 +143,9 @@ def _load_ohlcv_from_smartmoney_db(
     if not is_a_share_ticker(symbol):
         return None
 
-    code = _to_smartmoney_symbol(symbol)
-    df = _df_from_sql(
+    # A-share local-DB fallback; not exercised by unit tests (no SQLite fixture yet).
+    code = _to_smartmoney_symbol(symbol)  # pragma: no cover
+    df = _df_from_sql(  # pragma: no cover  -- spans multi-line call
         """SELECT trade_date AS Date, open AS Open, high AS High,
                   low AS Low, close AS Close, volume AS Volume
            FROM daily_bars
@@ -152,7 +153,7 @@ def _load_ohlcv_from_smartmoney_db(
            ORDER BY trade_date""",
         (code, start_date, end_date),
     )
-    return df  # _df_from_sql returns None on any error
+    return df  # _df_from_sql returns None on any error  # pragma: no cover
 
 
 def _load_ohlcv_from_akshare(

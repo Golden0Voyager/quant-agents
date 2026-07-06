@@ -51,6 +51,10 @@ jobs:
           python-version: "3.12"
       - run: uv sync
       - run: uv run pytest -m unit --no-header -q
+      - run: |
+          uv run coverage erase
+          uv run coverage run --source=tradingagents -m pytest -m unit --no-header -q
+          uv run coverage report --fail-under=90
 
   test-integration:
     runs-on: ubuntu-latest

@@ -34,13 +34,16 @@ class BatchRunner:
         checkpoint: bool = False,
         holdings: dict | None = None,
         workers: int = 1,
+        force: bool = False,
     ):
         self.tickers = tickers
         self.profile_config = profile_config
         self.output_dir = Path(output_dir)
         self.checkpoint = checkpoint
+        self.force = force
         self.holdings = self._resolve_holdings(holdings)
         self.workers = workers
+        self._headless = True  # default: unattended; interactive callers set False
         self.completed_tickers: set[str] = set()
         self.failures: dict[str, str] = {}
         self.summaries: dict[str, dict] = {}
@@ -749,6 +752,67 @@ class BatchRunner:
         self._layout = layout
         self._start_time = start_time
 
+        # ── Pre-check: prompt user about existing reports BEFORE Live context ──
+        skip_tickers: set[str] = set()
+        for ticker in self.tickers:
+            existing_report = self._find_existing_report(ticker)
+            if existing_report is not None and not self.force:
+                if not self._headless:
+                    import questionary
+                    choice = questionary.select(
+                        f"检测到 {ticker} 已有完整分析报告，请选择：",
+                        choices=[
+                            questionary.Choice("跳过，查看已有报告", value="skip"),
+                            questionary.Choice("强制重新生成", value="regenerate"),
+                        ],
+                        default="skip",
+                    ).ask()
+                    if choice == "regenerate":
+                        self.force = True  # force remaining tickers too
+                        # Don't skip — fall through to run analysis
+                    else:
+                        skip_tickers.add(ticker)
+                        # Copy report now (outside Live context)
+                        self._copy_existing_report(ticker, existing_report)
+                        with self._lock:
+                            self._extract_summary_from_report(ticker, existing_report)
+                        self.completed_tickers.add(ticker)
+                        self.dashboard.mark_skipped(ticker)
+                        self.dashboard.add_message(
+                            "Copy",
+                            f"📋 {ticker} — report exists, copying from previous batch"
+                        )
+                else:
+                    # Headless mode: skip silently
+                    skip_tickers.add(ticker)
+                    self._copy_existing_report(ticker, existing_report)
+                    with self._lock:
+                        self._extract_summary_from_report(ticker, existing_report)
+                    self.completed_tickers.add(ticker)
+                    self.dashboard.mark_skipped(ticker)
+                    self.dashboard.add_message(
+                        "Copy",
+                        f"📋 {ticker} — report exists, copying from previous batch"
+                    )
+
+        # ── Data readiness pre-check: pre-load cacheable data for all tickers ──
+        from tradingagents.agents.utils.data_readiness import check_batch_readiness
+        self.dashboard.add_message(
+            "System",
+            f"预处理 {len(self.tickers)} 个标的行情缓存…",
+        )
+        ready, total = check_batch_readiness(
+            self.tickers,
+            self.profile_config.get("analysis_date") or datetime.now().strftime("%Y-%m-%d"),
+            self.profile_config.get("analysts", []),
+        )
+        self.dashboard.readiness_ready = ready
+        self.dashboard.readiness_total = total
+        self.dashboard.add_message(
+            "System",
+            f"数据预检: {ready}/{total} 就绪",
+        )
+
         with Live(layout, refresh_per_second=4):
             # Push an initial frame so the user sees something other than empty
             # panels for the few seconds before the first node fires.
@@ -764,18 +828,8 @@ class BatchRunner:
             )
 
             for _idx, ticker in enumerate(self.tickers):
-                existing_report = self._find_existing_report(ticker)
-                if existing_report is not None:
-                    self.completed_tickers.add(ticker)
-                    self.dashboard.mark_skipped(ticker)
-                    self.dashboard.add_message("Copy", f"📋 {ticker} — report exists, copying from previous batch")
-                    # Copy the existing report files to the current batch
-                    # output directory so the report is physically present.
-                    self._copy_existing_report(ticker, existing_report)
-                    # Backfill the summary from the existing report so the final
-                    # table shows its rating / levels instead of a blank row.
-                    with self._lock:
-                        self._extract_summary_from_report(ticker, existing_report)
+                # Already decided (skip or regenerate) above the Live context
+                if ticker in skip_tickers:
                     self.dashboard.update_progress(
                         ticker,
                         len(self.completed_tickers) - len(self.failures),

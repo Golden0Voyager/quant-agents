@@ -135,7 +135,11 @@ def get_indicator(
             # In a real implementation, this would need to be calculated from OHLCV data
             return f"## VWMA (Volume Weighted Moving Average) for {symbol}:\n\nVWMA calculation requires OHLCV data and is not directly available from Alpha Vantage API.\nThis indicator would need to be calculated from the raw stock data using volume-weighted price averaging.\n\n{indicator_descriptions.get('vwma', 'No description available.')}"
         else:
-            return f"Error: Indicator {indicator} not implemented yet."
+            # Unreachable: the if-elif chain above maps every supported_indicators
+            # entry, and the upstream ``indicator not in supported_indicators``
+            # check rejects anything else. Kept as a safety net for future
+            # additions that forget to wire a new branch.
+            return f"Error: Indicator {indicator} not implemented yet."  # pragma: no cover
 
         # Parse CSV data and extract values for the date range
         lines = data.strip().split('\n')
@@ -160,8 +164,9 @@ def get_indicator(
         target_col_name = col_name_map.get(indicator)
 
         if not target_col_name:
-            # Default to the second column if no specific mapping exists
-            value_col_idx = 1
+            # Defensive fallback for any indicator added without updating the
+            # ``col_name_map`` above; every shipped indicator has an entry.
+            value_col_idx = 1  # pragma: no cover
         else:
             try:
                 value_col_idx = header.index(target_col_name)

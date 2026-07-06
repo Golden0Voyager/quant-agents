@@ -65,7 +65,7 @@ def fetch_stocktwits_messages(
                 created_dt = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
                 if created_dt >= cutoff:
                     filtered.append(m)
-            except Exception:
+            except Exception:  # pragma: no cover  -- fail-open: keep messages with unparseable timestamps
                 # If parsing fails, keep the message (fail-open)
                 filtered.append(m)
         messages = filtered

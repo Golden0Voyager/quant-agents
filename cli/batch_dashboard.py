@@ -20,6 +20,8 @@ class BatchDashboard(AnalysisDashboard):
         self.skipped = 0
         self.skipped_tickers: list[str] = []
         self.current_ticker: str | None = None
+        self.readiness_ready: int = 0
+        self.readiness_total: int = 0
 
     def update_progress(self, current_ticker: str, completed: int, failed: int) -> None:
         self.current_ticker = current_ticker

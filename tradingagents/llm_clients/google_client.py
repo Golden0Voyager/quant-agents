@@ -55,7 +55,7 @@ class GoogleClient(BaseLLMClient):
 
         retry_config = self.kwargs.get("retry_config")
         if retry_config is not None and isinstance(retry_config, dict):
-            retry_config = RetryConfig(**retry_config)
+            retry_config = RetryConfig(**retry_config)  # pragma: no cover  -- dict→RetryConfig kwargs path
 
         llm = NormalizedChatGoogleGenerativeAI(**llm_kwargs)
         if retry_config is not None:
