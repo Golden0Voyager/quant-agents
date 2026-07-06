@@ -8,6 +8,7 @@ import json
 import shutil
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -44,6 +45,7 @@ class BatchRunner:
         self.holdings = self._resolve_holdings(holdings)
         self.workers = workers
         self._headless = True  # default: unattended; interactive callers set False
+        self._batch_mode = workers > 1  # batch summary mode for concurrent runs
         self.completed_tickers: set[str] = set()
         self.failures: dict[str, str] = {}
         self.summaries: dict[str, dict] = {}
@@ -82,6 +84,7 @@ class BatchRunner:
             batch_total=self.dashboard.total,
             batch_failed=self.dashboard.failed,
             profile_name=self.dashboard.profile_name,
+            batch_mode=self._batch_mode,
         )
 
     @staticmethod
@@ -91,6 +94,7 @@ class BatchRunner:
             return holdings
         try:
             from tradingagents.portfolio import PortfolioRepository
+
             repo = PortfolioRepository()
             if repo.exists():
                 portfolio = repo.load()
@@ -132,6 +136,7 @@ class BatchRunner:
         """
         try:
             from tradingagents.ticker_resolver import resolve_ticker
+
             resolved = resolve_ticker(ticker)
             name = resolved.get("company_name", "")
             if name:
@@ -214,6 +219,7 @@ class BatchRunner:
         candidates = {ticker}
         try:
             from tradingagents.ticker_resolver import resolve_ticker
+
             resolved = resolve_ticker(ticker)
             candidates.add(resolved["ticker"])
             company_name = resolved.get("company_name", "")
@@ -337,6 +343,7 @@ class BatchRunner:
         transactions_context: list[dict] = []
         try:
             from tradingagents.portfolio import PortfolioRepository
+
             repo = PortfolioRepository()
             if repo.exists():
                 portfolio = repo.load()
@@ -374,24 +381,18 @@ class BatchRunner:
                 thread_id,
             )
 
-            checkpointer_ctx = get_checkpointer(
-                config["data_cache_dir"], resolved_ticker
-            )
+            checkpointer_ctx = get_checkpointer(config["data_cache_dir"], resolved_ticker)
             saver = checkpointer_ctx.__enter__()
             graph.graph = graph.workflow.compile(checkpointer=saver)
 
-            step = checkpoint_step(
-                config["data_cache_dir"], resolved_ticker, trade_date
-            )
+            step = checkpoint_step(config["data_cache_dir"], resolved_ticker, trade_date)
             if step is not None:
                 self.dashboard.add_message(
                     "Resume",
                     f"▶ Resuming {ticker} from checkpoint (step {step})",
                 )
             else:
-                self.dashboard.add_message(
-                    "Info", f"Starting fresh analysis for {ticker}"
-                )
+                self.dashboard.add_message("Info", f"Starting fresh analysis for {ticker}")
 
             # Inject thread_id so the same ticker+date resumes correctly.
             tid = thread_id(resolved_ticker, trade_date)
@@ -429,9 +430,7 @@ class BatchRunner:
 
             # Clear checkpoint on successful completion to avoid stale state.
             if config.get("checkpoint_enabled"):
-                clear_checkpoint(
-                    config["data_cache_dir"], resolved_ticker, trade_date
-                )
+                clear_checkpoint(config["data_cache_dir"], resolved_ticker, trade_date)
 
             return final_state
         finally:
@@ -540,13 +539,15 @@ class BatchRunner:
         def _find_rating_label(text: str) -> str:
             m = re.search(
                 r"(?:\*\*)?(?:Rating|Decision|评级|建议|决策|结论)(?:\*\*)?\s*[:：]\s*(?:\*\*)?([\w一-鿿]+)(?:\*\*)?",
-                text, re.IGNORECASE,
+                text,
+                re.IGNORECASE,
             )
             if m:
                 return m.group(1)
             m = re.search(
                 r"[\"「【]([\w一-鿿]+)[\"」】]\s*(?:评级|建议|决策|结论)",
-                text, re.IGNORECASE,
+                text,
+                re.IGNORECASE,
             )
             return m.group(1) if m else ""
 
@@ -650,9 +651,9 @@ class BatchRunner:
             self.batch_stats["tokens_out"] += out_tokens
             for model, cost in cost_by_model.items():
                 try:
-                    self.batch_stats["cost_by_model"][model] = (
-                        self.batch_stats["cost_by_model"].get(model, 0.0) + float(cost)
-                    )
+                    self.batch_stats["cost_by_model"][model] = self.batch_stats["cost_by_model"].get(
+                        model, 0.0
+                    ) + float(cost)
                 except (TypeError, ValueError):
                     continue
             self.batch_stats["per_ticker"][ticker] = {
@@ -681,11 +682,23 @@ class BatchRunner:
         try:
             text = report_path.read_text(encoding="utf-8")
         except Exception:
-            self.summaries[ticker] = {"company": company or ticker, "rating": "—", "entry": "—", "stop": "—", "size": "—"}
+            self.summaries[ticker] = {
+                "company": company or ticker,
+                "rating": "—",
+                "entry": "—",
+                "stop": "—",
+                "size": "—",
+            }
             return
 
         if not text:
-            self.summaries[ticker] = {"company": company or ticker, "rating": "—", "entry": "—", "stop": "—", "size": "—"}
+            self.summaries[ticker] = {
+                "company": company or ticker,
+                "rating": "—",
+                "entry": "—",
+                "stop": "—",
+                "size": "—",
+            }
             return
 
         # Extract the Portfolio Manager section (the authoritative rating source).
@@ -759,6 +772,7 @@ class BatchRunner:
             if existing_report is not None and not self.force:
                 if not self._headless:
                     import questionary
+
                     choice = questionary.select(
                         f"检测到 {ticker} 已有完整分析报告，请选择：",
                         choices=[
@@ -778,10 +792,7 @@ class BatchRunner:
                             self._extract_summary_from_report(ticker, existing_report)
                         self.completed_tickers.add(ticker)
                         self.dashboard.mark_skipped(ticker)
-                        self.dashboard.add_message(
-                            "Copy",
-                            f"📋 {ticker} — report exists, copying from previous batch"
-                        )
+                        self.dashboard.add_message("Copy", f"📋 {ticker} — report exists, copying from previous batch")
                 else:
                     # Headless mode: skip silently
                     skip_tickers.add(ticker)
@@ -790,13 +801,11 @@ class BatchRunner:
                         self._extract_summary_from_report(ticker, existing_report)
                     self.completed_tickers.add(ticker)
                     self.dashboard.mark_skipped(ticker)
-                    self.dashboard.add_message(
-                        "Copy",
-                        f"📋 {ticker} — report exists, copying from previous batch"
-                    )
+                    self.dashboard.add_message("Copy", f"📋 {ticker} — report exists, copying from previous batch")
 
         # ── Data readiness pre-check: pre-load cacheable data for all tickers ──
         from tradingagents.agents.utils.data_readiness import check_batch_readiness
+
         self.dashboard.add_message(
             "System",
             f"预处理 {len(self.tickers)} 个标的行情缓存…",
@@ -827,66 +836,123 @@ class BatchRunner:
                 profile_name=self.dashboard.profile_name,
             )
 
-            for _idx, ticker in enumerate(self.tickers):
-                # Already decided (skip or regenerate) above the Live context
-                if ticker in skip_tickers:
-                    self.dashboard.update_progress(
-                        ticker,
-                        len(self.completed_tickers) - len(self.failures),
-                        len(self.failures),
-                    )
+            if self.workers <= 1:
+                # ── Sequential path: detailed per-ticker Live dashboard ──
+                for _idx, ticker in enumerate(self.tickers):
+                    # Already decided (skip or regenerate) above the Live context
+                    if ticker in skip_tickers:
+                        self.dashboard.update_progress(
+                            ticker,
+                            len(self.completed_tickers) - len(self.failures),
+                            len(self.failures),
+                        )
+                        update_dashboard_display(
+                            layout,
+                            self.dashboard,
+                            ticker=self.dashboard.current_ticker or ticker,
+                            start_time=start_time,
+                            batch_completed=len(self.completed_tickers) - len(self.failures),
+                            batch_total=self.dashboard.total,
+                            batch_failed=len(self.failures),
+                            profile_name=self.dashboard.profile_name,
+                            stats_handler=self._batch_stats_adapter(),
+                        )
+                        continue
+
+                    self.dashboard.reset_for_next_stock()
+                    self.dashboard.update_progress(ticker, len(self.completed_tickers), len(self.failures))
+                    self.dashboard.update_agent_status("Market Analyst", "in_progress")
                     update_dashboard_display(
                         layout,
                         self.dashboard,
-                        ticker=self.dashboard.current_ticker or ticker,
+                        ticker=ticker,
                         start_time=start_time,
-                        batch_completed=len(self.completed_tickers) - len(self.failures),
+                        batch_completed=len(self.completed_tickers),
                         batch_total=self.dashboard.total,
                         batch_failed=len(self.failures),
                         profile_name=self.dashboard.profile_name,
                         stats_handler=self._batch_stats_adapter(),
                     )
-                    continue
 
-                self.dashboard.reset_for_next_stock()
-                self.dashboard.update_progress(ticker, len(self.completed_tickers), len(self.failures))
-                self.dashboard.update_agent_status("Market Analyst", "in_progress")
-                update_dashboard_display(
-                    layout,
-                    self.dashboard,
-                    ticker=ticker,
-                    start_time=start_time,
-                    batch_completed=len(self.completed_tickers),
-                    batch_total=self.dashboard.total,
-                    batch_failed=len(self.failures),
-                    profile_name=self.dashboard.profile_name,
-                    stats_handler=self._batch_stats_adapter(),
+                    try:
+                        self._run_single(ticker)
+                        self.completed_tickers.add(ticker)
+                    except Exception as e:
+                        self.failures[ticker] = str(e)
+                        self.completed_tickers.add(ticker)
+                        # Write failure log
+                        self.output_dir.mkdir(parents=True, exist_ok=True)
+                        failures_path = self.output_dir / "failures.log"
+                        with open(failures_path, "a", encoding="utf-8") as f:
+                            f.write(f"{ticker}: {e}\n")
+
+                    self.dashboard.update_progress(
+                        ticker, len(self.completed_tickers) - len(self.failures), len(self.failures)
+                    )
+                    update_dashboard_display(
+                        layout,
+                        self.dashboard,
+                        ticker=ticker,
+                        start_time=start_time,
+                        batch_completed=self.dashboard.completed,
+                        batch_total=self.dashboard.total,
+                        batch_failed=self.dashboard.failed,
+                        stats_handler=self._batch_stats_adapter(),
+                        profile_name=self.dashboard.profile_name,
+                    )
+            else:
+                # ── Concurrent path: process tickers via ThreadPoolExecutor ──
+                active_tickers = [t for t in self.tickers if t not in skip_tickers]
+                self.dashboard.add_message(
+                    "System",
+                    f"并发处理 {len(active_tickers)} 个标的 (workers={self.workers})",
                 )
 
-                try:
-                    self._run_single(ticker)
-                    self.completed_tickers.add(ticker)
-                except Exception as e:
-                    self.failures[ticker] = str(e)
-                    self.completed_tickers.add(ticker)
-                    # Write failure log
-                    self.output_dir.mkdir(parents=True, exist_ok=True)
-                    failures_path = self.output_dir / "failures.log"
-                    with open(failures_path, "a", encoding="utf-8") as f:
-                        f.write(f"{ticker}: {e}\n")
+                with ThreadPoolExecutor(max_workers=self.workers) as executor:
+                    futures = []
+                    for ticker in active_tickers:
+                        future = executor.submit(self._run_single, ticker)
+                        futures.append((future, ticker))
 
-                self.dashboard.update_progress(ticker, len(self.completed_tickers) - len(self.failures), len(self.failures))
-                update_dashboard_display(
-                    layout,
-                    self.dashboard,
-                    ticker=ticker,
-                    start_time=start_time,
-                    batch_completed=self.dashboard.completed,
-                    batch_total=self.dashboard.total,
-                    batch_failed=self.dashboard.failed,
-                    stats_handler=self._batch_stats_adapter(),
-                    profile_name=self.dashboard.profile_name,
-                )
+                    running_tickers: set[str] = set(active_tickers)
+                    for future, ticker in futures:
+                        try:
+                            future.result()
+                            with self._lock:
+                                self.completed_tickers.add(ticker)
+                        except Exception as e:
+                            with self._lock:
+                                self.failures[ticker] = str(e)
+                                self.completed_tickers.add(ticker)
+                            # Write failure log
+                            self.output_dir.mkdir(parents=True, exist_ok=True)
+                            failures_path = self.output_dir / "failures.log"
+                            with open(failures_path, "a", encoding="utf-8") as f:
+                                f.write(f"{ticker}: {e}\n")
+
+                        with self._lock:
+                            running_tickers.discard(ticker)
+
+                        self.dashboard.update_progress(
+                            ticker,
+                            len(self.completed_tickers) - len(self.failures),
+                            len(self.failures),
+                        )
+                        with self._lock:
+                            running_tickers_snapshot = running_tickers.copy()
+                        update_dashboard_display(
+                            layout,
+                            self.dashboard,
+                            ticker=ticker,
+                            start_time=start_time,
+                            batch_completed=self.dashboard.completed,
+                            batch_total=self.dashboard.total,
+                            batch_failed=self.dashboard.failed,
+                            stats_handler=self._batch_stats_adapter(),
+                            profile_name=self.dashboard.profile_name,
+                            batch_mode=True,
+                            running_tickers=running_tickers_snapshot,
+                        )
 
         # Live closed — release the layout reference so any stray _refresh_display
         # call from finalization code becomes a no-op instead of writing to a dead layout.
@@ -904,9 +970,7 @@ class BatchRunner:
             lines.append("| Ticker | Company | Rating | Entry | Stop | Size | Status | Details |")
             lines.append("|--------|---------|--------|-------|------|------|--------|---------|")
 
-        all_tickers = sorted(
-            set(self.tickers) | set(self.summaries.keys()) | set(self.failures.keys())
-        )
+        all_tickers = sorted(set(self.tickers) | set(self.summaries.keys()) | set(self.failures.keys()))
         json_rows = []
         for ticker in all_tickers:
             per_ticker_stats = self.batch_stats["per_ticker"].get(ticker, {})
@@ -916,19 +980,21 @@ class BatchRunner:
                     lines.append(f"| {ticker} | — | — | — | — | — | — | — | ❌ | — |")
                 else:
                     lines.append(f"| {ticker} | — | — | — | — | — | ❌ | — |")
-                json_rows.append({
-                    "ticker": ticker,
-                    "company": None,
-                    "rating": None,
-                    "entry": None,
-                    "stop": None,
-                    "size": None,
-                    "tokens_in": None,
-                    "tokens_out": None,
-                    "cost": None,
-                    "status": "failed",
-                    "error": self.failures[ticker],
-                })
+                json_rows.append(
+                    {
+                        "ticker": ticker,
+                        "company": None,
+                        "rating": None,
+                        "entry": None,
+                        "stop": None,
+                        "size": None,
+                        "tokens_in": None,
+                        "tokens_out": None,
+                        "cost": None,
+                        "status": "failed",
+                        "error": self.failures[ticker],
+                    }
+                )
             else:
                 s = self.summaries.get(ticker, {})
                 dir_name = self._build_ticker_dir_name(ticker, s.get("company", ""))
@@ -945,19 +1011,21 @@ class BatchRunner:
                         f"{s.get('entry', '—')} | {s.get('stop', '—')} | {s.get('size', '—')} | ✅ | "
                         f"[Report](./{dir_name}/complete_report.md) |"
                     )
-                json_rows.append({
-                    "ticker": ticker,
-                    "company": s.get("company", ticker),
-                    "rating": s.get("rating"),
-                    "entry": s.get("entry"),
-                    "stop": s.get("stop"),
-                    "size": s.get("size"),
-                    "tokens_in": per_ticker_stats.get("tokens_in"),
-                    "tokens_out": per_ticker_stats.get("tokens_out"),
-                    "cost": per_ticker_stats.get("cost"),
-                    "status": "success",
-                    "error": None,
-                })
+                json_rows.append(
+                    {
+                        "ticker": ticker,
+                        "company": s.get("company", ticker),
+                        "rating": s.get("rating"),
+                        "entry": s.get("entry"),
+                        "stop": s.get("stop"),
+                        "size": s.get("size"),
+                        "tokens_in": per_ticker_stats.get("tokens_in"),
+                        "tokens_out": per_ticker_stats.get("tokens_out"),
+                        "cost": per_ticker_stats.get("cost"),
+                        "status": "success",
+                        "error": None,
+                    }
+                )
 
         # Append failure details so errors are still readable without widening the table
         if self.failures:
@@ -1023,6 +1091,7 @@ class BatchRunner:
                     "cost_by_model": cost_by_model,
                     "tokens_by_model": {},
                 }
+
         return _Adapter()
 
     @staticmethod
