@@ -426,7 +426,20 @@ class TickerSymbolHandlingTests(unittest.TestCase):
     def test_single_get_ticker_no_shadow(self):
         import cli.main
         import cli.utils
-        self.assertIs(cli.main.get_ticker, cli.utils.get_ticker)
+        # Verify get_ticker is imported from cli.utils, not shadowed by a
+        # local ``def get_ticker`` in cli.main. We check __module__ instead of
+        # object identity (assertIs) because other tests (e.g.
+        # test_cli_env_skip.py's cli_utils fixture) may importlib.reload
+        # (cli.utils), which re-creates get_ticker as a new function object
+        # while cli.main still holds the old reference from its module-level
+        # ``from cli.utils import *``. The __module__ attribute stays
+        # "cli.utils" regardless of reloads, so this check is robust.
+        self.assertEqual(
+            cli.main.get_ticker.__module__,
+            "cli.utils",
+            "cli.main.get_ticker should be imported from cli.utils, not "
+            "defined locally (no shadow).",
+        )
 
 
 if __name__ == "__main__":
