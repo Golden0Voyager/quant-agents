@@ -201,7 +201,7 @@ def _fetch_company_name_from_db(ticker: str) -> str | None:
     The stock_list table stores bare codes (e.g. '002241') without suffixes.
     Returns None if the ticker is not found or the DB is unavailable.
     """
-    db_path = os.path.expanduser("~/Code/data/quant_data/quant_core.db")
+    db_path = os.path.expanduser("~/Code/quant_data/quant_core.db")
     if not os.path.exists(db_path):
         return None
     bare = ticker.split(".")[0]
