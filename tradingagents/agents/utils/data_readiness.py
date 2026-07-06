@@ -89,7 +89,8 @@ def _check_ohlcv(ticker: str, trade_date: str, config: dict) -> ReadinessItem:
 
 
 def _check_smartmoney_table(
-    ticker: str, table: str, label: str, analyst: str
+    ticker: str, table: str, label: str, analyst: str,
+    date_col: str = "trade_date"
 ) -> ReadinessItem | None:
     """检查 smartmoney_db 中某张表是否有该标的的数据。"""
     if not is_a_share_ticker(ticker):
@@ -101,7 +102,7 @@ def _check_smartmoney_table(
         )
         code = _to_smartmoney_symbol(ticker)
         df = _df_from_sql(
-            f"SELECT COUNT(*) as cnt, MAX(trade_date) as latest "
+            f"SELECT COUNT(*) as cnt, MAX({date_col}) as latest "
             f"FROM {table} WHERE ts_code = ?",
             (code,),
         )
@@ -133,7 +134,9 @@ def _check_fund_flow(ticker: str, analyst: str) -> ReadinessItem:
 
 def _check_fin_statements(ticker: str, analyst: str) -> ReadinessItem:
     """检查财务报表缓存。"""
-    result = _check_smartmoney_table(ticker, "financial_statements", "财务报表", analyst)
+    result = _check_smartmoney_table(
+        ticker, "quarterly_financials", "财务报表", analyst, date_col="report_period"
+    )
     if result:
         return result
     return ReadinessItem(
