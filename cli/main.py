@@ -186,9 +186,7 @@ class MessageBuffer:
                 "trader_investment_plan": "Trading Team Plan",
                 "final_trade_decision": "Portfolio Management Decision",
             }
-            self.current_report = (
-                f"### {section_titles[latest_section]}\n{latest_content}"
-            )
+            self.current_report = f"### {section_titles[latest_section]}\n{latest_content}"
 
         # Update the final complete report
         self._update_final_report()
@@ -201,21 +199,13 @@ class MessageBuffer:
         if any(self.report_sections.get(section) for section in analyst_sections):
             report_parts.append("## Analyst Team Reports")
             if self.report_sections.get("market_report"):
-                report_parts.append(
-                    f"### Market Analysis\n{self.report_sections['market_report']}"
-                )
+                report_parts.append(f"### Market Analysis\n{self.report_sections['market_report']}")
             if self.report_sections.get("sentiment_report"):
-                report_parts.append(
-                    f"### Social Sentiment\n{self.report_sections['sentiment_report']}"
-                )
+                report_parts.append(f"### Social Sentiment\n{self.report_sections['sentiment_report']}")
             if self.report_sections.get("news_report"):
-                report_parts.append(
-                    f"### News Analysis\n{self.report_sections['news_report']}"
-                )
+                report_parts.append(f"### News Analysis\n{self.report_sections['news_report']}")
             if self.report_sections.get("fundamentals_report"):
-                report_parts.append(
-                    f"### Fundamentals Analysis\n{self.report_sections['fundamentals_report']}"
-                )
+                report_parts.append(f"### Fundamentals Analysis\n{self.report_sections['fundamentals_report']}")
 
         # Research Team Reports
         if self.report_sections.get("investment_plan"):
@@ -245,19 +235,15 @@ def create_layout():
         Layout(name="main"),
         Layout(name="footer", size=3),
     )
-    layout["main"].split_column(
-        Layout(name="upper", ratio=3), Layout(name="analysis", ratio=5)
-    )
-    layout["upper"].split_row(
-        Layout(name="progress", ratio=2), Layout(name="messages", ratio=3)
-    )
+    layout["main"].split_column(Layout(name="upper", ratio=3), Layout(name="analysis", ratio=5))
+    layout["upper"].split_row(Layout(name="progress", ratio=2), Layout(name="messages", ratio=3))
     return layout
 
 
 def format_tokens(n):
     """Format token count for display."""
     if n >= 1000:
-        return f"{n/1000:.1f}k"
+        return f"{n / 1000:.1f}k"
     return str(n)
 
 
@@ -314,9 +300,7 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
         first_agent = agents[0]
         status = message_buffer.agent_status.get(first_agent, "pending")
         if status == "in_progress":
-            spinner = Spinner(
-                "dots", text="[blue]in_progress[/blue]", style="bold cyan"
-            )
+            spinner = Spinner("dots", text="[blue]in_progress[/blue]", style="bold cyan")
             status_cell = spinner
         else:
             status_color = {
@@ -331,9 +315,7 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
         for agent in agents[1:]:
             status = message_buffer.agent_status.get(agent, "pending")
             if status == "in_progress":
-                spinner = Spinner(
-                    "dots", text="[blue]in_progress[/blue]", style="bold cyan"
-                )
+                spinner = Spinner("dots", text="[blue]in_progress[/blue]", style="bold cyan")
                 status_cell = spinner
             else:
                 status_color = {
@@ -347,9 +329,7 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
         # Add horizontal line after each team
         progress_table.add_row("─" * 20, "─" * 20, "─" * 20, style="dim")
 
-    layout["progress"].update(
-        Panel(progress_table, title="Progress", border_style="cyan", padding=(1, 2))
-    )
+    layout["progress"].update(Panel(progress_table, title="Progress", border_style="cyan", padding=(1, 2)))
 
     # Messages panel showing recent messages and tool calls
     messages_table = Table(
@@ -363,9 +343,7 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
     )
     messages_table.add_column("Time", style="cyan", width=8, justify="center")
     messages_table.add_column("Type", style="green", width=10, justify="center")
-    messages_table.add_column(
-        "Content", style="white", no_wrap=False, ratio=1
-    )  # Make content column expand
+    messages_table.add_column("Content", style="white", no_wrap=False, ratio=1)  # Make content column expand
 
     # Combine tool calls and messages
     all_messages = []
@@ -428,9 +406,7 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
 
     # Footer with statistics
     # Agent progress - derived from agent_status dict
-    agents_completed = sum(
-        1 for status in message_buffer.agent_status.values() if status == "completed"
-    )
+    agents_completed = sum(1 for status in message_buffer.agent_status.values() if status == "completed")
     agents_total = len(message_buffer.agent_status)
 
     # Report progress - based on agent completion (not just content existence)
@@ -490,10 +466,10 @@ def get_user_selections(preselected_tickers: list[str] | None = None) -> dict | 
     welcome_content = f"{welcome_ascii}\n"
     welcome_content += "[bold green]TradingAgents: Multi-Agents LLM Financial Trading Framework - CLI[/bold green]\n\n"
     welcome_content += "[bold]Workflow Steps:[/bold]\n"
-    welcome_content += "I. Analyst Team → II. Research Team → III. Trader → IV. Risk Management → V. Portfolio Management\n\n"
     welcome_content += (
-        "[dim]Built by [Tauric Research](https://github.com/TauricResearch)[/dim]"
+        "I. Analyst Team → II. Research Team → III. Trader → IV. Risk Management → V. Portfolio Management\n\n"
     )
+    welcome_content += "[dim]Built by [Tauric Research](https://github.com/TauricResearch)[/dim]"
 
     # Create and center the welcome box
     welcome_box = Panel(
@@ -568,12 +544,15 @@ def get_user_selections(preselected_tickers: list[str] | None = None) -> dict | 
                 console.print(f"  • {line}")
 
             import questionary
+
             confirmed = questionary.confirm(
                 "股票信息是否正确？",
                 default=True,
-                style=questionary.Style([
-                    ("question", "fg:green bold"),
-                ]),
+                style=questionary.Style(
+                    [
+                        ("question", "fg:green bold"),
+                    ]
+                ),
             ).ask()
             if confirmed:
                 break
@@ -585,9 +564,7 @@ def get_user_selections(preselected_tickers: list[str] | None = None) -> dict | 
     # Only announce when it's not the default stock path, to avoid printing
     # "stock" on every run.
     if asset_type.value != "stock":
-        console.print(
-            f"[green]Detected asset type:[/green] {asset_type.value}"
-        )
+        console.print(f"[green]Detected asset type:[/green] {asset_type.value}")
 
     # Step 2: Analysis date
     default_date = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -602,15 +579,14 @@ def get_user_selections(preselected_tickers: list[str] | None = None) -> dict | 
         asset_type,
         ticker=selected_ticker if isinstance(selected_ticker, str) else None,
     )
-    console.print(
-        f"[green]Selected analysts:[/green] {', '.join(analyst.value for analyst in selected_analysts)}"
-    )
+    console.print(f"[green]Selected analysts:[/green] {', '.join(analyst.value for analyst in selected_analysts)}")
 
     # Step 3.5: Data Readiness Check
     from tradingagents.agents.utils.data_readiness import (
         check_data_readiness,
         display_readiness_report,
     )
+
     console.print()
     ticker_for_check = selected_ticker if isinstance(selected_ticker, str) else selected_tickers[0]
     report = check_data_readiness(
@@ -619,19 +595,20 @@ def get_user_selections(preselected_tickers: list[str] | None = None) -> dict | 
         selected_analysts=[a.value for a in selected_analysts],
     )
     display_readiness_report(console, report)
-    if report.warning_count > 0 and not questionary.confirm(
-        "部分数据不可用，是否继续分析？",
-        default=True,
-    ).ask():
+    if (
+        report.warning_count > 0
+        and not questionary.confirm(
+            "部分数据不可用，是否继续分析？",
+            default=True,
+        ).ask()
+    ):
         console.print("[yellow]已取消分析[/yellow]")
         return None
 
     # Step 4: Output language (skipped when set via TRADINGAGENTS_OUTPUT_LANGUAGE)
     if os.environ.get("TRADINGAGENTS_OUTPUT_LANGUAGE"):
         output_language = DEFAULT_CONFIG["output_language"]
-        console.print(
-            f"[green]✓ Output language from environment:[/green] {output_language}"
-        )
+        console.print(f"[green]✓ Output language from environment:[/green] {output_language}")
     else:
         console.print("\n[bold cyan]Step 4: Output Language[/bold cyan]")
         console.print("[dim]Select the language for analyst reports and final decision[/dim]")
@@ -742,9 +719,7 @@ def get_user_selections(preselected_tickers: list[str] | None = None) -> dict | 
 def get_analysis_date():
     """Get the analysis date from user input."""
     while True:
-        date_str = typer.prompt(
-            "", default=datetime.datetime.now().strftime("%Y-%m-%d")
-        )
+        date_str = typer.prompt("", default=datetime.datetime.now().strftime("%Y-%m-%d"))
         try:
             # Validate date format and ensure it's not in the future
             analysis_date = datetime.datetime.strptime(date_str, "%Y-%m-%d")
@@ -753,9 +728,7 @@ def get_analysis_date():
                 continue
             return date_str
         except ValueError:
-            console.print(
-                "[red]Error: Invalid date format. Please use YYYY-MM-DD[/red]"
-            )
+            console.print("[red]Error: Invalid date format. Please use YYYY-MM-DD[/red]")
 
 
 def _parse_tickers_input(raw: str) -> list[str]:
@@ -794,11 +767,13 @@ def ask_mode() -> str:
             questionary.Choice("查询自选股票（支持单只或多只，逗号分隔）", "single"),
             questionary.Choice("批量扫描 Watchlist", "batch"),
         ],
-        style=questionary.Style([
-            ("selected", "fg:green noinherit"),
-            ("highlighted", "fg:green noinherit"),
-            ("pointer", "fg:green noinherit"),
-        ]),
+        style=questionary.Style(
+            [
+                ("selected", "fg:green noinherit"),
+                ("highlighted", "fg:green noinherit"),
+                ("pointer", "fg:green noinherit"),
+            ]
+        ),
     ).ask()
     if choice is None:
         console.print("[red]No mode selected. Exiting...[/red]")
@@ -822,11 +797,13 @@ def select_watchlist_interactive() -> tuple[str, list[str]]:
     choice = questionary.select(
         "Select watchlist:",
         choices=choices,
-        style=questionary.Style([
-            ("selected", "fg:yellow noinherit"),
-            ("highlighted", "fg:yellow noinherit"),
-            ("pointer", "fg:yellow noinherit"),
-        ]),
+        style=questionary.Style(
+            [
+                ("selected", "fg:yellow noinherit"),
+                ("highlighted", "fg:yellow noinherit"),
+                ("pointer", "fg:yellow noinherit"),
+            ]
+        ),
     ).ask()
 
     if choice is None:
@@ -835,11 +812,16 @@ def select_watchlist_interactive() -> tuple[str, list[str]]:
 
     name, tickers = choice
     if name == "__import__":
-        file_path = questionary.text(
-            "Enter watchlist file path:",
-            validate=lambda x: len(x.strip()) > 0 or "Please enter a valid path.",
-        ).ask().strip()
+        file_path = (
+            questionary.text(
+                "Enter watchlist file path:",
+                validate=lambda x: len(x.strip()) > 0 or "Please enter a valid path.",
+            )
+            .ask()
+            .strip()
+        )
         from cli.watchlists import parse_watchlist_content
+
         tickers = parse_watchlist_content(Path(file_path).read_text(encoding="utf-8"))
         name = Path(file_path).stem
     return name, tickers
@@ -862,11 +844,13 @@ def select_profile_interactive() -> dict:
         choice = questionary.select(
             "Select profile:",
             choices=choices,
-            style=questionary.Style([
-                ("selected", "fg:magenta noinherit"),
-                ("highlighted", "fg:magenta noinherit"),
-                ("pointer", "fg:magenta noinherit"),
-            ]),
+            style=questionary.Style(
+                [
+                    ("selected", "fg:magenta noinherit"),
+                    ("highlighted", "fg:magenta noinherit"),
+                    ("pointer", "fg:magenta noinherit"),
+                ]
+            ),
         ).ask()
         if choice is None:
             console.print("[red]No profile selected. Exiting...[/red]")
@@ -977,11 +961,7 @@ def _translate_chunk(llm, chunk: str, is_first: bool = False, context: str = "")
         # Provide the tail of the previous chunk so the model can keep
         # heading styles and terminology consistent across boundaries.
         ctx = f"前文末尾：\n{context}\n\n" if context else ""
-        prompt = (
-            f"{ctx}"
-            "继续翻译以下报告内容（与前文衔接，保持格式、术语和语气一致）：\n\n"
-            f"{chunk}"
-        )
+        prompt = f"{ctx}继续翻译以下报告内容（与前文衔接，保持格式、术语和语气一致）：\n\n{chunk}"
     messages = [HumanMessage(content=prompt)]
     response = llm.invoke(messages)
     return str(response.content)
@@ -1024,18 +1004,14 @@ def run_translation_pipeline(save_path: Path, config: dict) -> None:
     base_url = config.get("backend_url")
 
     if not model:
-        console.print(
-            "[yellow]Warning: No LLM model configured for translation, skipping.[/yellow]"
-        )
+        console.print("[yellow]Warning: No LLM model configured for translation, skipping.[/yellow]")
         return
 
     try:
         client = create_llm_client(provider, model, base_url)
         llm = client.get_llm()
     except Exception as e:
-        console.print(
-            f"[yellow]Warning: Failed to initialize translation LLM: {e}[/yellow]"
-        )
+        console.print(f"[yellow]Warning: Failed to initialize translation LLM: {e}[/yellow]")
         return
 
     complete_report = save_path / "complete_report.md"
@@ -1052,9 +1028,7 @@ def run_translation_pipeline(save_path: Path, config: dict) -> None:
         output_path.write_text(translated, encoding="utf-8")
         console.print(f"  [green]✓[/green] [dim]{output_path.name}{chunk_info}[/dim]")
     except Exception as e:
-        console.print(
-            f"[yellow]Warning: Failed to translate complete report: {e}[/yellow]"
-        )
+        console.print(f"[yellow]Warning: Failed to translate complete report: {e}[/yellow]")
 
 
 def display_complete_report(final_state):
@@ -1097,7 +1071,9 @@ def display_complete_report(final_state):
     # III. Trading Team
     if final_state.get("trader_investment_plan"):
         console.print(Panel("[bold]III. Trading Team Plan[/bold]", border_style="yellow"))
-        console.print(Panel(Markdown(final_state["trader_investment_plan"]), title="Trader", border_style="blue", padding=(1, 2)))
+        console.print(
+            Panel(Markdown(final_state["trader_investment_plan"]), title="Trader", border_style="blue", padding=(1, 2))
+        )
 
     # IV. Risk Management Team
     if final_state.get("risk_debate_state"):
@@ -1117,7 +1093,9 @@ def display_complete_report(final_state):
         # V. Portfolio Manager Decision
         if risk.get("judge_decision"):
             console.print(Panel("[bold]V. Portfolio Manager Decision[/bold]", border_style="green"))
-            console.print(Panel(Markdown(risk["judge_decision"]), title="Portfolio Manager", border_style="blue", padding=(1, 2)))
+            console.print(
+                Panel(Markdown(risk["judge_decision"]), title="Portfolio Manager", border_style="blue", padding=(1, 2))
+            )
 
 
 def _resolve_holdings(
@@ -1139,8 +1117,7 @@ def _resolve_holdings(
         sheet_id = holdings_sheet or DEFAULT_CONFIG.get("portfolio", {}).get("sheet_id")
         if not sheet_id:
             console.print(
-                "[red]No sheet ID configured. Use --holdings-sheet or set "
-                "portfolio.sheet_id in config.[/red]"
+                "[red]No sheet ID configured. Use --holdings-sheet or set portfolio.sheet_id in config.[/red]"
             )
             return None
 
@@ -1150,8 +1127,7 @@ def _resolve_holdings(
             portfolio = sync_service.sync()
             repo.save(portfolio)
             console.print(
-                f"[green]✓ Synced {len(portfolio.holdings)} holdings to local cache[/green] "
-                f"([dim]{repo.path}[/dim])"
+                f"[green]✓ Synced {len(portfolio.holdings)} holdings to local cache[/green] ([dim]{repo.path}[/dim])"
             )
         except Exception as exc:
             console.print(f"[yellow]⚠ Sync failed: {exc}[/yellow]")
@@ -1263,7 +1239,7 @@ def extract_content_string(content):
 
     def is_empty(val):
         """Check if value is empty using Python's truthiness."""
-        if val is None or val == '':
+        if val is None or val == "":
             return True
         if isinstance(val, str):
             s = val.strip()
@@ -1282,16 +1258,17 @@ def extract_content_string(content):
         return content.strip()
 
     if isinstance(content, dict):
-        text = content.get('text', '')
+        text = content.get("text", "")
         return text.strip() if not is_empty(text) else None
 
     if isinstance(content, list):
         text_parts = [
-            item.get('text', '').strip() if isinstance(item, dict) and item.get('type') == 'text'
-            else (item.strip() if isinstance(item, str) else '')
+            item.get("text", "").strip()
+            if isinstance(item, dict) and item.get("type") == "text"
+            else (item.strip() if isinstance(item, str) else "")
             for item in content
         ]
-        result = ' '.join(t for t in text_parts if t and not is_empty(t))
+        result = " ".join(t for t in text_parts if t and not is_empty(t))
         return result if result else None
 
     return str(content).strip() if not is_empty(content) else None
@@ -1306,7 +1283,7 @@ def classify_message_type(message) -> tuple[str, str | None]:
     """
     from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-    content = extract_content_string(getattr(message, 'content', None))
+    content = extract_content_string(getattr(message, "content", None))
 
     if isinstance(message, HumanMessage):
         if content and content.strip() == "Continue":
@@ -1327,7 +1304,7 @@ def format_tool_args(args, max_length=80) -> str:
     """Format tool arguments for terminal display."""
     result = str(args)
     if len(result) > max_length:
-        return result[:max_length - 3] + "..."
+        return result[: max_length - 3] + "..."
     return result
 
 
@@ -1388,6 +1365,7 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
         report_date = BatchRunner._parse_report_analysis_date(existing_report)
         if report_date == selections["analysis_date"]:
             import questionary
+
             choice = questionary.select(
                 f"检测到 {selections['ticker']} 在 {selections['analysis_date']} 已有完整分析报告，请选择：",
                 choices=[
@@ -1415,6 +1393,7 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
                 report_date = BatchRunner._parse_report_analysis_date(last_report)
                 if report_date == last_date and last_report.stat().st_mtime >= last_close.timestamp():
                     import questionary
+
                     choice = questionary.select(
                         f"检测到 {selections['ticker']} 在 {last_date} 收盘后已有分析报告，请选择：",
                         choices=[
@@ -1431,6 +1410,7 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
 
     def save_message_decorator(obj, func_name):
         func = getattr(obj, func_name)
+
         @wraps(func)
         def wrapper(*args, **kwargs):
             func(*args, **kwargs)
@@ -1438,10 +1418,12 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
             content = content.replace("\n", " ")
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"{timestamp} [{message_type}] {content}\n")
+
         return wrapper
 
     def save_tool_call_decorator(obj, func_name):
         func = getattr(obj, func_name)
+
         @wraps(func)
         def wrapper(*args, **kwargs):
             func(*args, **kwargs)
@@ -1449,10 +1431,12 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
             args_str = ", ".join(f"{k}={v}" for k, v in args.items())
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"{timestamp} [Tool Call] {tool_name}({args_str})\n")
+
         return wrapper
 
     def save_report_section_decorator(obj, func_name):
         func = getattr(obj, func_name)
+
         @wraps(func)
         def wrapper(section_name, content):
             func(section_name, content)
@@ -1463,6 +1447,7 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
                     text = "\n".join(str(item) for item in content) if isinstance(content, list) else content
                     with open(report_dir / file_name, "w", encoding="utf-8") as f:
                         f.write(text)
+
         return wrapper
 
     message_buffer.add_message = save_message_decorator(message_buffer, "add_message")
@@ -1480,9 +1465,7 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
         message_buffer.add_message("System", f"Selected ticker: {selections['ticker']}")
         if selections["asset_type"] != "stock":
             message_buffer.add_message("System", f"Detected asset type: {selections['asset_type']}")
-        message_buffer.add_message(
-            "System", f"Analysis date: {selections['analysis_date']}"
-        )
+        message_buffer.add_message("System", f"Analysis date: {selections['analysis_date']}")
         message_buffer.add_message(
             "System",
             f"Selected analysts: {', '.join(analyst.value for analyst in selections['analysts'])}",
@@ -1496,9 +1479,7 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
         # Create spinner text
-        spinner_text = (
-            f"Analyzing {selections['ticker']} on {selections['analysis_date']}..."
-        )
+        spinner_text = f"Analyzing {selections['ticker']} on {selections['analysis_date']}..."
         update_display(layout, spinner_text, stats_handler=stats_handler, start_time=start_time)
 
         # Initialize state and get graph args with callbacks.
@@ -1523,13 +1504,12 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
         # Inject transaction history if available
         try:
             from tradingagents.portfolio import PortfolioRepository
+
             repo = PortfolioRepository()
             if repo.exists():
                 portfolio = repo.load()
                 if portfolio.transactions:
-                    init_agent_state["transactions_context"] = [
-                        t.to_dict() for t in portfolio.transactions
-                    ]
+                    init_agent_state["transactions_context"] = [t.to_dict() for t in portfolio.transactions]
         except Exception:
             pass
         # Pass callbacks to graph config for tool execution tracking
@@ -1593,9 +1573,7 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
 
                 # Trading Team
                 if chunk.get("trader_investment_plan"):
-                    message_buffer.update_report_section(
-                        "trader_investment_plan", chunk["trader_investment_plan"]
-                    )
+                    message_buffer.update_report_section("trader_investment_plan", chunk["trader_investment_plan"])
                     if message_buffer.agent_status.get("Trader") != "completed":
                         message_buffer.update_agent_status("Trader", "completed")
                         message_buffer.update_agent_status("Aggressive Analyst", "in_progress")
@@ -1643,6 +1621,7 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
 
         except Exception as exc:
             from openai import APIConnectionError, APITimeoutError, RateLimitError
+
             if isinstance(exc, RateLimitError):
                 friendly = "⚠️ API 限流：当前请求过于频繁，请稍后重试。"
             elif isinstance(exc, APITimeoutError):
@@ -1665,9 +1644,7 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
         for agent in message_buffer.agent_status:
             message_buffer.update_agent_status(agent, "completed")
 
-        message_buffer.add_message(
-            "System", f"Completed analysis for {selections['analysis_date']}"
-        )
+        message_buffer.add_message("System", f"Completed analysis for {selections['analysis_date']}")
         message_buffer.add_message("System", analyst_wall_time_tracker.format_summary())
 
         # Update final report sections
@@ -1692,7 +1669,17 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
         display_complete_report(final_state)
 
 
-def run_batch_analysis(tickers: list[str], profile_config: dict, checkpoint: bool = False, output_dir: Path | None = None, watchlist_name: str | None = None, holdings: dict | None = None, workers: int = 1, headless: bool = False, force: bool = False):
+def run_batch_analysis(
+    tickers: list[str],
+    profile_config: dict,
+    checkpoint: bool = False,
+    output_dir: Path | None = None,
+    watchlist_name: str | None = None,
+    holdings: dict | None = None,
+    workers: int = 1,
+    headless: bool = False,
+    force: bool = False,
+):
     """Run unattended batch analysis for multiple tickers.
 
     When *headless* is True, all interactive prompts are skipped so the
@@ -1723,12 +1710,15 @@ def run_batch_analysis(tickers: list[str], profile_config: dict, checkpoint: boo
     # Generate summary
     summary_path = runner.generate_summary()
     console.print("\n[bold cyan]Batch Complete![/bold cyan]\n")
-    console.print(f"Total: {len(tickers)}  |  Success: {len(runner.completed_tickers) - len(runner.failures)}  |  Failed: {len(runner.failures)}")
+    console.print(
+        f"Total: {len(tickers)}  |  Success: {len(runner.completed_tickers) - len(runner.failures)}  |  Failed: {len(runner.failures)}"
+    )
     console.print(f"[green]Reports:[/green] {output_dir.resolve()}")
     console.print(f"[green]Summary:[/green] {summary_path.name}")
 
     # Print summary table
     from rich.table import Table
+
     table = Table(show_header=True, header_style="bold magenta")
     table.add_column("Ticker", style="cyan")
     table.add_column("Company", style="green")
@@ -1763,12 +1753,14 @@ def run_batch_analysis(tickers: list[str], profile_config: dict, checkpoint: boo
         report_path = output_dir / ticker_dir_name / "complete_report.md"
         if report_path.exists() and report_path.stat().st_size > 0:
             import questionary
+
             show_report = questionary.confirm(
                 f"查看 {ticker} 完整分析报告？",
                 default=True,
             ).ask()
             if show_report:
                 from rich.markdown import Markdown
+
                 report_content = report_path.read_text(encoding="utf-8")
                 console.print()
                 console.print(Rule("Complete Analysis Report", style="bold green"))
@@ -1839,11 +1831,12 @@ def analyze(
         1,
         "--workers",
         "-w",
-        help="Number of concurrent workers for batch analysis (default: 1). Values > 1 disable the live dashboard.",
+        help="Number of concurrent workers for batch analysis (default: 1). Values > 1 degrade the dashboard to a batch summary view.",
     ),
 ):
     if clear_checkpoints:
         from tradingagents.graph.checkpointer import clear_all_checkpoints
+
         n = clear_all_checkpoints(DEFAULT_CONFIG["data_cache_dir"])
         console.print(f"[yellow]Cleared {n} checkpoint(s).[/yellow]")
 
@@ -1857,6 +1850,7 @@ def analyze(
     # Headless batch mode via JSON config file (--config)
     if config:
         import json as _json
+
         config_path = Path(config)
         if not config_path.exists():
             console.print(f"[red]Config file not found: {config}[/red]")
@@ -1874,9 +1868,7 @@ def analyze(
 
         # Merge config file settings with defaults
         profile_config = DEFAULT_CONFIG.copy()
-        profile_config.update({
-            k: v for k, v in cfg.get("config", {}).items() if v is not None
-        })
+        profile_config.update({k: v for k, v in cfg.get("config", {}).items() if v is not None})
 
         run_batch_analysis(
             ticker_list,
@@ -1912,6 +1904,7 @@ def analyze(
             except Exception:
                 # Try as file path
                 from cli.watchlists import parse_watchlist_content
+
                 ticker_list = parse_watchlist_content(Path(watchlist).read_text(encoding="utf-8"))
         else:
             console.print("[red]Batch mode requires --tickers or --watchlist.[/red]")
@@ -1971,15 +1964,32 @@ def analyze(
                 run_analysis(checkpoint=checkpoint, selections=selections, holdings=holdings)
             else:
                 # User selected an existing profile — use batch flow with a single ticker
-                run_batch_analysis([ticker_list[0]], profile_config, checkpoint=checkpoint, output_dir=Path(output_dir) if output_dir else None, watchlist_name=watchlist_name, holdings=holdings, workers=workers)
+                run_batch_analysis(
+                    [ticker_list[0]],
+                    profile_config,
+                    checkpoint=checkpoint,
+                    output_dir=Path(output_dir) if output_dir else None,
+                    watchlist_name=watchlist_name,
+                    holdings=holdings,
+                    workers=workers,
+                )
         else:
             # Ask for worker count in interactive mode (CLI --workers defaults to 1)
             if workers <= 1:
                 workers = ask_workers()
-            run_batch_analysis(ticker_list, profile_config, checkpoint=checkpoint, output_dir=Path(output_dir) if output_dir else None, watchlist_name=watchlist_name, holdings=holdings, workers=workers)
+            run_batch_analysis(
+                ticker_list,
+                profile_config,
+                checkpoint=checkpoint,
+                output_dir=Path(output_dir) if output_dir else None,
+                watchlist_name=watchlist_name,
+                holdings=holdings,
+                workers=workers,
+            )
     else:
         # Single / custom mode
         import questionary
+
         use_profile = questionary.confirm(
             "使用保存的配置快速开始？（跳过 LLM/分析师等配置）",
             default=True,
@@ -1988,6 +1998,7 @@ def analyze(
             profile_config = select_profile_interactive()
             if profile_config:
                 from tradingagents.ticker_resolver import resolve_ticker
+
                 console.print("\n[bold cyan]Step 1: Ticker Symbol[/bold cyan]")
                 console.print("[dim]Enter ticker symbol(s) to analyze[/dim]")
                 raw_tickers = get_ticker()
@@ -2004,9 +2015,23 @@ def analyze(
                 if len(tickers) > 1:
                     if workers <= 1:
                         workers = ask_workers()
-                    run_batch_analysis(tickers, profile_config, checkpoint=checkpoint, output_dir=Path(output_dir) if output_dir else None, holdings=holdings, workers=workers)
+                    run_batch_analysis(
+                        tickers,
+                        profile_config,
+                        checkpoint=checkpoint,
+                        output_dir=Path(output_dir) if output_dir else None,
+                        holdings=holdings,
+                        workers=workers,
+                    )
                 else:
-                    run_batch_analysis(tickers, profile_config, checkpoint=checkpoint, output_dir=Path(output_dir) if output_dir else None, holdings=holdings, workers=workers)
+                    run_batch_analysis(
+                        tickers,
+                        profile_config,
+                        checkpoint=checkpoint,
+                        output_dir=Path(output_dir) if output_dir else None,
+                        holdings=holdings,
+                        workers=workers,
+                    )
                 return
         # Fall back to full interactive flow
         selections = get_user_selections()
@@ -2030,7 +2055,14 @@ def analyze(
             # Ask for worker count in interactive mode (CLI --workers defaults to 1)
             if workers <= 1:
                 workers = ask_workers()
-            run_batch_analysis(tickers, profile_config, checkpoint=checkpoint, output_dir=Path(output_dir) if output_dir else None, holdings=holdings, workers=workers)
+            run_batch_analysis(
+                tickers,
+                profile_config,
+                checkpoint=checkpoint,
+                output_dir=Path(output_dir) if output_dir else None,
+                holdings=holdings,
+                workers=workers,
+            )
         else:
             run_analysis(checkpoint=checkpoint, selections=selections, holdings=holdings)
 
@@ -2045,16 +2077,19 @@ def _prompt_sync_holdings_interactive() -> dict | None:
         return None
 
     import questionary
+
     do_sync = questionary.confirm(
         "是否同步自选股数据（持仓 & 交易记录）？",
         default=False,
-        style=questionary.Style([
-            ("qmark", "fg:cyan bold"),
-            ("question", "fg:yellow bold"),
-            ("answer", "fg:green"),
-            ("pointer", "fg:cyan"),
-            ("highlighted", "fg:cyan"),
-        ]),
+        style=questionary.Style(
+            [
+                ("qmark", "fg:cyan bold"),
+                ("question", "fg:yellow bold"),
+                ("answer", "fg:green"),
+                ("pointer", "fg:cyan"),
+                ("highlighted", "fg:cyan"),
+            ]
+        ),
     ).ask()
     if do_sync is None:
         return None
@@ -2068,6 +2103,7 @@ def _prompt_sync_holdings_interactive() -> dict | None:
             return None
 
     from tradingagents.portfolio import PortfolioRepository
+
     repo = PortfolioRepository()
     if repo.exists():
         try:
@@ -2096,10 +2132,7 @@ def _do_sync_holdings(sheet_id: str | None, worksheet: str):
 
     _sheet_id = sheet_id or DEFAULT_CONFIG.get("portfolio", {}).get("sheet_id")
     if not _sheet_id:
-        console.print(
-            "[red]No sheet ID configured. Use --sheet-id or set "
-            "PORTFOLIO_SHEET_ID in .env[/red]"
-        )
+        console.print("[red]No sheet ID configured. Use --sheet-id or set PORTFOLIO_SHEET_ID in .env[/red]")
         raise typer.Exit(1)
 
     _worksheet = worksheet or DEFAULT_CONFIG.get("portfolio", {}).get("worksheet", "total")
@@ -2117,6 +2150,7 @@ def _do_sync_holdings(sheet_id: str | None, worksheet: str):
 
         # Show summary table
         from rich.table import Table
+
         table = Table(show_header=True, header_style="bold magenta")
         table.add_column("Ticker", style="cyan")
         table.add_column("Name", style="green")
@@ -2197,14 +2231,11 @@ def _do_sync_transactions(sheet_id: str | None, worksheet: str):
     _sheet_id = sheet_id or DEFAULT_CONFIG.get("portfolio", {}).get("transaction_sheet_id")
     if not _sheet_id:
         console.print(
-            "[red]No transaction sheet ID configured. Use --sheet-id or set "
-            "TRANSACTION_SHEET_ID in .env[/red]"
+            "[red]No transaction sheet ID configured. Use --sheet-id or set TRANSACTION_SHEET_ID in .env[/red]"
         )
         raise typer.Exit(1)
 
-    _worksheet = worksheet or DEFAULT_CONFIG.get("portfolio", {}).get(
-        "transaction_worksheet", "stock transitions"
-    )
+    _worksheet = worksheet or DEFAULT_CONFIG.get("portfolio", {}).get("transaction_worksheet", "stock transitions")
 
     try:
         sync_service = TransactionSyncService(sheet_id=_sheet_id, worksheet=_worksheet)
@@ -2270,9 +2301,7 @@ def show_holdings_command(
 
     repo = PortfolioRepository()
     if not repo.exists():
-        console.print(
-            "[yellow]No local holdings found. Run 'uv run tradingagents sync-holdings' first.[/yellow]"
-        )
+        console.print("[yellow]No local holdings found. Run 'uv run tradingagents sync-holdings' first.[/yellow]")
         raise typer.Exit(1)
 
     try:
@@ -2282,6 +2311,7 @@ def show_holdings_command(
 
         from rich.table import Table
         from rich.text import Text
+
         table = Table(show_header=True, header_style="bold magenta")
         table.add_column("Ticker", style="cyan")
         table.add_column("Name", style="green")
@@ -2314,6 +2344,7 @@ def show_holdings_command(
 
         if history and portfolio.transactions:
             console.print("\n[bold]近期交易记录[/bold] (各标的最近 10 笔)")
+
             # Normalise ticker for cross-source matching (holdings may have
             # .SS/.SZ/.BJ suffix while transaction sheet stores bare codes).
             def _normalise_tx_ticker(tx_ticker: str) -> str:
@@ -2321,10 +2352,7 @@ def show_holdings_command(
 
             for ticker, h in sorted(portfolio.holdings.items()):
                 ticker_base = _normalise_tx_ticker(ticker)
-                txs = [
-                    t for t in portfolio.transactions
-                    if _normalise_tx_ticker(t.ticker) == ticker_base
-                ]
+                txs = [t for t in portfolio.transactions if _normalise_tx_ticker(t.ticker) == ticker_base]
                 if not txs:
                     continue
                 txs_sorted = sorted(txs, key=lambda t: t.date, reverse=True)
@@ -2336,8 +2364,7 @@ def show_holdings_command(
                     fee_str = f" 手续费 {t.fee:.2f}" if t.fee else ""
                     tag_str = f" [{t.tag}]" if t.tag else ""
                     console.print(
-                        f"  [dim]{t.date}[/dim] {t.action} {abs(t.shares):,.0f} 股 "
-                        f"@ {t.price:.3f}{fee_str}{tag_str}"
+                        f"  [dim]{t.date}[/dim] {t.action} {abs(t.shares):,.0f} 股 @ {t.price:.3f}{fee_str}{tag_str}"
                     )
                 if omitted:
                     console.print(omitted)

@@ -225,8 +225,10 @@ def load_ohlcv(symbol: str, curr_date: str, lookback_years: int = 5) -> pd.DataF
     filtered out so backtests never see future prices.
 
     For A-share tickers (``.SS`` / ``.SZ`` / ``.BJ``) with ``is_a_share_ticker``,
-    falls back to akshare (Eastmoney) when yfinance fails — yfinance rate-limits
-    aggressively on batch runs and its A-share coverage is unreliable.
+    tries local smartmoney DB first, then akshare (Eastmoney), then yfinance as
+    last resort — yfinance rate-limits aggressively on batch runs and its A-share
+    coverage is unreliable. Set ``DISABLE_YFINANCE_FALLBACK=1`` to skip yfinance
+    entirely for A-share tickers.
     """
     from tradingagents.dataflows.akshare_common import is_a_share_ticker
 
@@ -262,37 +264,69 @@ def load_ohlcv(symbol: str, curr_date: str, lookback_years: int = 5) -> pd.DataF
 
     if data is None:
         downloaded = None
-        try:
-            downloaded = yf_retry(
-                lambda: yf.download(
-                    canonical,
-                    start=start_str,
-                    end=end_str,
-                    multi_level_index=False,
-                    progress=False,
-                    auto_adjust=True,
-                )
-            )
-            downloaded = _ensure_date_column(downloaded.reset_index())
-            if downloaded.empty or "Close" not in downloaded.columns:
-                downloaded = None
-        except Exception:
-            logger.warning(
-                "yfinance failed for %s, trying akshare fallback",
-                symbol,
-                exc_info=True,
-            )
-            downloaded = None
+        is_a_share = is_a_share_ticker(canonical)
 
-        # For A-share: local DB → akshare network, in that order
-        if downloaded is None and is_a_share_ticker(canonical):
+        if is_a_share:
+            # A-share: local smartmoney DB → akshare → yfinance (last resort)
             downloaded = _load_ohlcv_from_smartmoney_db(canonical, start_str, end_str)
             if downloaded is None:
-                logger.info("Falling back to akshare for A-share ticker %s", symbol)
+                logger.info(
+                    "smartmoney_db returned no data for A-share %s, trying akshare",
+                    symbol,
+                )
                 downloaded = _load_ohlcv_from_akshare(canonical, start_str, end_str)
+            if downloaded is None and os.getenv("DISABLE_YFINANCE_FALLBACK") != "1":
+                logger.info(
+                    "akshare returned no data for A-share %s, falling back to yfinance",
+                    symbol,
+                )
+                try:
+                    downloaded = yf_retry(
+                        lambda: yf.download(
+                            canonical,
+                            start=start_str,
+                            end=end_str,
+                            multi_level_index=False,
+                            progress=False,
+                            auto_adjust=True,
+                        )
+                    )
+                    downloaded = _ensure_date_column(downloaded.reset_index())
+                    if downloaded.empty or "Close" not in downloaded.columns:
+                        downloaded = None
+                except Exception:
+                    logger.warning(
+                        "yfinance fallback failed for A-share %s",
+                        symbol,
+                        exc_info=True,
+                    )
+                    downloaded = None
+        else:
+            # Non-A-share: yfinance first (existing behavior)
+            try:
+                downloaded = yf_retry(
+                    lambda: yf.download(
+                        canonical,
+                        start=start_str,
+                        end=end_str,
+                        multi_level_index=False,
+                        progress=False,
+                        auto_adjust=True,
+                    )
+                )
+                downloaded = _ensure_date_column(downloaded.reset_index())
+                if downloaded.empty or "Close" not in downloaded.columns:
+                    downloaded = None
+            except Exception:
+                logger.warning(
+                    "yfinance failed for %s",
+                    symbol,
+                    exc_info=True,
+                )
+                downloaded = None
 
         if downloaded is None or downloaded.empty or "Close" not in downloaded.columns:
-            raise NoMarketDataError(symbol, canonical, "Yahoo Finance returned no rows")
+            raise NoMarketDataError(symbol, canonical, "No data returned from any vendor")
         downloaded.to_csv(data_file, index=False, encoding="utf-8")
         data = downloaded
 

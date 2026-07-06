@@ -91,6 +91,32 @@ class TestRouteToVendor:
         assert result == "YFINANCE_RESULT"
         fake_yf.assert_called_once_with("600519.SS", "rsi", "2026-05-14", 30)
 
+    def test_disable_yfinance_fallback_skips_yfinance_for_ashare(self):
+        """With DISABLE_YFINANCE_FALLBACK=1, A-share ticker skips yfinance entirely."""
+        from tradingagents.dataflows import interface
+        import os
+
+        fake_sm = MagicMock(
+            side_effect=NoMarketDataError("000001.SZ", "000001.SZ", "Not in local DB")
+        )
+        fake_ak = MagicMock(
+            side_effect=NoMarketDataError("000001.SZ", "000001.SZ", "No akshare data")
+        )
+        fake_yf = MagicMock(return_value="YFINANCE_RESULT")
+        with patch.dict(
+            interface.VENDOR_METHODS["get_fundamentals"],
+            {"smartmoney_db": fake_sm, "akshare": fake_ak, "yfinance": fake_yf},
+            clear=False,
+        ), patch.dict(os.environ, {"DISABLE_YFINANCE_FALLBACK": "1"}):
+            result = interface.route_to_vendor(
+                "get_fundamentals", "000001.SZ", "2026-05-14"
+            )
+        assert "NO_DATA_AVAILABLE" in result
+        assert "000001.SZ" in result
+        fake_sm.assert_called_once_with("000001.SZ", "2026-05-14")
+        fake_ak.assert_called_once_with("000001.SZ", "2026-05-14")
+        fake_yf.assert_not_called()
+
     def test_all_vendors_fail_raises_first_error(self):
         """When every vendor raises, route_to_vendor should raise the first error."""
         from tradingagents.dataflows import interface

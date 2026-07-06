@@ -1,4 +1,5 @@
 import logging
+import os
 
 # Import from vendor-specific modules
 from .akshare_common import is_a_share_ticker
@@ -346,6 +347,10 @@ def route_to_vendor(method: str, *args, **kwargs):
             ]
         else:
             primary_vendors = ["akshare"] + [v for v in primary_vendors if v != "akshare"]
+
+        # DISABLE_YFINANCE_FALLBACK env var: strip yfinance from A-share chain
+        if os.getenv("DISABLE_YFINANCE_FALLBACK") == "1":
+            primary_vendors = [v for v in primary_vendors if v != "yfinance"]
 
     all_available_vendors = list(VENDOR_METHODS[method].keys())
 

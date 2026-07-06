@@ -355,6 +355,8 @@ def render_header(
     batch_total: int = 0,
     batch_failed: int = 0,
     profile_name: str | None = None,
+    batch_mode: bool = False,
+    running_tickers: set[str] | None = None,
 ) -> None:
     parts = []
     if profile_name:
@@ -374,16 +376,55 @@ def render_header(
             color = "green" if r_ready == readiness_total else "yellow"
             progress_str += f" | 预检: [{color}]{r_ready}/{readiness_total}[/{color}]"
         parts.append(progress_str)
-        parts.append(f"Current: [cyan]{ticker}[/cyan]")
+
+        if batch_mode:
+            # Batch summary mode: show running tickers instead of a single current ticker
+            if running_tickers:
+                running_str = ", ".join(sorted(running_tickers)[:10])
+                if len(running_tickers) > 10:
+                    running_str += f" +{len(running_tickers) - 10} more"
+                parts.append(f"Running: [cyan]{running_str}[/cyan]")
+            parts.append("Stage: [yellow]Batch Processing[/yellow]")
+        else:
+            parts.append(f"Current: [cyan]{ticker}[/cyan]")
+            parts.append(f"Stage: [yellow]{dashboard.current_stage}[/yellow]")
+            parts.append(_stage_bar(dashboard.overall_progress))
     else:
         parts.append(f"[bold]Ticker:[/bold] [cyan]{ticker}[/cyan]")
-
-    parts.append(f"Stage: [yellow]{dashboard.current_stage}[/yellow]")
-    parts.append(_stage_bar(dashboard.overall_progress))
+        parts.append(f"Stage: [yellow]{dashboard.current_stage}[/yellow]")
+        parts.append(_stage_bar(dashboard.overall_progress))
 
     header_text = "  |  ".join(parts)
     layout["header"].update(
         Panel(header_text, border_style="green", padding=(1, 2), expand=True)
+    )
+
+
+def render_batch_progress_panel(layout: Layout, dashboard: AnalysisDashboard) -> None:
+    """Render simplified progress panel for batch summary mode."""
+    completed = getattr(dashboard, "completed", 0)
+    failed = getattr(dashboard, "failed", 0)
+    total = getattr(dashboard, "total", 0)
+    skipped = getattr(dashboard, "skipped", 0)
+    pct = (completed / total * 100) if total > 0 else 0
+
+    table = Table(show_header=False, box=None, padding=(0, 2), expand=True)
+    table.add_column("Progress", justify="center")
+    bar_len = 40
+    filled = int(bar_len * completed / total) if total > 0 else 0
+    bar = "━" * filled + "─" * (bar_len - filled)
+    progress_line = f"[green]{bar}[/green] {pct:.0f}%"
+    summary_parts = [
+        f"Completed: [green]{completed}[/green]",
+        f"Failed: [red]{failed}[/red]",
+        f"Skipped: [cyan]{skipped}[/cyan]",
+        f"Total: {total}",
+    ]
+    if failed > 0:
+        summary_parts[1] = f"Failed: [bold red]{failed}[/bold red]"
+    table.add_row(f"{progress_line}    {' | '.join(summary_parts)}")
+    layout["progress"].update(
+        Panel(table, title="Batch Progress  (concurrent mode)", border_style="cyan", padding=(1, 2))
     )
 
 
@@ -448,7 +489,7 @@ def render_progress_panel(layout: Layout, dashboard: AnalysisDashboard) -> None:
     )
 
 
-def render_messages_panel(layout: Layout, dashboard: AnalysisDashboard) -> None:
+def render_messages_panel(layout: Layout, dashboard: AnalysisDashboard, batch_mode: bool = False) -> None:
     table = Table(
         show_header=True,
         header_style="bold magenta",
@@ -462,48 +503,54 @@ def render_messages_panel(layout: Layout, dashboard: AnalysisDashboard) -> None:
     table.add_column("Content", style="white", no_wrap=False, ratio=1)
 
     all_items = []
-    for ts, tool_name, args in dashboard.tool_calls:
-        args_str = str(args)
-        if len(args_str) > 80:
-            args_str = args_str[:77] + "..."
-        all_items.append((ts, "Tool", f"{tool_name}: {args_str}"))
-    for ts, msg_type, content in dashboard.messages:
-        content_str = str(content)[:200] if content else ""
-        all_items.append((ts, msg_type, content_str))
+
+    if batch_mode:
+        # In batch mode: show only System / Data messages, skip tool calls
+        for ts, msg_type, content in dashboard.messages:
+            if msg_type in ("System", "Copy"):
+                content_str = str(content)[:200] if content else ""
+                all_items.append((ts, msg_type, content_str))
+    else:
+        for ts, tool_name, args in dashboard.tool_calls:
+            args_str = str(args)
+            if len(args_str) > 80:
+                args_str = args_str[:77] + "..."
+            all_items.append((ts, "Tool", f"{tool_name}: {args_str}"))
+        for ts, msg_type, content in dashboard.messages:
+            content_str = str(content)[:200] if content else ""
+            all_items.append((ts, msg_type, content_str))
 
     all_items.sort(key=lambda x: x[0], reverse=True)
 
-    # Current Focus: messages from current_agent + latest tool call
-    focus_items = []
-    if dashboard.current_agent:
-        for ts, msg_type, content in dashboard.messages:
-            # Heuristic: show messages that appear while current_agent is active
-            if msg_type in ("Agent", "Data"):
-                focus_items.append((ts, msg_type, content[:150]))
-                if len(focus_items) >= 3:
-                    break
-    if dashboard.tool_calls:
-        ts, tool_name, args = dashboard.tool_calls[-1]
-        args_str = str(args)
-        if len(args_str) > 60:
-            args_str = args_str[:57] + "..."
-        focus_items.append((ts, "Tool", f"{tool_name}: {args_str}"))
+    if not batch_mode:
+        # Current Focus: messages from current_agent + latest tool call
+        focus_items = []
+        if dashboard.current_agent:
+            for ts, msg_type, content in dashboard.messages:
+                if msg_type in ("Agent", "Data"):
+                    focus_items.append((ts, msg_type, content[:150]))
+                    if len(focus_items) >= 3:
+                        break
+        if dashboard.tool_calls:
+            ts, tool_name, args = dashboard.tool_calls[-1]
+            args_str = str(args)
+            if len(args_str) > 60:
+                args_str = args_str[:57] + "..."
+            focus_items.append((ts, "Tool", f"{tool_name}: {args_str}"))
 
-    # Display: focus first, then general messages
-    shown = set()
-    for ts, msg_type, content in focus_items:
-        key = (ts, msg_type, content)
-        if key not in shown:
-            table.add_row(ts, f"[bold]{msg_type}[/bold]", Text(content, overflow="fold"))
-            shown.add(key)
+        # Display: focus first, then general messages
+        shown = set()
+        for ts, msg_type, content in focus_items:
+            key = (ts, msg_type, content)
+            if key not in shown:
+                table.add_row(ts, f"[bold]{msg_type}[/bold]", Text(content, overflow="fold"))
+                shown.add(key)
 
-    # Separator
-    if focus_items and all_items:
-        table.add_row("─" * 8, "─" * 10, "─" * 40, style="dim")
+        if focus_items and all_items:
+            table.add_row("─" * 8, "─" * 10, "─" * 40, style="dim")
 
     for ts, msg_type, content in all_items[:10]:
-        key = (ts, msg_type, content)
-        if key in shown:
+        if not batch_mode and (ts, msg_type, content) in shown:
             continue
         table.add_row(ts, msg_type, Text(content, overflow="fold"))
 
@@ -512,8 +559,24 @@ def render_messages_panel(layout: Layout, dashboard: AnalysisDashboard) -> None:
     )
 
 
-def render_analysis_panel(layout: Layout, dashboard: AnalysisDashboard) -> None:
-    if dashboard.final_report:
+def render_analysis_panel(layout: Layout, dashboard: AnalysisDashboard, batch_mode: bool = False) -> None:
+    if batch_mode:
+        completed = getattr(dashboard, "completed", 0)
+        failed = getattr(dashboard, "failed", 0)
+        total = getattr(dashboard, "total", 0)
+        layout["analysis"].update(
+            Panel(
+                f"[bold]Batch Analysis in Progress[/bold]\n\n"
+                f"Completed: [green]{completed}[/green]  "
+                f"Failed: [red]{failed}[/red]  "
+                f"Total: {total}\n\n"
+                f"[italic]Detailed per-ticker reports will be available after completion.[/italic]",
+                title="Batch Overview",
+                border_style="green",
+                padding=(1, 2),
+            )
+        )
+    elif dashboard.final_report:
         layout["analysis"].update(
             Panel(
                 Markdown(dashboard.final_report),
@@ -611,6 +674,8 @@ def update_dashboard_display(
     batch_total: int = 0,
     batch_failed: int = 0,
     profile_name: str | None = None,
+    batch_mode: bool = False,
+    running_tickers: set[str] | None = None,
 ) -> None:
     """统一渲染入口，batch 与单股模式共用。"""
     render_header(
@@ -621,10 +686,17 @@ def update_dashboard_display(
         batch_total=batch_total,
         batch_failed=batch_failed,
         profile_name=profile_name,
+        batch_mode=batch_mode,
+        running_tickers=running_tickers,
     )
-    render_progress_panel(layout, dashboard)
-    render_messages_panel(layout, dashboard)
-    render_analysis_panel(layout, dashboard)
+    if batch_mode:
+        render_batch_progress_panel(layout, dashboard)
+        render_messages_panel(layout, dashboard, batch_mode=True)
+        render_analysis_panel(layout, dashboard, batch_mode=True)
+    else:
+        render_progress_panel(layout, dashboard)
+        render_messages_panel(layout, dashboard)
+        render_analysis_panel(layout, dashboard)
     render_footer(layout, dashboard, stats_handler=stats_handler, start_time=start_time)
 
 
