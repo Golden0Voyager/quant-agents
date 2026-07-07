@@ -46,9 +46,8 @@ jobs:
         run: |
           cat > .env <<EOF
           SENSENOVA_API_KEY=${{ secrets.SENSENOVA_API_KEY }}
-          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-          DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
+          MODELSCOPE_API_KEY=${{ secrets.MODELSCOPE_API_KEY }}
+          OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
           EOF
 
       - name: Run my list analysis
@@ -93,9 +92,8 @@ jobs:
         run: |
           cat > .env <<EOF
           SENSENOVA_API_KEY=${{ secrets.SENSENOVA_API_KEY }}
-          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
-          DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
+          MODELSCOPE_API_KEY=${{ secrets.MODELSCOPE_API_KEY }}
+          OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
           EOF
 
       - name: Run Erin list analysis

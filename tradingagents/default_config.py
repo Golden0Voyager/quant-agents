@@ -83,6 +83,29 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Internal agent debate stays in English for reasoning quality
     "output_language": "Chinese",
     # Token pricing overrides (fallback for unknown models in cost estimation)
+    # Provider fallback chains: when the primary LLM returns a transient
+    # error (quota exceeded, rate limit, 5xx), the system tries each
+    # subsequent entry in order before giving up.
+    # Each entry: {"provider": str, "model": str}
+    # The first entry's provider and backend_url match the primary config;
+    # subsequent entries use their provider's default endpoint.
+    "quick_think_fallback": [
+        {"provider": "sensenova",   "model": "sensenova-6.7-flash-lite"},
+        {"provider": "sensenova",   "model": "deepseek-v4-flash"},
+        {"provider": "modelscope",  "model": "deepseek-ai/DeepSeek-V4-Flash"},
+        {"provider": "modelscope",  "model": "stepfun-ai/Step-3.7-Flash"},
+        {"provider": "modelscope",  "model": "MiniMax/MiniMax-M3"},
+        {"provider": "openrouter",  "model": "nvidia/nemotron-3-ultra-550b-a55b:free"},
+        {"provider": "openrouter",  "model": "nvidia/nemotron-3-super-120b-a12b:free"},
+    ],
+    "deep_think_fallback": [
+        {"provider": "sensenova",   "model": "deepseek-v4-flash"},
+        {"provider": "modelscope",  "model": "deepseek-ai/DeepSeek-V4-Pro"},
+        {"provider": "modelscope",  "model": "Qwen/Qwen3.5-397B-A17B"},
+        {"provider": "modelscope",  "model": "ZhipuAI/GLM-5.2"},
+        {"provider": "openrouter",  "model": "nvidia/nemotron-3-ultra-550b-a55b:free"},
+        {"provider": "openrouter",  "model": "nvidia/nemotron-3-super-120b-a12b:free"},
+    ],
     "input_token_price_per_1m": None,
     "output_token_price_per_1m": None,
     # Debate and discussion settings

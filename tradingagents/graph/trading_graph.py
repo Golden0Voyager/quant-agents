@@ -42,6 +42,7 @@ from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.llm_clients import create_llm_client
+from tradingagents.llm_clients.fallback import patch_invoke_with_fallback
 from tradingagents.llm_clients.retry_utils import RetryConfig
 from tradingagents.reporting import write_report_tree
 
@@ -95,21 +96,8 @@ class TradingAgentsGraph:
         if self.callbacks:
             llm_kwargs["callbacks"] = self.callbacks
 
-        deep_client = create_llm_client(
-            provider=self.config["llm_provider"],
-            model=self.config["deep_think_llm"],
-            base_url=self.config.get("backend_url"),
-            **llm_kwargs,
-        )
-        quick_client = create_llm_client(
-            provider=self.config["llm_provider"],
-            model=self.config["quick_think_llm"],
-            base_url=self.config.get("backend_url"),
-            **llm_kwargs,
-        )
-
-        self.deep_thinking_llm = deep_client.get_llm()
-        self.quick_thinking_llm = quick_client.get_llm()
+        self.deep_thinking_llm = self._create_fallback_llm("deep_think_fallback", llm_kwargs)
+        self.quick_thinking_llm = self._create_fallback_llm("quick_think_fallback", llm_kwargs)
 
         self.memory_log = TradingMemoryLog(self.config)
         self.node_timings: list[dict[str, Any]] = []
@@ -184,6 +172,46 @@ class TradingAgentsGraph:
             kwargs["retry_config"] = RetryConfig(enabled=False)  # pragma: no cover  -- retry-disabled config branch; default is enabled
 
         return kwargs
+
+    def _create_fallback_llm(self, config_key: str, llm_kwargs: dict):
+        """Create an LLM instance with provider fallback chain.
+
+        Builds the full LLM chain (primary + fallbacks) from the config entry
+        at ``config_key``, then patches the primary's ``invoke`` to try each
+        fallback on transient provider errors.
+        """
+        fallback_config = self.config.get(config_key)
+        if not fallback_config:  # pragma: no cover  -- legacy config without fallback
+            # No fallback configured — use legacy single-provider path
+            model_key = "deep_think_llm" if "deep" in config_key else "quick_think_llm"
+            client = create_llm_client(
+                provider=self.config["llm_provider"],
+                model=self.config[model_key],
+                base_url=self.config.get("backend_url"),
+                **llm_kwargs,
+            )
+            return client.get_llm()
+
+        primary_provider = fallback_config[0]["provider"]
+        llm_chain = []
+        for entry in fallback_config:
+            tier_base_url = (
+                self.config.get("backend_url")
+                if entry["provider"] == primary_provider
+                else None
+            )
+            client = create_llm_client(
+                provider=entry["provider"],
+                model=entry["model"],
+                base_url=tier_base_url,
+                **llm_kwargs,
+            )
+            llm_chain.append(client.get_llm())
+
+        if len(llm_chain) == 1:
+            return llm_chain[0]
+
+        return patch_invoke_with_fallback(llm_chain[0], llm_chain[1:])
 
     def _create_tool_nodes(self) -> dict[str, ToolNode]:
         """Create tool nodes for different data sources using abstract methods."""
