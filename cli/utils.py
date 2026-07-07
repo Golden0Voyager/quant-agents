@@ -455,10 +455,10 @@ def ask_workers() -> int:
     choice = questionary.select(
         "并发 Worker 数量（每个 Worker 分析一只股票）:",
         choices=[
-            questionary.Choice("1 — 顺序执行，稳定可靠", value=1),
-            questionary.Choice("2 — 轻量并发，速度翻倍（推荐）", value=2),
-            questionary.Choice("3 — 中等并发，适合多只股票", value=3),
-            questionary.Choice("5 — 高并发，需确保 API 限流允许", value=5),
+            questionary.Choice("1 — 顺序执行，稳定可靠（1 个 Worker）", value=1),
+            questionary.Choice("2 — 轻量并发，速度翻倍（2 个 Worker，推荐）", value=2),
+            questionary.Choice("3 — 中等并发，适合多只股票（3 个 Worker）", value=3),
+            questionary.Choice("5 — 高并发，需确保 API 限流允许（5 个 Worker）", value=5),
         ],
         style=questionary.Style([
             ("selected", "fg:green noinherit"),
