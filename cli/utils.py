@@ -277,6 +277,32 @@ def _fetch_openrouter_models() -> list[tuple[str, str]]:
         return []
 
 
+def _fetch_kimi_models() -> list[tuple[str, str]]:
+    """Fetch available models from the Kimi Coding Plan API.
+
+    Falls back to the built-in catalog when the API key is missing or the
+    request fails so the CLI always remains usable.
+    """
+    import requests
+
+    api_key = os.environ.get("KIMI_CODING_API_KEY")
+    if not api_key:
+        return []
+    try:
+        resp = requests.get(
+            "https://api.kimi.com/coding/v1/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        models = resp.json().get("data", [])
+        models.sort(key=lambda m: m.get("created") or 0, reverse=True)
+        return [(m.get("name") or m["id"], m["id"]) for m in models]
+    except Exception as e:
+        console.print(f"\n[yellow]Could not fetch Kimi models: {e}[/yellow]")
+        return []
+
+
 def _require_text(message: str, hint: str) -> str:
     """Prompt for a required value; exit cleanly if the user cancels.
 
@@ -335,6 +361,40 @@ def select_openrouter_model(mode: str) -> str:
     return choice
 
 
+def select_kimi_model(mode: str) -> str:
+    """Select a Kimi model from the API or the built-in catalog.
+
+    ``mode`` ("quick"/"deep") labels the prompt like the other providers.
+    If the API list is unavailable, falls back to the hardcoded catalog.
+    """
+    from tradingagents.llm_clients.model_catalog import get_model_options
+
+    fetched = _fetch_kimi_models()
+    top = fetched[:6] if fetched else get_model_options("kimi", mode)
+
+    choices = [questionary.Choice(name, value=mid) for name, mid in top]
+    if not any(value == "custom" for _, value in top):
+        choices.append(questionary.Choice("Custom model ID", value="custom"))
+
+    choice = questionary.select(
+        f"Select Your [{mode.title()}-Thinking] Kimi Model:",
+        choices=choices,
+        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
+        style=questionary.Style([
+            ("selected", "fg:magenta noinherit"),
+            ("highlighted", "fg:magenta noinherit"),
+            ("pointer", "fg:magenta noinherit"),
+        ]),
+    ).ask()
+
+    if choice is None:
+        console.print("\n[red]No model selected. Exiting...[/red]")
+        exit(1)
+    if choice == "custom":
+        return _prompt_custom_model_id()
+    return choice
+
+
 def _prompt_custom_model_id() -> str:
     """Prompt user to type a custom model ID."""
     return _require_text("Enter model ID:", "Please enter a model ID.")
@@ -344,6 +404,8 @@ def _select_model(provider: str, mode: str) -> str:
     """Select a model for the given provider and mode (quick/deep)."""
     if provider.lower() == "openrouter":
         return select_openrouter_model(mode)
+    if provider.lower() == "kimi":
+        return select_kimi_model(mode)
 
     if provider.lower() == "azure":
         return _require_text(
