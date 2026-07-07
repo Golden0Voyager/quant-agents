@@ -640,7 +640,10 @@ class ConstructorTests(unittest.TestCase):
 
             g = TradingAgentsGraph(config=self.config)
 
-            self.assertEqual(mock_create_llm.call_count, 2)
+            # 7 quick_think_fallback + 6 deep_think_fallback tiers
+            self.assertEqual(mock_create_llm.call_count, 13)
+            # Primary LLMs (first tier of each chain) are returned unpatched
+            # by patch_invoke_with_fallback when invoked with mock strings.
             self.assertEqual(g.deep_thinking_llm, "deep_llm_obj")
             self.assertEqual(g.quick_thinking_llm, "quick_llm_obj")
 

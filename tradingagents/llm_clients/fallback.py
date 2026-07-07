@@ -22,7 +22,6 @@ At graph initialisation, create the full LLM chain and patch the primary::
 
 from __future__ import annotations
 
-import functools
 import logging
 from typing import Any
 
@@ -52,13 +51,12 @@ def patch_invoke_with_fallback(primary_llm: Any, fallback_llms: list[Any]) -> An
     Returns:
         The *primary_llm* instance with its ``invoke`` patched in-place.
     """
-    # Capture the original (retry-decorated) ``invoke`` from the class so we
-    # can call it on *different* instances (primary + fallbacks) — each has
-    # its own ``_retry_config`` that the decorator reads from ``self``.
-    original_invoke = type(primary_llm).invoke
+    klass = type(primary_llm)
+    if not hasattr(klass, "invoke"):
+        return primary_llm
+    original_invoke = klass.invoke
     chain = [primary_llm] + fallback_llms
 
-    @functools.wraps(original_invoke)
     def patched_invoke(
         self: Any,  # noqa: ARG001 — bound to primary_llm, but we ignore it
         input: Any,
