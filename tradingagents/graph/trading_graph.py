@@ -179,39 +179,65 @@ class TradingAgentsGraph:
         Builds the full LLM chain (primary + fallbacks) from the config entry
         at ``config_key``, then patches the primary's ``invoke`` to try each
         fallback on transient provider errors.
+
+        Fallback tiers whose API key is not set in the environment are
+        silently skipped so the graph can start even when only the primary
+        provider is configured.
         """
         fallback_config = self.config.get(config_key)
         if not fallback_config:  # pragma: no cover  -- legacy config without fallback
-            # No fallback configured — use legacy single-provider path
-            model_key = "deep_think_llm" if "deep" in config_key else "quick_think_llm"
-            client = create_llm_client(
-                provider=self.config["llm_provider"],
-                model=self.config[model_key],
-                base_url=self.config.get("backend_url"),
-                **llm_kwargs,
-            )
-            return client.get_llm()
+            return self._fallback_to_legacy(config_key, llm_kwargs)
 
         primary_provider = fallback_config[0]["provider"]
         llm_chain = []
-        for entry in fallback_config:
+        for i, entry in enumerate(fallback_config):
             tier_base_url = (
                 self.config.get("backend_url")
                 if entry["provider"] == primary_provider
                 else None
             )
-            client = create_llm_client(
-                provider=entry["provider"],
-                model=entry["model"],
-                base_url=tier_base_url,
-                **llm_kwargs,
-            )
-            llm_chain.append(client.get_llm())
+            try:
+                client = create_llm_client(
+                    provider=entry["provider"],
+                    model=entry["model"],
+                    base_url=tier_base_url,
+                    **llm_kwargs,
+                )
+                llm_chain.append(client.get_llm())
+            except ValueError as exc:
+                msg = str(exc).lower()
+                if "api key" in msg or "not set" in msg:
+                    if i == 0:
+                        logger.warning(
+                            "Primary LLM provider '%s' has no API key set — "
+                            "graph will likely fail at runtime: %s",
+                            entry["provider"], exc,
+                        )
+                    else:
+                        logger.info(
+                            "Skipping fallback tier %d (%s/%s): %s",
+                            i, entry["provider"], entry["model"], exc,
+                        )
+                    continue
+                raise
 
-        if len(llm_chain) == 1:
-            return llm_chain[0]
+        if len(llm_chain) <= 1:
+            return llm_chain[0] if llm_chain else self._fallback_to_legacy(config_key, llm_kwargs)
 
         return patch_invoke_with_fallback(llm_chain[0], llm_chain[1:])
+
+    def _fallback_to_legacy(self, config_key: str, llm_kwargs: dict):
+        """Fall back to the legacy single-provider path when no fallback
+        tiers could be created (all API keys missing) or fallback is not
+        configured."""
+        model_key = "deep_think_llm" if "deep" in config_key else "quick_think_llm"
+        client = create_llm_client(
+            provider=self.config["llm_provider"],
+            model=self.config[model_key],
+            base_url=self.config.get("backend_url"),
+            **llm_kwargs,
+        )
+        return client.get_llm()
 
     def _create_tool_nodes(self) -> dict[str, ToolNode]:
         """Create tool nodes for different data sources using abstract methods."""
