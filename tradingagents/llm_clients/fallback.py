@@ -86,5 +86,12 @@ def patch_invoke_with_fallback(primary_llm: Any, fallback_llms: list[Any]) -> An
 
     # Bind the patched method to the instance so ``self`` resolves correctly
     # when called via the instance (``primary_llm.invoke(...)``).
-    primary_llm.invoke = patched_invoke.__get__(primary_llm, type(primary_llm))
+    # Use object.__setattr__ to bypass Pydantic v2's field validation
+    # (ChatOpenAI subclasses are Pydantic models; direct assignment would
+    # raise ``ValueError: object has no field "invoke"``).
+    object.__setattr__(
+        primary_llm,
+        "invoke",
+        patched_invoke.__get__(primary_llm, type(primary_llm)),
+    )
     return primary_llm

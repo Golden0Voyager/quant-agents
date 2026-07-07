@@ -2003,11 +2003,10 @@ def analyze(
                 console.print("[dim]Enter ticker symbol(s) to analyze[/dim]")
                 raw_tickers = get_ticker()
                 parsed_tickers = _parse_tickers_input(raw_tickers)
-                resolved = resolve_ticker(parsed_tickers[0])
-                first_ticker = resolved["ticker"]
-                company = resolved.get("company_name", "")
-                console.print(f"[green]已解析:[/green] {first_ticker} {company}")
-
+                for pt in parsed_tickers:
+                    r = resolve_ticker(pt)
+                    name = r.get("company_name", "")
+                    console.print(f"[green]  ✓ {r['ticker']}[/green] {name}")
                 default_date = datetime.datetime.now().strftime("%Y-%m-%d")
                 console.print("\n[bold cyan]Step 2: Analysis Date[/bold cyan]")
                 console.print(f"[dim]Using default date: {default_date}[/dim]")
