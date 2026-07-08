@@ -373,10 +373,38 @@ def test_batch_stats_adapter_exposes_running_totals(tmp_path):
     assert snap2["cost_by_model"]["deepseek-v4-flash"] == pytest.approx(0.02)
 
 
+def test_run_single_selects_analysts_from_profile(tmp_path):
+    """BatchRunner 应该根据 profile 里的 analysts 初始化 dashboard，而不是只 fallback 到 market."""
+    runner = BatchRunner(
+        tickers=["AAPL"],
+        profile_config={
+            "llm_provider": "openai",
+            "output_language": "English",
+            "analysts": ["market", "news", "governance"],
+        },
+        output_dir=tmp_path / "reports",
+    )
+    fake_graph = MagicMock()
+    fake_graph.propagator.create_initial_state.return_value = {"messages": []}
+    fake_graph.propagator.get_graph_args.return_value = {}
+    fake_graph.graph.stream.return_value = iter([])
+    fake_graph.resolve_instrument_context.return_value = {}
+
+    with patch("cli.batch_runner.TradingAgentsGraph", return_value=fake_graph), \
+         patch("cli.batch_runner.StatsCallbackHandler"), \
+         patch("tradingagents.ticker_resolver.resolve_ticker",
+               return_value={"ticker": "AAPL", "company_name": "Apple"}), \
+         patch("cli.main.save_report_to_disk"), \
+         patch.object(runner.dashboard, "init_for_analysis") as mock_init:
+        runner._run_single("AAPL")
+
+    mock_init.assert_called_once()
+    selected = mock_init.call_args[0][0]
+    assert selected == ["market", "news", "governance"]
+
+
 def test_interactive_regenerate_only_affects_current_ticker(tmp_path):
     """选择'强制重新生成'只影响当前 ticker，后续仍逐个询问."""
-    import sys
-
     runner = BatchRunner(
         tickers=["AAPL", "MSFT"],
         profile_config={
