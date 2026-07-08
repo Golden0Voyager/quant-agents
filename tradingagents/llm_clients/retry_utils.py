@@ -63,6 +63,12 @@ _TRANSIENT_MESSAGE_MARKERS: frozenset[str] = frozenset(
         "deadline_exceeded",
         "context deadline",
         "context_deadline",
+        # OpenAI-compatible providers (vLLM, ModelScope, OpenRouter) sometimes
+        # return a 200 response whose ``choices`` field is null. The request is
+        # well-formed; the provider simply produced an empty/malformed
+        # completion, so treat it as transient and let the fallback chain try
+        # the next provider instead of aborting the whole analysis.
+        "null value for 'choices'",
     }
 )
 

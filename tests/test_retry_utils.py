@@ -264,6 +264,15 @@ class TestIsTransientError:
     def test_message_empty_response_short_marker(self) -> None:
         assert is_transient_llm_error(RuntimeError("empty response")) is True
 
+    def test_message_null_choices_marker(self) -> None:
+        msg = (
+            "Received response with null value for 'choices'. This can happen when using "
+            "OpenAI-compatible APIs (e.g., vLLM) that return a response in an unexpected format. "
+            "Full response keys: ['id', 'choices', 'created', 'model', 'object', 'service_tier', "
+            "'system_fingerprint', 'usage']"
+        )
+        assert is_transient_llm_error(ValueError(msg)) is True
+
     def test_message_marker_case_insensitive(self) -> None:
         assert is_transient_llm_error(ValueError("RATE LIMIT Exceeded")) is True
 

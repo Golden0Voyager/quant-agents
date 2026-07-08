@@ -112,6 +112,26 @@ class TestIsTransientLlmError:
     def test_plain_exception_with_empty_response_keyword(self):
         assert is_transient_llm_error(RuntimeError("Empty response received from API"))
 
+    def test_null_choices_error_is_transient_and_retried(self):
+        msg = "Received response with null value for 'choices'"
+        assert is_transient_llm_error(ValueError(msg))
+
+    @patch("tradingagents.llm_clients.retry_utils.time.sleep")
+    def test_retries_on_null_choices_error(self, mock_sleep):
+        calls = []
+        error = ValueError("Received response with null value for 'choices'")
+
+        def func():
+            calls.append(len(calls))
+            if len(calls) < 2:
+                raise error
+            return "ok"
+
+        result = llm_retry(func, retry_config=RetryConfig(max_retries=3, base_delay=0.1))
+        assert result == "ok"
+        assert len(calls) == 2
+        mock_sleep.assert_called_once_with(0.1)
+
 
 @pytest.mark.unit
 class TestLlmRetry:
