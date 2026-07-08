@@ -781,10 +781,7 @@ class BatchRunner:
                         ],
                         default="skip",
                     ).ask()
-                    if choice == "regenerate":
-                        self.force = True  # force remaining tickers too
-                        # Don't skip — fall through to run analysis
-                    else:
+                    if choice != "regenerate":
                         skip_tickers.add(ticker)
                         # Copy report now (outside Live context)
                         self._copy_existing_report(ticker, existing_report)

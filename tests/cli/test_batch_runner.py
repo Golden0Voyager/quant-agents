@@ -371,3 +371,40 @@ def test_batch_stats_adapter_exposes_running_totals(tmp_path):
     # Adapter reads self.batch_stats lazily, so it now contains BOTH models.
     assert snap2["cost_by_model"]["gpt-5.4"] == pytest.approx(0.01)
     assert snap2["cost_by_model"]["deepseek-v4-flash"] == pytest.approx(0.02)
+
+
+def test_interactive_regenerate_only_affects_current_ticker(tmp_path):
+    """选择'强制重新生成'只影响当前 ticker，后续仍逐个询问."""
+    import sys
+
+    runner = BatchRunner(
+        tickers=["AAPL", "MSFT"],
+        profile_config={
+            "llm_provider": "openai",
+            "output_language": "English",
+            "analysis_date": "2026-07-08",
+        },
+        output_dir=tmp_path / "reports",
+    )
+    runner._headless = False
+
+    for ticker in ("AAPL", "MSFT"):
+        ticker_dir = runner.output_dir / ticker
+        ticker_dir.mkdir(parents=True)
+        (ticker_dir / "complete_report.md").write_text(
+            "Analysis Date: 2026-07-08\n", encoding="utf-8"
+        )
+
+    answers = iter(["regenerate", "skip"])
+    mock_questionary = MagicMock()
+    mock_questionary.select.return_value.ask = lambda: next(answers)
+
+    with patch.dict("sys.modules", {"questionary": mock_questionary}), \
+         patch.object(runner, "_run_single") as mock_run:
+        runner.run()
+        mock_run.assert_called_once_with("AAPL")
+
+    assert "AAPL" in runner.completed_tickers
+    assert "MSFT" in runner.completed_tickers
+    assert "AAPL" not in runner.dashboard.skipped_tickers
+    assert "MSFT" in runner.dashboard.skipped_tickers
