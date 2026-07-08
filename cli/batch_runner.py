@@ -16,7 +16,12 @@ from rich.console import Console
 from rich.live import Live
 
 from cli.batch_dashboard import BatchDashboard
-from cli.dashboard import create_dashboard_layout, process_stream_chunk, update_dashboard_display
+from cli.dashboard import (
+    ANALYST_ORDER,
+    create_dashboard_layout,
+    process_stream_chunk,
+    update_dashboard_display,
+)
 from cli.stats_handler import StatsCallbackHandler
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
@@ -312,10 +317,7 @@ class BatchRunner:
 
     def _run_single(self, ticker: str) -> dict:
         """Run analysis for a single ticker. Returns final state dict."""
-        from cli.main import (
-            ANALYST_ORDER,
-            save_report_to_disk,
-        )
+        from cli.main import save_report_to_disk
         from tradingagents.ticker_resolver import resolve_ticker
 
         # Resolve ticker (A-share numeric codes get .SS/.SZ/.BJ suffix)
