@@ -408,12 +408,9 @@ def render_batch_progress_panel(layout: Layout, dashboard: AnalysisDashboard) ->
     skipped = getattr(dashboard, "skipped", 0)
     pct = (completed / total * 100) if total > 0 else 0
 
-    table = Table(show_header=False, box=None, padding=(0, 2), expand=True)
-    table.add_column("Progress", justify="center")
     bar_len = 40
     filled = int(bar_len * completed / total) if total > 0 else 0
     bar = "━" * filled + "─" * (bar_len - filled)
-    progress_line = f"[green]{bar}[/green] {pct:.0f}%"
     summary_parts = [
         f"Completed: [green]{completed}[/green]",
         f"Failed: [red]{failed}[/red]",
@@ -422,9 +419,46 @@ def render_batch_progress_panel(layout: Layout, dashboard: AnalysisDashboard) ->
     ]
     if failed > 0:
         summary_parts[1] = f"Failed: [bold red]{failed}[/bold red]"
-    table.add_row(f"{progress_line}    {' | '.join(summary_parts)}")
+
+    # Use plain markup strings so Rich parses [green]...[/green] tags
+    progress_markup = f"[green]{bar}[/green] {pct:.0f}%    {' | '.join(summary_parts)}"
+
+    meta: dict[str, dict] = getattr(dashboard, "per_ticker_meta", {})
+    ticker_lines: list[str] = []
+    if meta:
+        running = [(t, m) for t, m in meta.items() if m.get("stage") not in ("Completed", "Failed")]
+        done = [(t, m) for t, m in meta.items() if m.get("stage") in ("Completed", "Failed")]
+        running.sort(key=lambda x: x[1].get("stage", ""))
+        done.sort(key=lambda x: x[0])
+
+        ticker_lines.append(f"\n{'Ticker':<12} {'Stage':<16} {'Progress':<12} {'Agent':<18}")
+        ticker_lines.append(f"{'─'*12} {'─'*16} {'─'*12} {'─'*18}")
+
+        for ticker, m in running:
+            p = m.get("progress", 0)
+            pb = "█" * int(p * 10) + "░" * (10 - int(p * 10))
+            ticker_lines.append(
+                f"[cyan]{ticker[-8:]:>8}[/cyan]  "
+                f"{m.get('stage', '—'):<16}  "
+                f"{pb} {int(p*100):>3d}%  "
+                f"{m.get('agent', '—'):<18}"
+            )
+
+        for ticker, m in done:
+            status = m.get("stage", "")
+            style = "green" if status == "Completed" else "red"
+            ticker_lines.append(
+                f"[cyan]{ticker[-8:]:>8}[/cyan]  "
+                f"[{style}]{status:<16}[/{style}]  "
+                f"{'██████████ 100%':<12}  "
+                f"{'✓' if status == 'Completed' else '✗':<18}"
+            )
+
+    ticker_markup = "\n".join(ticker_lines) if ticker_lines else ""
+
+    content = f"{progress_markup}\n{ticker_markup}" if ticker_markup else progress_markup
     layout["progress"].update(
-        Panel(table, title="Batch Progress  (concurrent mode)", border_style="cyan", padding=(1, 2))
+        Panel(content, title="Batch Progress  (concurrent mode)", border_style="cyan", padding=(1, 2))
     )
 
 
