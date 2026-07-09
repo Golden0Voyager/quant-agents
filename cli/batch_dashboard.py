@@ -22,11 +22,19 @@ class BatchDashboard(AnalysisDashboard):
         self.current_ticker: str | None = None
         self.readiness_ready: int = 0
         self.readiness_total: int = 0
+        self.per_ticker_meta: dict[str, dict] = {}  # ticker -> {stage, progress, agent}
 
     def update_progress(self, current_ticker: str, completed: int, failed: int) -> None:
         self.current_ticker = current_ticker
         self.completed = completed
         self.failed = failed
+
+    def update_ticker_meta(self, ticker: str, stage: str, progress: float, agent: str) -> None:
+        self.per_ticker_meta[ticker] = {
+            "stage": stage,
+            "progress": progress,
+            "agent": agent,
+        }
 
     def mark_skipped(self, ticker: str) -> None:
         """Record a ticker as skipped (already completed from a previous run)."""

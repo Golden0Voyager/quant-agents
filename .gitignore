@@ -235,6 +235,7 @@ audit_reports/
 # IDE-local agent rules (e.g. Antigravity)
 .agents/
 .antigravitycli/
+.mimocode/
 
 # Skill-generated analysis artifacts
 .understand-anything/

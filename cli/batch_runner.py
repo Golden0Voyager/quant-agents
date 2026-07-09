@@ -78,7 +78,19 @@ class BatchRunner:
         """
         if self._layout is None or self._start_time is None:
             return
-        time.time() - self._start_time
+        elapsed = time.time() - self._start_time  # noqa: F841
+
+        if self._batch_mode:
+            ticker = self.dashboard.current_ticker
+            if ticker:
+                with self._lock:
+                    self.dashboard.update_ticker_meta(
+                        ticker,
+                        stage=self.dashboard.current_stage,
+                        progress=self.dashboard.overall_progress,
+                        agent=self.dashboard.current_agent or "",
+                    )
+
         update_dashboard_display(
             self._layout,
             self.dashboard,
@@ -707,7 +719,7 @@ class BatchRunner:
         decision = ""
         pm_match = re.search(
             r"(?:^|\n)(?:#{1,2}\s*V\.\s*Portfolio Manager Decision|###\s*Decision)[\s\S]*?"
-            r"(?=(?:\n#{1,2}\s*|$))",
+            r"(?=(?:\n(?:#{2}(?!#)|#{1}(?!\#))\s*|$))",
             text,
         )
         if pm_match:
@@ -717,7 +729,7 @@ class BatchRunner:
         trader = ""
         trader_match = re.search(
             r"(?:^|\n)(?:#{1,2}\s*III\.\s*Trading Team Plan|###\s*Trader)[\s\S]*?"
-            r"(?=(?:\n#{1,2}\s*|$))",
+            r"(?=(?:\n(?:#{2}(?!#)|#{1}(?!\#))\s*|$))",
             text,
         )
         if trader_match:
@@ -875,10 +887,14 @@ class BatchRunner:
 
                     try:
                         self._run_single(ticker)
-                        self.completed_tickers.add(ticker)
+                        with self._lock:
+                            self.completed_tickers.add(ticker)
+                            self.dashboard.update_ticker_meta(ticker, "Completed", 1.0, "Done")
                     except Exception as e:
-                        self.failures[ticker] = str(e)
-                        self.completed_tickers.add(ticker)
+                        with self._lock:
+                            self.failures[ticker] = str(e)
+                            self.completed_tickers.add(ticker)
+                            self.dashboard.update_ticker_meta(ticker, "Failed", 0.0, str(e)[:20])
                         # Write failure log
                         self.output_dir.mkdir(parents=True, exist_ok=True)
                         failures_path = self.output_dir / "failures.log"
@@ -919,10 +935,12 @@ class BatchRunner:
                             future.result()
                             with self._lock:
                                 self.completed_tickers.add(ticker)
+                                self.dashboard.update_ticker_meta(ticker, "Completed", 1.0, "Done")
                         except Exception as e:
                             with self._lock:
                                 self.failures[ticker] = str(e)
                                 self.completed_tickers.add(ticker)
+                                self.dashboard.update_ticker_meta(ticker, "Failed", 0.0, str(e)[:20])
                             # Write failure log
                             self.output_dir.mkdir(parents=True, exist_ok=True)
                             failures_path = self.output_dir / "failures.log"
