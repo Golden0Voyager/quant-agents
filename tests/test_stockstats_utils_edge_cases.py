@@ -433,3 +433,112 @@ class StockstatsUtilsGetStatsEdgeCases(unittest.TestCase):
 
         with self.assertRaises(KeyError):
             StockstatsUtils.get_stock_stats("AAPL", "nonexistent_indicator", "2026-01-02")
+
+
+# ---------------------------------------------------------------------------
+# load_ohlcv: cache freshness / refresh behaviour
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class LoadOhlcvCacheFreshnessTests(_TempDirMixin, unittest.TestCase):
+    """Cache is reused only when it covers the requested date; otherwise refresh."""
+
+    def _write_cache(self, symbol: str, dates: list[str]) -> None:
+        df = pd.DataFrame({
+            "Date": dates,
+            "Open": [100.0] * len(dates),
+            "High": [101.0] * len(dates),
+            "Low": [99.0] * len(dates),
+            "Close": [100.5 + i for i in range(len(dates))],
+            "Volume": [10000] * len(dates),
+        })
+        # File name matches load_ohlcv's naming convention.
+        today = pd.Timestamp.today()
+        start = (today - pd.DateOffset(years=5)).strftime("%Y-%m-%d")
+        end = (today + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+        cache_file = self._tmp / f"{symbol}-YFin-data-{start}-{end}.csv"
+        df.to_csv(cache_file, index=False)
+
+    def test_refreshes_when_cache_lags_weekday(self):
+        """Weekday curr_date with older cache -> re-download."""
+        self._write_cache("AAPL", ["2026-01-02"])  # Friday
+        fresh = pd.DataFrame({
+            "Date": ["2026-01-02", "2026-01-05"],  # Monday
+            "Open": [100.0, 101.0],
+            "High": [101.0, 102.0],
+            "Low": [99.0, 100.0],
+            "Close": [100.5, 101.5],
+            "Volume": [10000, 11000],
+        })
+
+        with patch("tradingagents.dataflows.stockstats_utils.get_config",
+                   return_value={"data_cache_dir": str(self._tmp)}), \
+             patch("tradingagents.dataflows.stockstats_utils.normalize_symbol",
+                   return_value="AAPL"), \
+             patch("tradingagents.dataflows.akshare_common.is_a_share_ticker",
+                   return_value=False), \
+             patch("tradingagents.dataflows.stockstats_utils.yf_retry",
+                   return_value=fresh) as mock_yf:
+            result = load_ohlcv("AAPL", "2026-01-05", lookback_years=5)
+
+        mock_yf.assert_called_once()
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result["Close"].iloc[-1], 101.5)
+
+    def test_uses_cache_when_it_covers_requested_date(self):
+        """Cache already covers curr_date -> no re-download."""
+        self._write_cache("AAPL", ["2026-01-02", "2026-01-05"])
+
+        with patch("tradingagents.dataflows.stockstats_utils.get_config",
+                   return_value={"data_cache_dir": str(self._tmp)}), \
+             patch("tradingagents.dataflows.stockstats_utils.normalize_symbol",
+                   return_value="AAPL"), \
+             patch("tradingagents.dataflows.akshare_common.is_a_share_ticker",
+                   return_value=False), \
+             patch("tradingagents.dataflows.stockstats_utils.yf_retry") as mock_yf:
+            result = load_ohlcv("AAPL", "2026-01-05", lookback_years=5)
+
+        mock_yf.assert_not_called()
+        self.assertEqual(len(result), 2)
+
+    def test_refresh_parameter_bypasses_cache(self):
+        """refresh=True ignores cache and re-downloads."""
+        self._write_cache("AAPL", ["2026-01-02", "2026-01-05"])
+        fresh = pd.DataFrame({
+            "Date": ["2026-01-02", "2026-01-05", "2026-01-06"],
+            "Open": [100.0, 101.0, 102.0],
+            "High": [101.0, 102.0, 103.0],
+            "Low": [99.0, 100.0, 101.0],
+            "Close": [100.5, 101.5, 102.5],
+            "Volume": [10000, 11000, 12000],
+        })
+
+        with patch("tradingagents.dataflows.stockstats_utils.get_config",
+                   return_value={"data_cache_dir": str(self._tmp)}), \
+             patch("tradingagents.dataflows.stockstats_utils.normalize_symbol",
+                   return_value="AAPL"), \
+             patch("tradingagents.dataflows.akshare_common.is_a_share_ticker",
+                   return_value=False), \
+             patch("tradingagents.dataflows.stockstats_utils.yf_retry",
+                   return_value=fresh) as mock_yf:
+            result = load_ohlcv("AAPL", "2026-01-06", lookback_years=5, refresh=True)
+
+        mock_yf.assert_called_once()
+        self.assertEqual(len(result), 3)
+
+    def test_accepts_friday_cache_for_saturday(self):
+        """Weekend curr_date -> accept last trading day without refreshing."""
+        self._write_cache("AAPL", ["2026-01-02"])  # Friday
+
+        with patch("tradingagents.dataflows.stockstats_utils.get_config",
+                   return_value={"data_cache_dir": str(self._tmp)}), \
+             patch("tradingagents.dataflows.stockstats_utils.normalize_symbol",
+                   return_value="AAPL"), \
+             patch("tradingagents.dataflows.akshare_common.is_a_share_ticker",
+                   return_value=False), \
+             patch("tradingagents.dataflows.stockstats_utils.yf_retry") as mock_yf:
+            result = load_ohlcv("AAPL", "2026-01-03", lookback_years=5)  # Saturday
+
+        mock_yf.assert_not_called()
+        self.assertEqual(len(result), 1)

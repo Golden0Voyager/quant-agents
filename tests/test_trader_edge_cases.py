@@ -109,6 +109,61 @@ class TestBuildVerifiedSnapshotBlock:
 
 
 # ---------------------------------------------------------------------------
+# trader_node: shared verified_market_snapshot from state
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestTraderUsesSharedSnapshot:
+    """Trader should use verified_market_snapshot from state when present."""
+
+    def test_uses_state_snapshot_and_skips_build(self):
+        state = _TraderTestHelpers._make_state(
+            verified_market_snapshot="STATE_SNAPSHOT",
+        )
+        llm = _TraderTestHelpers._make_llm()
+        trader = create_trader(llm)
+
+        captured_messages = []
+        with patch(
+            "tradingagents.agents.trader.trader.build_verified_market_snapshot",
+        ) as mock_build, patch(
+            "tradingagents.agents.trader.trader.invoke_structured_or_freetext",
+        ) as mock_invoke:
+            mock_invoke.return_value = "**Action**: Buy\n"
+            trader(state)
+            captured_messages = mock_invoke.call_args[0][2]
+
+        mock_build.assert_not_called()
+        prompt_text = "\n".join(
+            m.get("content", "") for m in captured_messages if isinstance(m, dict)
+        )
+        assert "STATE_SNAPSHOT" in prompt_text
+
+    def test_falls_back_when_state_snapshot_missing(self):
+        state = _TraderTestHelpers._make_state()
+        llm = _TraderTestHelpers._make_llm()
+        trader = create_trader(llm)
+
+        captured_messages = []
+        with patch(
+            "tradingagents.agents.trader.trader.build_verified_market_snapshot",
+            return_value="FRESH_SNAPSHOT",
+        ) as mock_build, patch(
+            "tradingagents.agents.trader.trader.invoke_structured_or_freetext",
+        ) as mock_invoke:
+            mock_invoke.return_value = "**Action**: Buy\n"
+            trader(state)
+            captured_messages = mock_invoke.call_args[0][2]
+
+        mock_build.assert_called_once()
+        prompt_text = "\n".join(
+            m.get("content", "") for m in captured_messages if isinstance(m, dict)
+        )
+        assert "FRESH_SNAPSHOT" in prompt_text
+
+
+# ---------------------------------------------------------------------------
 # trader_node: holdings_context and data_quality_summary paths
 # ---------------------------------------------------------------------------
 

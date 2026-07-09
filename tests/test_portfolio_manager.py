@@ -148,6 +148,54 @@ SAMPLE_SNAPSHOT = """\
 
 
 @pytest.mark.unit
+class PortfolioManagerSharedSnapshotTests(unittest.TestCase):
+    """PM should use verified_market_snapshot from state when present."""
+
+    @patch("tradingagents.agents.managers.portfolio_manager.invoke_structured_or_freetext")
+    @patch("tradingagents.agents.managers.portfolio_manager.bind_structured")
+    @patch(
+        "tradingagents.agents.managers.portfolio_manager.build_verified_market_snapshot",
+    )
+    @patch(
+        "tradingagents.agents.managers.portfolio_manager.get_instrument_context_from_state",
+        return_value="The instrument to analyze is `AAPL`.",
+    )
+    def test_uses_state_snapshot_and_skips_build(
+        self, mock_get_ctx, mock_build_snapshot, mock_bind, mock_invoke
+    ):
+        mock_invoke.return_value = "**Rating**: Hold\n"
+        mock_build_snapshot.return_value = "FRESH_SNAPSHOT"
+        node = create_portfolio_manager(_make_mock_llm())
+        node(_make_state(verified_market_snapshot="STATE_SNAPSHOT"))
+
+        mock_build_snapshot.assert_not_called()
+        prompt = mock_invoke.call_args[0][2]
+        self.assertIn("STATE_SNAPSHOT", prompt)
+        self.assertNotIn("FRESH_SNAPSHOT", prompt)
+
+    @patch("tradingagents.agents.managers.portfolio_manager.invoke_structured_or_freetext")
+    @patch("tradingagents.agents.managers.portfolio_manager.bind_structured")
+    @patch(
+        "tradingagents.agents.managers.portfolio_manager.build_verified_market_snapshot",
+        return_value=SAMPLE_SNAPSHOT,
+    )
+    @patch(
+        "tradingagents.agents.managers.portfolio_manager.get_instrument_context_from_state",
+        return_value="The instrument to analyze is `AAPL`.",
+    )
+    def test_falls_back_when_state_snapshot_missing(
+        self, mock_get_ctx, mock_build_snapshot, mock_bind, mock_invoke
+    ):
+        mock_invoke.return_value = "**Rating**: Hold\n"
+        node = create_portfolio_manager(_make_mock_llm())
+        node(_make_state())
+
+        mock_build_snapshot.assert_called_once()
+        prompt = mock_invoke.call_args[0][2]
+        self.assertIn("152.35", prompt)
+
+
+@pytest.mark.unit
 class CreatePortfolioManagerTests(unittest.TestCase):
     """create_portfolio_manager factory."""
 

@@ -590,6 +590,34 @@ class TradingAgentsGraph:
             past_context=past_context,
             instrument_context=instrument_context,
         )
+
+        # Build the verified market snapshot once, with a forced refresh, so
+        # every downstream agent shares the same ground-truth data. The Market
+        # Analyst's tool path now also uses load_ohlcv, so this snapshot and
+        # the analyst's raw data come from the same source. If the initial state
+        # already carries a snapshot (e.g. programmatic callers or tests), keep
+        # it instead of recomputing.
+        if not init_agent_state.get("verified_market_snapshot"):
+            try:
+                from tradingagents.dataflows.market_data_validator import (
+                    build_verified_market_snapshot,
+                )
+
+                init_agent_state["verified_market_snapshot"] = (
+                    build_verified_market_snapshot(
+                        company_name,
+                        str(trade_date),
+                        refresh=True,
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Could not build verified market snapshot for %s on %s: %s",
+                    company_name,
+                    trade_date,
+                    exc,
+                )
+
         args = self.propagator.get_graph_args()
 
         # Inject thread_id so same ticker+date resumes, different date starts fresh.

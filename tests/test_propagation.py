@@ -30,6 +30,7 @@ class CreateInitialStateTests(unittest.TestCase):
         self.assertIn("investment_debate_state", state)
         self.assertIn("risk_debate_state", state)
         self.assertIn("market_report", state)
+        self.assertIn("verified_market_snapshot", state)
         self.assertIn("fundamentals_report", state)
         self.assertIn("sentiment_report", state)
         self.assertIn("news_report", state)

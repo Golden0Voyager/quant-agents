@@ -85,17 +85,20 @@ def create_portfolio_manager(llm):
             if holdings_prompt:
                 holdings_line = f"\n**Current Position:**\n{holdings_prompt}\n"
 
-        # Re-verify the snapshot in the PM node so the final decision can
-        # reject any entry / stop that the LLM may have invented upstream.
-        # We fall back gracefully when the snapshot is unavailable.
-        try:
-            snapshot = build_verified_market_snapshot(ticker, trade_date)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "PM could not refresh verified market snapshot for %s on %s: %s",
-                ticker, trade_date, exc,
-            )
-            snapshot = None
+        # Use the verified snapshot built at graph start. All agents share the
+        # same snapshot so the PM cannot see a different price than the Trader.
+        # We fall back to building one only when the shared snapshot is missing
+        # (e.g. tests or programmatic state creation).
+        snapshot = state.get("verified_market_snapshot", "")
+        if not snapshot:
+            try:
+                snapshot = build_verified_market_snapshot(ticker, trade_date)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "PM could not refresh verified market snapshot for %s on %s: %s",
+                    ticker, trade_date, exc,
+                )
+                snapshot = None
         _extract_snapshot_close(snapshot)
         snapshot_block = snapshot if snapshot else (
             "Verified market data is unavailable for this ticker on the "
