@@ -1,3 +1,5 @@
+import contextlib
+import io
 import logging
 import os
 import time
@@ -39,6 +41,17 @@ def yf_retry(func, max_retries=3, base_delay=2.0):
                 time.sleep(delay)
             else:
                 raise
+
+
+def _silent_yf_download(*args, **kwargs):
+    """Call yf.download with stdout suppressed to hide 'Failed download' messages.
+
+    yfinance uses print() internally for failure reporting; redirect_stdout
+    silences these without affecting Rich's Live rendering (which runs in the
+    main thread and writes to the layout data structure, not sys.stdout directly).
+    """
+    with contextlib.redirect_stdout(io.StringIO()):
+        return yf.download(*args, **kwargs)
 
 
 def _ensure_date_column(data: pd.DataFrame) -> pd.DataFrame:
@@ -161,7 +174,13 @@ def _load_ohlcv_from_akshare(
     start_date: str,
     end_date: str,
 ) -> pd.DataFrame | None:
-    """Fetch OHLCV data via akshare (Eastmoney network API) for A-share.
+    """Fetch OHLCV data via akshare for A-share.
+
+    Tries three sources in order:
+      1. Eastmoney (``ak.stock_zh_a_hist``) — primary
+      2. Tencent (``ak.stock_zh_a_hist_tx``) — bypasses Eastmoney's
+         TLS fingerprinting / anti-bot blocks
+      3. Sina (``ak.stock_zh_a_daily``) — additional fallback
 
     Returns a DataFrame with Date/Open/High/Low/Close/Volume columns,
     or None on failure. Uses lazy imports to avoid circular dependencies.
@@ -181,40 +200,79 @@ def _load_ohlcv_from_akshare(
     if not is_a_share_ticker(symbol):
         return None
 
-    try:
-        code = to_akshare_symbol(symbol, style="bare")
-        ak_start = start_date.replace("-", "")
-        ak_end = end_date.replace("-", "")
+    ak_start = start_date.replace("-", "")
+    ak_end = end_date.replace("-", "")
 
-        with no_proxy():
-            df = _akshare_retry(
-                lambda: ak.stock_zh_a_hist(
-                    symbol=code,
-                    period="daily",
-                    start_date=ak_start,
-                    end_date=ak_end,
-                    adjust="qfq",
-                ),
-                max_retries=3,
-                base_delay=2.0,
-            )
+    # source config: (label, symbol_style, fetch_callable, column_map)
+    sources = (
+        (
+            "Eastmoney",
+            "bare",
+            lambda code: ak.stock_zh_a_hist(
+                symbol=code,
+                period="daily",
+                start_date=ak_start,
+                end_date=ak_end,
+                adjust="qfq",
+            ),
+            {"日期": "Date", "开盘": "Open", "收盘": "Close",
+             "最高": "High", "最低": "Low", "成交量": "Volume"},
+        ),
+        (
+            "Tencent",
+            "lower_prefix",
+            lambda code: ak.stock_zh_a_hist_tx(
+                symbol=code,
+                start_date=ak_start,
+                end_date=ak_end,
+                adjust="qfq",
+            ),
+            {"date": "Date", "open": "Open", "close": "Close",
+             "high": "High", "low": "Low", "amount": "Volume"},
+        ),
+        (
+            "Sina",
+            "lower_prefix",
+            lambda code: ak.stock_zh_a_daily(
+                symbol=code,
+                start_date=ak_start,
+                end_date=ak_end,
+                adjust="qfq",
+            ),
+            {"date": "Date", "open": "Open", "close": "Close",
+             "high": "High", "low": "Low", "volume": "Volume"},
+        ),
+    )
 
-        if df is None or df.empty:
-            return None
+    for idx, (name, style, fetch, col_map) in enumerate(sources):
+        try:
+            code = to_akshare_symbol(symbol, style=style)
 
-        col_map = {
-            "日期": "Date",
-            "开盘": "Open",
-            "收盘": "Close",
-            "最高": "High",
-            "最低": "Low",
-            "成交量": "Volume",
-        }
-        df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
-        return df
-    except Exception:
-        logger.warning("akshare network fallback failed for %s", symbol, exc_info=True)
-        return None
+            with no_proxy():
+                df = _akshare_retry(
+                    lambda f=fetch, c=code: f(c),
+                    max_retries=2,
+                    base_delay=1.0,
+                )
+
+            if df is not None and not df.empty:
+                df = df.rename(
+                    columns={k: v for k, v in col_map.items() if k in df.columns}
+                )
+                return df
+
+            logger.info("akshare %s returned empty for %s", name, symbol)
+        except Exception:
+            if idx < len(sources) - 1:
+                logger.info(
+                    "akshare %s failed for %s, trying next source", name, symbol
+                )
+            else:
+                logger.warning(
+                    "akshare all sources failed for %s", symbol, exc_info=True
+                )
+
+    return None
 
 
 def _cache_covers_requested_date(cached: pd.DataFrame, curr_date: str) -> bool:
@@ -332,7 +390,7 @@ def load_ohlcv(
                 )
                 try:
                     downloaded = yf_retry(
-                        lambda: yf.download(
+                        lambda: _silent_yf_download(
                             canonical,
                             start=start_str,
                             end=end_str,
@@ -355,7 +413,7 @@ def load_ohlcv(
             # Non-A-share: yfinance first (existing behavior)
             try:
                 downloaded = yf_retry(
-                    lambda: yf.download(
+                    lambda: _silent_yf_download(
                         canonical,
                         start=start_str,
                         end=end_str,
