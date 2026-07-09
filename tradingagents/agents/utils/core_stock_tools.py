@@ -2,7 +2,7 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
-from tradingagents.dataflows.interface import route_to_vendor
+from tradingagents.dataflows.stockstats_utils import load_ohlcv
 
 
 @tool
@@ -13,7 +13,8 @@ def get_stock_data(
 ) -> str:
     """
     Retrieve stock price data (OHLCV) for a given ticker symbol.
-    Uses the configured core_stock_apis vendor.
+    Uses the same cached OHLCV source as the verified market snapshot so
+    analysts and downstream agents see consistent prices.
     Args:
         symbol (str): Ticker symbol of the company, e.g. AAPL, TSM
         start_date (str): Start date in yyyy-mm-dd format
@@ -21,4 +22,8 @@ def get_stock_data(
     Returns:
         str: A formatted dataframe containing the stock price data for the specified ticker symbol in the specified date range.
     """
-    return route_to_vendor("get_stock_data", symbol, start_date, end_date)
+    data = load_ohlcv(symbol, end_date)
+    filtered = data[
+        (data["Date"] >= start_date) & (data["Date"] <= end_date)
+    ]
+    return filtered.to_csv(index=False)

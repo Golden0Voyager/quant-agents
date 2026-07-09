@@ -117,7 +117,11 @@ def create_trader(llm):
                 holdings_line = f"\n{trader_prompt}\n"
 
         market_report = state.get("market_report", "")
-        snapshot_block = _build_verified_snapshot_block(ticker, trade_date, market_report=market_report)
+        snapshot_block = state.get("verified_market_snapshot", "")
+        if not snapshot_block:
+            snapshot_block = _build_verified_snapshot_block(
+                ticker, trade_date, market_report=market_report
+            )
         data_quality_summary = get_or_build_data_quality_summary(state)
 
         messages = [

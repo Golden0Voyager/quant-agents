@@ -55,6 +55,9 @@ class AgentState(MessagesState):
 
     # research step
     market_report: Annotated[str, "Report from the Market Analyst"]
+    verified_market_snapshot: Annotated[
+        str, "Pre-computed verified market snapshot shared across agents"
+    ]
     sentiment_report: Annotated[str, "Report from the Sentiment Analyst"]
     news_report: Annotated[
         str, "Report from the News Researcher of current world affairs"

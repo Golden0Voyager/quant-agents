@@ -1,63 +1,82 @@
 """Tests for core_stock_tools module.
 
-The single ``@tool``-decorated function ``get_stock_data`` is a
-``StructuredTool`` that delegates to ``route_to_vendor``.
+The ``@tool``-decorated function ``get_stock_data`` now reads from the same
+``load_ohlcv`` cache used by the verified market snapshot so that analysts and
+downstream agents see consistent prices.
 """
 
 from unittest.mock import patch
 
+import pandas as pd
 import pytest
 
 
-def _make_mock_vendor(return_value: str = "mock_data"):
-    return patch(
-        "tradingagents.agents.utils.core_stock_tools.route_to_vendor",
-        return_value=return_value,
-    )
+def _make_mock_load_ohlcv():
+    dates = pd.bdate_range("2026-06-01", "2026-06-30")
+    return pd.DataFrame({
+        "Date": dates,
+        "Open": [100.0 + i for i in range(len(dates))],
+        "High": [101.0 + i for i in range(len(dates))],
+        "Low": [99.0 + i for i in range(len(dates))],
+        "Close": [100.5 + i for i in range(len(dates))],
+        "Volume": [1_000_000 + i for i in range(len(dates))],
+    })
 
 
 @pytest.mark.unit
 class TestGetStockData:
-    def test_calls_route_to_vendor(self):
+    def test_uses_load_ohlcv_and_filters_date_range(self):
         from tradingagents.agents.utils.core_stock_tools import get_stock_data
 
-        with _make_mock_vendor("ohlcv data") as mock_route:
+        mock_df = _make_mock_load_ohlcv()
+        with patch(
+            "tradingagents.agents.utils.core_stock_tools.load_ohlcv",
+            return_value=mock_df,
+        ) as mock_load:
             result = get_stock_data.invoke({
                 "symbol": "AAPL",
-                "start_date": "2026-06-01",
-                "end_date": "2026-06-30",
+                "start_date": "2026-06-10",
+                "end_date": "2026-06-15",
             })
 
-        mock_route.assert_called_once_with(
-            "get_stock_data", "AAPL", "2026-06-01", "2026-06-30"
-        )
-        assert result == "ohlcv data"
+        mock_load.assert_called_once_with("AAPL", "2026-06-15")
+        assert "Date,Open,High,Low,Close,Volume" in result
+        assert "2026-06-10" in result
+        assert "2026-06-15" in result
+        assert "2026-06-09" not in result
+        assert "2026-06-16" not in result
 
     def test_different_symbol_and_dates(self):
         from tradingagents.agents.utils.core_stock_tools import get_stock_data
 
-        with _make_mock_vendor() as mock_route:
+        mock_df = _make_mock_load_ohlcv()
+        with patch(
+            "tradingagents.agents.utils.core_stock_tools.load_ohlcv",
+            return_value=mock_df,
+        ) as mock_load:
             get_stock_data.invoke({
                 "symbol": "TSLA",
-                "start_date": "2026-01-01",
-                "end_date": "2026-03-31",
+                "start_date": "2026-06-01",
+                "end_date": "2026-06-30",
             })
 
-        mock_route.assert_called_once_with(
-            "get_stock_data", "TSLA", "2026-01-01", "2026-03-31"
-        )
+        mock_load.assert_called_once_with("TSLA", "2026-06-30")
 
     def test_error_propagates(self):
         from tradingagents.agents.utils.core_stock_tools import get_stock_data
 
-        with _make_mock_vendor() as mock_route:
-            mock_route.side_effect = RuntimeError("vendor error")
-            with pytest.raises(RuntimeError, match="vendor error"):
-                get_stock_data.invoke({
-                    "symbol": "AAPL",
-                    "start_date": "2026-06-01",
-                    "end_date": "2026-06-30",
-                })
+        with (
+            patch(
+                "tradingagents.agents.utils.core_stock_tools.load_ohlcv",
+                side_effect=RuntimeError("vendor error"),
+            ),
+            pytest.raises(RuntimeError, match="vendor error"),
+        ):
+            get_stock_data.invoke({
+                "symbol": "AAPL",
+                "start_date": "2026-06-01",
+                "end_date": "2026-06-30",
+            })
 
     def test_is_structured_tool(self):
         from tradingagents.agents.utils.core_stock_tools import get_stock_data

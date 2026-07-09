@@ -107,6 +107,7 @@ def _make_graph():
             "company_of_interest": "AAPL",
             "trade_date": "2026-06-15",
             "market_report": "",
+            "verified_market_snapshot": "MOCK_SNAPSHOT",
             "sentiment_report": "",
             "news_report": "",
             "fundamentals_report": "",
@@ -1221,6 +1222,49 @@ class RunGraphTests(unittest.TestCase):
 
         state, signal = g._run_graph("AAPL", "2026-06-15")
         self.assertEqual(state["final_trade_decision"], "Sell")
+
+    def test_injects_verified_market_snapshot_when_empty(self):
+        g = _make_graph()
+        g.propagator.create_initial_state.return_value["verified_market_snapshot"] = ""
+        g.memory_log.get_past_context.return_value = "past"
+        g.resolve_instrument_context = MagicMock(return_value="ctx")
+
+        captured_state = {}
+
+        def mock_stream(init_state, **kwargs):
+            captured_state.update(init_state)
+            yield {"final_node": {
+                "market_report": "",
+                "sentiment_report": "",
+                "news_report": "",
+                "fundamentals_report": "",
+                "governance_report": "",
+                "industry_report": "",
+                "investment_debate_state": {
+                    "bull_history": [], "bear_history": [],
+                    "history": [], "current_response": "",
+                    "judge_decision": "",
+                },
+                "trader_investment_plan": {},
+                "risk_debate_state": {
+                    "aggressive_history": [], "conservative_history": [],
+                    "neutral_history": [], "history": [],
+                    "judge_decision": "",
+                },
+                "investment_plan": {},
+                "final_trade_decision": "Hold",
+            }}
+
+        g.graph.stream = mock_stream
+
+        with patch(
+            "tradingagents.dataflows.market_data_validator.build_verified_market_snapshot",
+            return_value="FRESH_SNAPSHOT",
+        ) as mock_build:
+            g._run_graph("AAPL", "2026-06-15")
+
+        mock_build.assert_called_once_with("AAPL", "2026-06-15", refresh=True)
+        self.assertEqual(captured_state["verified_market_snapshot"], "FRESH_SNAPSHOT")
 
     def test_checkpoint_thread_id_injected(self):
         g = _make_graph()

@@ -217,7 +217,41 @@ def _load_ohlcv_from_akshare(
         return None
 
 
-def load_ohlcv(symbol: str, curr_date: str, lookback_years: int = 5) -> pd.DataFrame:
+def _cache_covers_requested_date(cached: pd.DataFrame, curr_date: str) -> bool:
+    """Return True if the cached frame already covers the requested date.
+
+    A cache is considered adequate when its latest row is on or after the
+    requested analysis date. For weekday ``curr_date`` values we try to refresh
+    when the cache lags, because the market may have published a newer bar since
+    the cache was written. For weekends we accept the last trading day's data
+    without repeatedly hitting the vendor.
+    """
+    if cached is None or cached.empty or "Date" not in cached.columns:
+        return False
+    dates = pd.to_datetime(cached["Date"], errors="coerce").dropna()
+    if dates.empty:
+        return False
+    cached_latest = dates.max().normalize()
+    requested = pd.to_datetime(curr_date, errors="coerce").normalize()
+    if pd.isna(requested):
+        return True
+    if cached_latest >= requested:
+        return True
+    # Cannot refresh future dates.
+    today = pd.Timestamp.today().normalize()
+    if requested > today:
+        return True
+    # Weekday: the requested bar may now be available, so refresh.
+    # Weekend: accept the last available trading day.
+    return requested.weekday() >= 5
+
+
+def load_ohlcv(
+    symbol: str,
+    curr_date: str,
+    lookback_years: int = 5,
+    refresh: bool = False,
+) -> pd.DataFrame:
     """Fetch OHLCV data with caching, filtered to prevent look-ahead bias.
 
     Downloads ``lookback_years`` of data up to today and caches per symbol.
@@ -229,6 +263,13 @@ def load_ohlcv(symbol: str, curr_date: str, lookback_years: int = 5) -> pd.DataF
     last resort — yfinance rate-limits aggressively on batch runs and its A-share
     coverage is unreliable. Set ``DISABLE_YFINANCE_FALLBACK=1`` to skip yfinance
     entirely for A-share tickers.
+
+    Args:
+        symbol: Ticker symbol.
+        curr_date: Analysis date used to filter look-ahead rows and to judge
+            whether the on-disk cache is fresh enough.
+        lookback_years: How many years of history to download.
+        refresh: If True, bypass the on-disk cache and force a fresh download.
     """
     from tradingagents.dataflows.akshare_common import is_a_share_ticker
 
@@ -255,12 +296,21 @@ def load_ohlcv(symbol: str, curr_date: str, lookback_years: int = 5) -> pd.DataF
 
     # A cached file may be empty if a prior fetch failed (unknown symbol,
     # transient rate limit). Treat an empty/columnless cache as a miss and
-    # re-fetch rather than serving the poisoned file forever.
+    # re-fetch rather than serving the poisoned file forever. Also re-fetch
+    # when the caller forces a refresh or when the cache lags the requested
+    # date on a weekday.
     data = None
-    if os.path.exists(data_file):
+    if not refresh and os.path.exists(data_file):
         cached = pd.read_csv(data_file, on_bad_lines="skip", encoding="utf-8")
         if not cached.empty and "Close" in cached.columns:
-            data = cached
+            if _cache_covers_requested_date(cached, curr_date):
+                data = cached
+            else:
+                logger.info(
+                    "Cache for %s lags requested date %s; refreshing",
+                    symbol,
+                    curr_date,
+                )
 
     if data is None:
         downloaded = None
