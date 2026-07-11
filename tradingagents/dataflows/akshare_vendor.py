@@ -769,18 +769,21 @@ def _nearest_trade_date() -> str:
     """Return the most recent trading date as YYYYMMDD."""
     df = _safe_call(ak.tool_trade_date_hist_sina)
     if df is None or df.empty:
-        # Fallback to today
         return datetime.now().strftime("%Y%m%d")
-    # The column is named 'trade_date' in recent akshare builds
     date_col = "trade_date" if "trade_date" in df.columns else df.columns[0]
-    # Filter to dates <= today and pick the latest
-    today = datetime.now().strftime("%Y-%m-%d")
-    valid = df[df[date_col] <= today]
+    today = datetime.now()
+    # Normalise to string for safe comparison (akshare may return datetime.date)
+    try:
+        valid = df[df[date_col] <= today.strftime("%Y-%m-%d")]
+    except TypeError:
+        # date_col is datetime.date / Timestamp — use date comparison
+        valid = df[pd.to_datetime(df[date_col]).dt.date <= today.date()]
     if valid.empty:
-        return datetime.now().strftime("%Y%m%d")
+        return today.strftime("%Y%m%d")
     latest = valid[date_col].max()
-    # May already be YYYYMMDD or YYYY-MM-DD
-    return latest.replace("-", "")
+    if hasattr(latest, "strftime"):
+        return latest.strftime("%Y%m%d")
+    return str(latest).replace("-", "")
 
 
 def get_margin_trading(symbol: str) -> str:

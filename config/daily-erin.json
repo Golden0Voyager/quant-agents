@@ -1,12 +1,11 @@
 {
   "tickers": [
-    "000100",
-    "300059",
     "601899",
     "601088",
-    "002475",
+    "600901",
     "002223",
-    "002230"
+    "002230",
+    "001365"
   ],
   "config": {
     "analysts": ["market", "social", "news", "fundamentals", "governance", "industry"],

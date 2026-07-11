@@ -111,6 +111,7 @@ TOOLS_CATEGORIES = {
             "get_income_statement",
             "get_industry_valuation",
             "get_earnings_estimates",
+            "get_shareholder_count",
         ]
     },
     "news_data": {
@@ -128,6 +129,10 @@ TOOLS_CATEGORIES = {
         "description": "Corporate governance and risk metrics",
         "tools": [
             "get_pledge_ratio",
+            "get_company_announcements",
+            "get_margin_trading",
+            "get_dragon_tiger",
+            "get_block_trade",
         ]
     },
     "shareholder_return": {

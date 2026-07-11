@@ -67,7 +67,7 @@ def fetch_eastmoney_hot_rank(ticker: str, limit: int = 20) -> str:
     hot_rank_lines: list[str] = []
     try:
         with no_proxy():
-            rank_df = _akshare_retry(lambda: ak.stock_hot_rank_em(), max_retries=0)
+            rank_df = _akshare_retry(lambda: ak.stock_hot_rank_em(), max_retries=3)
         mask = rank_df.iloc[:, 0].astype(str).str.contains(
             bare_code, na=False
         ) | rank_df.iloc[:, 1].astype(str).str.contains(bare_code, na=False)
@@ -99,7 +99,7 @@ def fetch_eastmoney_hot_rank(ticker: str, limit: int = 20) -> str:
         with no_proxy():
             detail_df = _akshare_retry(
                 lambda: ak.stock_hot_rank_detail_em(symbol=prefixed_code),
-                max_retries=0,
+                max_retries=3,
             )
         if detail_df is not None and not detail_df.empty:
             # Show the most recent entries (latest data first)
@@ -166,7 +166,7 @@ def fetch_eastmoney_guba_sentiment(ticker: str, limit: int = 10) -> str:
     comment_lines: list[str] = []
     try:
         with no_proxy():
-            comment_df = _akshare_retry(lambda: ak.stock_comment_em(), max_retries=0)
+            comment_df = _akshare_retry(lambda: ak.stock_comment_em(), max_retries=3)
         mask = comment_df.iloc[:, 1].astype(str).str.contains(bare_code, na=False)
         match = comment_df[mask]
         if not match.empty:
@@ -209,7 +209,7 @@ def fetch_eastmoney_guba_sentiment(ticker: str, limit: int = 10) -> str:
         with no_proxy():
             focus_df = _akshare_retry(
                 lambda: ak.stock_comment_detail_scrd_focus_em(symbol=bare_code),
-                max_retries=0,
+                max_retries=3,
             )
         if focus_df is not None and not focus_df.empty:
             recent = focus_df.tail(limit)
@@ -236,7 +236,7 @@ def fetch_eastmoney_guba_sentiment(ticker: str, limit: int = 10) -> str:
         with no_proxy():
             desire_df = _akshare_retry(
                 lambda: ak.stock_comment_detail_scrd_desire_em(symbol=bare_code),
-                max_retries=0,
+                max_retries=3,
             )
         if desire_df is not None and not desire_df.empty:
             recent = desire_df.tail(limit)

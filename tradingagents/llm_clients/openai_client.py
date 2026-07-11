@@ -274,7 +274,7 @@ class OpenAIClient(BaseLLMClient):
                 f"or 'deep_think_llm' / 'quick_think_llm' is set."
             )
         self.warn_if_unknown_model()
-        llm_kwargs = {"model": self.model}
+        llm_kwargs: dict[str, Any] = {"model": self.model}
 
         # Provider-specific base URL and auth. An explicit base_url on the
         # client (e.g. a corporate proxy) takes precedence over the
@@ -334,7 +334,7 @@ class OpenAIClient(BaseLLMClient):
             retry_config = RetryConfig(**retry_config)
 
         if self.provider == "deepseek":
-            chat_cls = DeepSeekChatOpenAI
+            chat_cls: type[ChatOpenAI] = DeepSeekChatOpenAI
         elif self.provider in ("minimax", "minimax-cn"):
             chat_cls = MinimaxChatOpenAI
         elif self.provider in ("mimo",) or (
@@ -345,7 +345,7 @@ class OpenAIClient(BaseLLMClient):
             chat_cls = NormalizedChatOpenAI
         llm = chat_cls(**llm_kwargs)
         if retry_config is not None:
-            llm._retry_config = retry_config
+            llm._retry_config = retry_config  # type: ignore[attr-defined]
         return llm
 
     def validate_model(self) -> bool:

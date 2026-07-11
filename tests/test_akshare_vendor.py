@@ -1274,6 +1274,28 @@ class TestNearestTradeDate(TestCase):
             result = _nearest_trade_date()
         assert result == "20260514"
 
+    def test_datetime_date_column_does_not_crash(self):
+        """Ensure _nearest_trade_date handles datetime.date values (not just strings)."""
+        from datetime import date
+
+        from tradingagents.dataflows.akshare_vendor import _nearest_trade_date
+        with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
+            mock_ak.tool_trade_date_hist_sina.return_value = pd.DataFrame(
+                {"trade_date": [date(2026, 5, 14), date(2026, 5, 15)]}
+            )
+            result = _nearest_trade_date()
+        assert result == "20260515"
+
+    def test_timestamp_column_does_not_crash(self):
+        """Ensure _nearest_trade_date handles pd.Timestamp values."""
+        from tradingagents.dataflows.akshare_vendor import _nearest_trade_date
+        with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
+            mock_ak.tool_trade_date_hist_sina.return_value = pd.DataFrame(
+                {"trade_date": pd.to_datetime(["2026-05-14", "2026-05-15"])}
+            )
+            result = _nearest_trade_date()
+        assert result == "20260515"
+
 
 # ---------------------------------------------------------------------------
 # Regression tests

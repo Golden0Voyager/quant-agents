@@ -131,6 +131,18 @@ class TestFetchEastmoneyHotRank:
         assert "unavailable" in result.lower()
         assert "RuntimeError" in result
 
+    def test_hot_rank_uses_max_retries_3(self):
+        """_akshare_retry should be called with max_retries=3 for hot-rank calls."""
+        with patch(
+            "tradingagents.dataflows.eastmoney_sentiment._akshare_retry"
+        ) as mock_retry:
+            mock_retry.side_effect = [None, _FAKE_HOT_RANK_DETAIL_DF]
+            fetch_eastmoney_hot_rank("600519.SS")
+            for call in mock_retry.call_args_list:
+                assert call.kwargs.get("max_retries") == 3, (
+                    f"Expected max_retries=3, got {call.kwargs.get('max_retries')}"
+                )
+
 
 # ===================================================================
 # Guba sentiment tests
@@ -198,6 +210,19 @@ class TestFetchEastmoneyGubaSentiment:
         assert "unavailable" in result.lower() or "RuntimeError" in result
         # Should still return the structure with placeholders
         assert "股吧情绪" in result
+
+    def test_guba_uses_max_retries_3(self):
+        """_akshare_retry should be called with max_retries=3 for all guba sentiment calls."""
+        with patch(
+            "tradingagents.dataflows.eastmoney_sentiment._akshare_retry"
+        ) as mock_retry:
+            mock_retry.return_value = pd.DataFrame()
+            fetch_eastmoney_guba_sentiment("600519.SS")
+            assert len(mock_retry.call_args_list) >= 3
+            for call in mock_retry.call_args_list:
+                assert call.kwargs.get("max_retries") == 3, (
+                    f"Expected max_retries=3, got {call.kwargs.get('max_retries')}"
+                )
 
     def test_bj_stock_works(self):
         """北交所 stocks should also work."""
