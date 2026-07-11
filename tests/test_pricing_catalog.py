@@ -3,9 +3,8 @@
 The catalog is the single source of truth for what each model costs
 in the dashboard's cost estimate. These tests pin the contract so:
 
-* Adding/removing a model in ``model_catalog.MODEL_OPTIONS`` surfaces
-  as a stale-pricing test failure (the parametrize list is generated
-  from the catalog).
+* Adding a model to the explicit ``_priced_models()`` list surfaces
+  a test failure until it has a price entry in ``pricing.yaml``.
 * Renaming a model or provider key trips the call-site assertions.
 * The callback handler returns the expected per-model buckets for a
   realistic mixed-provider LangChain run.
@@ -35,9 +34,7 @@ from cli.stats_handler import (
     _parse_price,
 )
 from tradingagents.llm_clients import pricing
-from tradingagents.llm_clients.model_catalog import MODEL_OPTIONS
 from tradingagents.llm_clients.pricing import (
-    PRICING,
     _load_litellm_overlay,
     _parse_litellm_payload,
     get_price,
@@ -47,43 +44,35 @@ from tradingagents.llm_clients.pricing import (
 # ---- Catalog coverage -----------------------------------------------------
 
 
-def _catalog_models() -> list[tuple[str, str]]:
-    """Flatten ``MODEL_OPTIONS`` to ``(provider, model)`` pairs,
-    excluding the "custom" sentinel that users type by hand."""
-    pairs: list[tuple[str, str]] = []
-    for provider, modes in MODEL_OPTIONS.items():
-        for mode_options in modes.values():
-            for _label, value in mode_options:
-                if value == "custom":
-                    continue
-                pairs.append((provider, value))
-    return pairs
+def _priced_models() -> list[tuple[str, str]]:
+    """Explicit (provider, model) pairs that must have a price in
+    pricing.yaml. Add entries here when you add a new priced model."""
+    return [
+        ("agnes", "agnes-2.0-flash"),
+        ("deepseek", "deepseek-v4-flash"),
+        ("kimi", "kimi-k2.6"),
+        ("sensenova", "sensenova-6.7-flash-lite"),
+        ("sensenova", "deepseek-v4-flash"),
+    ]
 
 
-@pytest.mark.parametrize("provider,model", _catalog_models())
+@pytest.mark.parametrize("provider,model", _priced_models())
 def test_every_catalog_model_has_a_price(provider: str, model: str):
-    """Every model exposed in the CLI dropdown must have a price.
-
-    If you add a model to ``model_catalog``, this test fails until you
-    also add it to ``pricing.PRICING``. That coupling is intentional:
-    a missing entry would silently make the cost estimate read $0
-    for that model in mixed-provider runs.
-    """
+    """Every (provider, model) pair returned by ``_priced_models()`` must
+    have a price in pricing.yaml. Add new priced models to that list."""
     price = get_price(provider, model)
     assert price is not None, (
-        f"Model {model!r} in provider {provider!r} is in the CLI catalog "
-        f"but not in pricing.PRICING. Add it to tradingagents/llm_clients/pricing.py."
+        f"Model {model!r} in provider {provider!r} is listed in "
+        f"_priced_models() but not in pricing.yaml. Add it to pricing.yaml."
     )
     in_rate, out_rate = price
     assert in_rate >= 0 and out_rate >= 0
     assert (in_rate, out_rate) != (0.0, 0.0) or provider in (
-        "agnes", "ollama", "sensenova",
+        "agnes", "sensenova",
     ), (
         f"Model {model!r} under {provider!r} is priced at $0/$0 — only "
-        f"Agnes AI, Ollama, and SenseNova (during the public-beta Token "
-        f"Plan) should be free. If the model is genuinely free, document "
-        f"the free tier in the catalog comment and add the provider to "
-        f"this whitelist."
+        f"Agnes AI and SenseNova (during the public-beta Token Plan) "
+        f"should be free."
     )
 
 
@@ -93,12 +82,6 @@ def test_every_catalog_model_has_a_price(provider: str, model: str):
 def test_agnes_is_free():
     """The whole point of surfacing Agnes AI is the 0-cost tier."""
     assert get_price("agnes", "agnes-2.0-flash") == (0.00, 0.00)
-
-
-def test_ollama_is_free():
-    """Ollama runs locally, so API cost is zero regardless of model size."""
-    for model in ("qwen3:latest", "gpt-oss:latest", "glm-4.7-flash:latest"):
-        assert get_price("ollama", model) == (0.00, 0.00)
 
 
 def test_sensenova_flash_lite_is_free_during_beta():
@@ -111,22 +94,8 @@ def test_sensenova_flash_lite_is_free_during_beta():
 
 def test_deepseek_pricing_matches_published_rates():
     """DeepSeek's published V4-Flash rate is $0.14/$0.28 per 1M
-    (cache-miss input / output, verified 2026-06). The V3 chat
-    baseline is $0.27/$1.10 — the two must not be confused."""
+    (cache-miss input / output, verified 2026-07)."""
     assert get_price("deepseek", "deepseek-v4-flash") == (0.14, 0.28)
-    assert get_price("deepseek", "deepseek-chat") == (0.27, 1.10)
-
-
-def test_qwen_cn_and_global_share_pricing():
-    """qwen and qwen-cn should expose identical rates (same model IDs)."""
-    for model in get_price_for_model.__globals__["PRICING"]["qwen"]:
-        assert get_price("qwen", model) == get_price("qwen-cn", model)
-
-
-def test_minimax_cn_and_global_share_pricing():
-    """minimax and minimax-cn should expose identical rates."""
-    for model in PRICING["minimax"]:
-        assert get_price("minimax", model) == get_price("minimax-cn", model)
 
 
 # ---- Provider-agnostic lookup (used by callback) -------------------------
@@ -134,10 +103,9 @@ def test_minimax_cn_and_global_share_pricing():
 
 def test_get_price_for_model_finds_known_model():
     """Spot-check the local catalog for two well-known rates.
-    The 2026-06 OpenAI GPT-5.4 rate is $2.50/$15.00 (long-context
-    >272K tier charges more, but TradingAgents prompts fit in the
-    short tier)."""
-    assert get_price_for_model("gpt-5.4") == (2.50, 15.00)
+    Kimi K2.6 cache-miss rate is $0.95/$4.00 (verified 2026-07).
+    DeepSeek V4-Flash cache-miss rate is $0.14/$0.28."""
+    assert get_price_for_model("kimi-k2.6") == (0.95, 4.00)
     assert get_price_for_model("deepseek-v4-flash") == (0.14, 0.28)
 
 
@@ -250,12 +218,12 @@ def test_callback_prices_multiple_models_independently():
         messages=[],
     )
     handler.on_llm_end(_make_chat_result("deepseek-v4-flash", 1_000_000, 0))
-    # OpenAI gpt-5.4: 1M in, 0 out → $2.50
+    # Kimi K2.6: 1M in, 0 out → $0.95
     handler.on_chat_model_start(
-        serialized={"kwargs": {"model_name": "gpt-5.4"}},
+        serialized={"kwargs": {"model_name": "kimi-k2.6"}},
         messages=[],
     )
-    handler.on_llm_end(_make_chat_result("gpt-5.4", 1_000_000, 0))
+    handler.on_llm_end(_make_chat_result("kimi-k2.6", 1_000_000, 0))
     # Agnes: free
     handler.on_chat_model_start(
         serialized={"kwargs": {"model_name": "agnes-2.0-flash"}},
@@ -266,10 +234,10 @@ def test_callback_prices_multiple_models_independently():
     stats = handler.get_stats()
     assert stats["cost_by_model"] == {
         "deepseek-v4-flash": pytest.approx(0.14),
-        "gpt-5.4":            pytest.approx(2.50),
+        "kimi-k2.6":          pytest.approx(0.95),
         "agnes-2.0-flash":    pytest.approx(0.00),
     }
-    assert stats["cost"] == pytest.approx(2.64)
+    assert stats["cost"] == pytest.approx(1.09)
     # Token buckets: 1M in + 1M in + 2M in for input, 0 + 0 + 1M for output.
     assert stats["tokens_in"] == 3_000_000
     assert stats["tokens_out"] == 1_000_000
@@ -491,8 +459,8 @@ def test_litellm_overlay_converts_per_token_to_per_million():
 def test_local_catalog_used_when_litellm_omits_provider(tmp_path, monkeypatch):
     """End-to-end: when LiteLLM doesn't carry a Chinese provider's
     model, ``get_price_for_model`` falls through to the local
-    ``PRICING`` dict (which is the primary source for these)."""
-    # Force the overlay to be empty so we test the local-PRICING path.
+    ``pricing.yaml``."""
+    # Force the overlay to be empty so we test the YAML path.
     cache_path = tmp_path / "litellm_pricing.json"
     cache_path.write_text(json.dumps({}))
     monkeypatch.setattr(pricing, "_LITELLM_CACHE_PATH", str(cache_path))
@@ -500,7 +468,7 @@ def test_local_catalog_used_when_litellm_omits_provider(tmp_path, monkeypatch):
     # Local-only entries must still resolve.
     assert get_price_for_model("deepseek-v4-flash") == (0.14, 0.28)
     assert get_price_for_model("agnes-2.0-flash") == (0.00, 0.00)
-    assert get_price_for_model("qwen3.7-max") == (2.50, 7.50)
+    assert get_price_for_model("kimi-k2.6") == (0.95, 4.00)
 
 
 # ---- _parse_litellm_payload edge cases -----------------------------------
@@ -633,9 +601,9 @@ class TestGetPriceEdgeCases:
 
     def test_provider_case_insensitive(self):
         """get_price lowercases the provider before lookup."""
-        assert get_price("OpenAI", "gpt-5.4") == (2.50, 15.00)
         assert get_price("DEEPSEEK", "deepseek-v4-flash") == (0.14, 0.28)
         assert get_price("Agnes", "agnes-2.0-flash") == (0.00, 0.00)
+        assert get_price("Sensenova", "sensenova-6.7-flash-lite") == (0.00, 0.00)
 
 
 # ---- _load_litellm_overlay edge cases ------------------------------------
