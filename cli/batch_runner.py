@@ -25,6 +25,7 @@ from cli.dashboard import (
 from cli.stats_handler import StatsCallbackHandler
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.llm_clients.pricing import get_usd_to_cny_rate
 
 console = Console()
 
@@ -1061,11 +1062,11 @@ class BatchRunner:
             cost_by_model = self.batch_stats["cost_by_model"]
             if cost_by_model:
                 total_cost = sum(cost_by_model.values())
-                lines.append(f"- **Total cost**: ${total_cost:.4f}")
-                # By-model breakdown sorted by cost desc
+                cny_rate = get_usd_to_cny_rate()
+                lines.append(f"- **Total cost**: ${total_cost:.4f}（¥{total_cost * cny_rate:.2f}）")
                 lines.append("- **By model**:")
                 for model, cost in sorted(cost_by_model.items(), key=lambda kv: -kv[1]):
-                    lines.append(f"  - {model}: ${cost:.4f}")
+                    lines.append(f"  - {model}: ${cost:.4f}（¥{cost * cny_rate:.2f}）")
             else:
                 lines.append("- **Total cost**: — (no priced models in this batch)")
 
@@ -1075,7 +1076,20 @@ class BatchRunner:
 
         # Write JSON summary for downstream processing
         json_path = self.output_dir / "batch_summary.json"
-        json_path.write_text(json.dumps(json_rows, ensure_ascii=False, indent=2), encoding="utf-8")
+        json_output = {
+            "rows": json_rows,
+            "totals": {
+                "tokens_in": self.batch_stats.get("tokens_in", 0),
+                "tokens_out": self.batch_stats.get("tokens_out", 0),
+                "cost_by_model": dict(self.batch_stats.get("cost_by_model", {})),
+            },
+        }
+        json_output["totals"]["total_cost_usd"] = sum(json_output["totals"]["cost_by_model"].values())
+        json_output["totals"]["usd_to_cny_rate"] = get_usd_to_cny_rate()
+        json_output["totals"]["total_cost_cny"] = (
+            json_output["totals"]["total_cost_usd"] * json_output["totals"]["usd_to_cny_rate"]
+        )
+        json_path.write_text(json.dumps(json_output, ensure_ascii=False, indent=2), encoding="utf-8")
 
         return md_path
 

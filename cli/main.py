@@ -34,6 +34,7 @@ from tradingagents.graph.analyst_execution import (
     sync_analyst_tracker_from_chunk,
 )
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.llm_clients.pricing import get_usd_to_cny_rate
 from tradingagents.reporting import write_report_tree
 
 console = Console()
@@ -1114,6 +1115,24 @@ def run_batch_analysis(
                 "✅",
             )
     console.print(table)
+
+    if runner.batch_stats.get("tokens_in", 0) > 0:
+        tin = runner.batch_stats["tokens_in"]
+        tout = runner.batch_stats["tokens_out"]
+        tin_str = f"{tin / 1000:.1f}k" if tin >= 1000 else str(tin)
+        tout_str = f"{tout / 1000:.1f}k" if tout >= 1000 else str(tout)
+        cost_by_model = runner.batch_stats.get("cost_by_model", {})
+        total_cost = sum(cost_by_model.values())
+        cny_rate = get_usd_to_cny_rate()
+        console.print("\n[bold]Batch Cost Summary[/bold]")
+        console.print(f"  Tokens: {tin_str}\u2191 {tout_str}\u2193")
+        if cost_by_model:
+            console.print(f"  Total Cost: [yellow]${total_cost:.4f}[/yellow] (\u00a5{total_cost * cny_rate:.2f})")
+            console.print("  By Model:")
+            for model, cost in sorted(cost_by_model.items(), key=lambda kv: -kv[1]):
+                console.print(f"    {model}: ${cost:.4f} (\u00a5{cost * cny_rate:.2f})")
+        else:
+            console.print("  Total Cost: \u2014 (no priced models in this batch)")
 
     # For single-ticker runs, offer to display the complete report
     if not headless and len(tickers) == 1:
