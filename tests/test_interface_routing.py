@@ -163,6 +163,31 @@ class TestGetCategoryForMethod:
         with pytest.raises(ValueError, match="not found in any category"):
             interface.get_category_for_method("nonexistent_method")
 
+    def test_all_vendor_methods_have_category(self):
+        """Every method in VENDOR_METHODS must belong to a TOOLS_CATEGORIES category."""
+        from tradingagents.dataflows import interface
+
+        all_categorized = {
+            tool
+            for cat in interface.TOOLS_CATEGORIES.values()
+            for tool in cat["tools"]
+        }
+        missing = [m for m in interface.VENDOR_METHODS if m not in all_categorized]
+        assert not missing, (
+            f"Methods without category: {missing}. "
+            f"Add them to TOOLS_CATEGORIES in interface.py"
+        )
+
+    def test_newly_added_tools_map_correctly(self):
+        """Verify the 5 previously-missing tools now have correct categories."""
+        from tradingagents.dataflows import interface
+
+        assert interface.get_category_for_method("get_company_announcements") == "governance_risk"
+        assert interface.get_category_for_method("get_margin_trading") == "governance_risk"
+        assert interface.get_category_for_method("get_dragon_tiger") == "governance_risk"
+        assert interface.get_category_for_method("get_block_trade") == "governance_risk"
+        assert interface.get_category_for_method("get_shareholder_count") == "fundamental_data"
+
 
 @pytest.mark.unit
 class TestGetVendor:
@@ -412,4 +437,79 @@ class TestRouteToVendorSentinel(unittest.TestCase):
                 "get_stock_data", "FAKE", "2026-01-01", "2026-01-10"
             )
         self.assertIn("NO_DATA_AVAILABLE", result)
+
+
+# ===========================================================================
+# Regression: every tool bound by analysts must route through a category.
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestAnalystBoundToolsHaveCategories:
+    """Every tool imported and used by an analyst must have a TOOLS_CATEGORIES entry."""
+
+    def test_governance_analyst_tools_all_categorized(self):
+        from tradingagents.agents.utils.agent_utils import (
+            get_company_announcements,
+            get_dragon_tiger,
+            get_insider_transactions,
+            get_institutional_holdings,
+            get_margin_trading,
+            get_news,
+            get_northbound_hold,
+            get_pledge_ratio,
+            get_restricted_release,
+        )
+        from tradingagents.dataflows import interface
+
+        for tool_fn in [
+            get_company_announcements,
+            get_insider_transactions,
+            get_news,
+            get_restricted_release,
+            get_institutional_holdings,
+            get_northbound_hold,
+            get_margin_trading,
+            get_pledge_ratio,
+            get_dragon_tiger,
+        ]:
+            cat = interface.get_category_for_method(tool_fn.name)
+            assert cat is not None
+
+    def test_fundamentals_analyst_tools_all_categorized(self):
+        from tradingagents.agents.utils.agent_utils import (
+            get_balance_sheet,
+            get_cashflow,
+            get_dividend_history,
+            get_earnings_estimates,
+            get_fundamentals,
+            get_income_statement,
+            get_shareholder_count,
+        )
+        from tradingagents.dataflows import interface
+
+        for tool_fn in [
+            get_fundamentals,
+            get_balance_sheet,
+            get_cashflow,
+            get_income_statement,
+            get_earnings_estimates,
+            get_shareholder_count,
+            get_dividend_history,
+        ]:
+            cat = interface.get_category_for_method(tool_fn.name)
+            assert cat is not None
+
+    def test_market_analyst_tools_all_categorized(self):
+        from tradingagents.agents.utils.agent_utils import (
+            get_fund_flow,
+            get_indicators,
+            get_sector_fund_flow,
+            get_stock_data,
+        )
+        from tradingagents.dataflows import interface
+
+        for tool_fn in [get_stock_data, get_indicators, get_fund_flow, get_sector_fund_flow]:
+            cat = interface.get_category_for_method(tool_fn.name)
+            assert cat is not None
 
