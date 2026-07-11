@@ -19,8 +19,9 @@ logger = logging.getLogger(__name__)
 
 GAMMA_BASE = "https://gamma-api.polymarket.com"
 
-# Network timeout (seconds), consistent with the other vendors.
-REQUEST_TIMEOUT = 30
+# Network timeout (seconds). Polymarket gamma-api is often unreachable from
+# Chinese networks; keep the timeout low to fail fast rather than hang.
+REQUEST_TIMEOUT = 5
 
 # Default number of markets to return, ranked by traded volume.
 DEFAULT_LIMIT = 6
