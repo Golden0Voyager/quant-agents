@@ -1,0 +1,37 @@
+# Pricing configuration — USD per million tokens (input, output).
+#
+# Edit this file to add or override model prices without touching
+# Python source. This is the primary local pricing source (the
+# LiteLLM community catalog is checked first, then this file).
+#
+# Format:
+#   provider_name:
+#     model_name: [input_price_per_1M, output_price_per_1M]
+#
+agnes:
+  agnes-2.0-flash: [0.0, 0.0]
+
+deepseek:
+  deepseek-v4-flash: [0.14, 0.28]
+  deepseek-v4-pro: [0.435, 0.87]
+
+kimi:
+  kimi-k2.6: [0.95, 4.0]
+  kimi-k2.7-code: [0.95, 4.0]
+
+modelscope:
+  deepseek-ai/DeepSeek-V4-Flash: [0.14, 0.28]
+  deepseek-ai/DeepSeek-V4-Pro: [0.435, 0.87]
+  stepfun-ai/Step-3.7-Flash: [0.20, 1.15]
+  MiniMax/MiniMax-M3: [0.30, 1.20]
+  Qwen/Qwen3.5-397B-A17B: [0.60, 3.60]
+  ZhipuAI/GLM-5.2: [1.20, 4.10]
+
+openrouter:
+  nvidia/nemotron-3-ultra-550b-a55b:free: [0.0, 0.0]
+  nvidia/nemotron-3-super-120b-a12b:free: [0.0, 0.0]
+
+sensenova:
+  deepseek-v4-flash: [0.14, 0.28]
+  sensenova-6.7-flash-lite: [0.0, 0.0]
+
