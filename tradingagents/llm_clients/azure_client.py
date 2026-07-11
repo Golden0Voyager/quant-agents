@@ -38,7 +38,7 @@ class AzureOpenAIClient(BaseLLMClient):
         self._require_model()
         self.warn_if_unknown_model()
 
-        llm_kwargs = {
+        llm_kwargs: dict[str, Any] = {
             "model": self.model,
             "azure_deployment": os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME", self.model),
         }
@@ -53,7 +53,7 @@ class AzureOpenAIClient(BaseLLMClient):
 
         llm = NormalizedAzureChatOpenAI(**llm_kwargs)
         if retry_config is not None:
-            llm._retry_config = retry_config
+            llm._retry_config = retry_config  # type: ignore[attr-defined]
         return llm
 
     def validate_model(self) -> bool:

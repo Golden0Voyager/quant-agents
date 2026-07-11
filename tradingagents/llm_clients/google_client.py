@@ -29,7 +29,7 @@ class GoogleClient(BaseLLMClient):
         """Return configured ChatGoogleGenerativeAI instance."""
         self._require_model()
         self.warn_if_unknown_model()
-        llm_kwargs = {"model": self.model}
+        llm_kwargs: dict[str, Any] = {"model": self.model}
 
         if self.base_url:
             llm_kwargs["base_url"] = self.base_url
@@ -59,7 +59,7 @@ class GoogleClient(BaseLLMClient):
 
         llm = NormalizedChatGoogleGenerativeAI(**llm_kwargs)
         if retry_config is not None:
-            llm._retry_config = retry_config
+            llm._retry_config = retry_config  # type: ignore[attr-defined]
         return llm
 
     def validate_model(self) -> bool:
