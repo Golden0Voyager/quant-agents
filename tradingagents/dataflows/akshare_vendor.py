@@ -548,8 +548,6 @@ def get_fund_flow(symbol: str) -> str:
 def get_northbound_hold(symbol: str) -> str:
     """Fetch A-share northbound (Stock Connect) holding data."""
     code = to_akshare_symbol(symbol, "bare")
-    prefix = to_akshare_symbol(symbol, "lower_prefix")[:2]
-
     with _akshare_task_context(f"🌏 {symbol} 北向资金"), no_proxy():
         df = _safe_call(ak.stock_hsgt_individual_em, symbol=code)
 

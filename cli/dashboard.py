@@ -132,7 +132,7 @@ class AnalysisDashboard:
 
     def reset_per_stock(self, clear_messages: bool = True) -> None:
         """清空单只股票的运行时状态（batch 切股时使用）。
-        
+
         Args:
             clear_messages: 是否清空消息和工具调用历史。
                 在 batch 模式下设为 False 以保留跨标的的初始化消息。

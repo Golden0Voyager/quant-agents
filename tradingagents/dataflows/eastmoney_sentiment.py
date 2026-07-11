@@ -270,10 +270,10 @@ def fetch_eastmoney_guba_sentiment(ticker: str, limit: int = 10) -> str:
         "▎千股千评综合评分",
         "\n".join(comment_lines),
         "",
-        "▎用户关注指数 (近{limit}个交易日)".format(limit=len(focus_lines)),
+        f"▎用户关注指数 (近{len(focus_lines)}个交易日)",
         "\n".join(focus_lines) if focus_lines else "  <无数据>",
         "",
-        "▎参与意愿趋势 (近{limit}个交易日)".format(limit=len(desire_lines)),
+        f"▎参与意愿趋势 (近{len(desire_lines)}个交易日)",
         "\n".join(desire_lines) if desire_lines else "  <无数据>",
     ]
     return "\n".join(parts)

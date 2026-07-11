@@ -5,7 +5,6 @@ from datetime import datetime
 
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
-
 from yfinance.exceptions import YFRateLimitError
 
 from .config import get_config
@@ -134,7 +133,7 @@ def get_news_yfinance(
         raise VendorRateLimitError(
             f"Yahoo Finance rate-limited for ticker {ticker}. "
             f"Vendor fallback to akshare will be attempted."
-        )
+        ) from None
     except Exception as e:
         return f"Error fetching news for {ticker}: {str(e)}"
 
@@ -227,6 +226,6 @@ def get_global_news_yfinance(
         raise VendorRateLimitError(
             "Yahoo Finance rate-limited for global news search. "
             "Vendor fallback will be attempted."
-        )
+        ) from None
     except Exception as e:
         return f"Error fetching global news: {str(e)}"
