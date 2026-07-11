@@ -43,4 +43,4 @@ class BatchDashboard(AnalysisDashboard):
 
     def reset_for_next_stock(self) -> None:
         """Clear per-stock state when moving to the next ticker."""
-        self.reset_per_stock()
+        self.reset_per_stock(clear_messages=False)

@@ -8,10 +8,14 @@ Reddit/X/StockTwits content under prompt pressure (verified live).
 The redesigned agent pre-fetches three complementary data sources before
 the LLM is invoked and injects them into the prompt as structured blocks:
 
-  1. News headlines     — Yahoo Finance (institutional framing)
-  2. StockTwits messages — retail-trader posts indexed by cashtag, with
-                           user-labeled Bullish/Bearish sentiment tags
-  3. Reddit posts        — r/wallstreetbets, r/stocks, r/investing
+  1. News headlines       — Yahoo Finance (institutional framing)
+  2. Eastmoney hot rank   — 个股人气排名, rank-trajectory and fan
+                            composition (新晋粉丝 / 铁杆粉丝)
+  3. Eastmoney Guba       — 千股千评 综合评分, 用户关注指数,
+                            参与意愿趋势 from 东方财富 股吧
+
+StockTwits and Reddit were removed in 2026-Q3 because their public
+endpoints became reliably unreliable (StockTwits 403, Reddit SSL errors).
 
 The agent does not use tool-calling; the data is in the prompt from
 turn 0. Output uses the structured-output pattern (json_schema for
@@ -40,8 +44,10 @@ from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
-from tradingagents.dataflows.reddit import fetch_reddit_posts
-from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
+from tradingagents.dataflows.eastmoney_sentiment import (
+    fetch_eastmoney_guba_sentiment,
+    fetch_eastmoney_hot_rank,
+)
 
 
 def _seven_days_back(trade_date: str) -> str:
@@ -51,10 +57,10 @@ def _seven_days_back(trade_date: str) -> str:
 def create_sentiment_analyst(llm):
     """Create a sentiment analyst node for the trading graph.
 
-    Pre-fetches news + StockTwits + Reddit data, injects them into the
-    prompt as structured blocks, and produces a deterministic sentiment
-    report via structured output (with a free-text fallback for providers
-    that do not support it).
+    Pre-fetches news (Yahoo Finance) + Eastmoney hot rank + Eastmoney Guba
+    sentiment indicators, injects them into the prompt as structured blocks,
+    and produces a deterministic sentiment report via structured output
+    (with a free-text fallback for providers that do not support it).
     """
     structured_llm = bind_structured(llm, SentimentReport, "Sentiment Analyst")
 
@@ -69,8 +75,8 @@ def create_sentiment_analyst(llm):
         # returns a string (no exceptions surface from here), so the LLM
         # always sees something — either real data or a clear placeholder.
         news_block = get_news.func(ticker, start_date, end_date)
-        stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
-        reddit_block = fetch_reddit_posts(ticker)
+        hot_rank_block = fetch_eastmoney_hot_rank(ticker)
+        guba_block = fetch_eastmoney_guba_sentiment(ticker)
 
         system_message = _build_system_message(
             ticker=ticker,
@@ -78,8 +84,8 @@ def create_sentiment_analyst(llm):
             start_date=start_date,
             end_date=end_date,
             news_block=news_block,
-            stocktwits_block=stocktwits_block,
-            reddit_block=reddit_block,
+            hot_rank_block=hot_rank_block,
+            guba_block=guba_block,
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -132,8 +138,8 @@ def _build_system_message(
     start_date: str,
     end_date: str,
     news_block: str,
-    stocktwits_block: str,
-    reddit_block: str,
+    hot_rank_block: str,
+    guba_block: str,
 ) -> str:
     """Assemble the sentiment-analyst system message with structured data blocks."""
     ticker_guard = (
@@ -151,33 +157,37 @@ Institutional framing. Fact-driven, slower-moving signal.
 {news_block}
 <end_of_news>
 
-### StockTwits messages — retail-trader social platform indexed by cashtag
-Fast-moving signal. Each message carries a user-labeled sentiment tag (Bullish / Bearish / no-label) plus the message body.
+### Eastmoney 人气排名 — retail investor attention ranking on 东方财富
+Aggregate ranking of the stock among all A-shares on the Eastmoney platform. Shows the stock's current rank in the top-100 hot list (price, change %), plus a historical time-series of rank position and fan-composition metrics (新晋粉丝 = new followers, 铁杆粉丝 = loyal fans). Higher rank + rising loyal-fan ratio signals growing retail conviction.
 
-<start_of_stocktwits>
-{stocktwits_block}
-<end_of_stocktwits>
+<start_of_hot_rank>
+{hot_rank_block}
+<end_of_hot_rank>
 
-### Reddit posts — r/wallstreetbets, r/stocks, r/investing (past 7 days)
-Community discussion. Engagement signal via upvote score and comment count. Subreddit character matters (r/wallstreetbets is often contrarian/exuberant; r/stocks more measured; r/investing longer-term).
+### Eastmoney 股吧情绪 — Guba sentiment indicators from 千股千评
+Three quantitative sentiment signals from the Eastmoney 股吧 (stock bar) community:
 
-<start_of_reddit>
-{reddit_block}
-<end_of_reddit>
+  - **综合得分** (Comprehensive Score, 0–100): Composite rating based on technicals, fundamentals, and institutional participation. Higher = more bullish aggregate sentiment.
+  - **用户关注指数** (User Attention Index, 0–100): Daily attention intensity. A sudden spike often precedes significant price moves.
+  - **参与意愿** (Participation Willingness): Whether retail investors are inclined to buy (higher = more willing). Trend direction (5-day average and daily change) is more informative than the absolute level.
+
+<start_of_guba>
+{guba_block}
+<end_of_guba>
 
 ## How to analyze this data (best practices)
 
-1. **Read the StockTwits Bullish/Bearish ratio as a leading retail-sentiment signal.** A 70/30 bullish/bearish split is moderately bullish; ≥90/10 may indicate over-extension and contrarian risk; 50/50 is uncertainty. Sample size matters — base rates on the actual message count, not percentages alone.
+1. **Read the 人气排名 trend as a retail-attention signal.** A stock rising in rank (lower number = better) with increasing 铁杆粉丝 ratio suggests growing retail conviction. A sudden spike into the top 10 without a news catalyst may indicate coordinated retail attention (contrarian risk).
 
-2. **Look for cross-source divergences.** If news framing is bearish but StockTwits is overwhelmingly bullish, that mismatch is itself a signal — it can mean retail is leaning into a thesis the news flow hasn't caught up to (or vice versa, that retail is chasing while institutions are cautious).
+2. **Look for cross-source divergences.** If news framing is bearish but Eastmoney 综合得分 is high (e.g., >70) and 参与意愿 is rising, that mismatch is itself a signal — retail may be leaning into a thesis the news flow hasn't caught up to (or vice versa, that retail is chasing while institutions are cautious).
 
-3. **Weight Reddit posts by engagement.** A 400-upvote / 200-comment thread reflects community attention; a 3-upvote post is noise. Read the body excerpts for context — the title alone often misleads.
+3. **Weight the 用户关注指数 spike as a leading indicator.** A sudden jump in attention (e.g., from 50 to 90) typically precedes price movement. The direction of the move depends on concurrent news — a spike with positive news is bullish; a spike with negative news is bearish; a spike with no news is high uncertainty.
 
-4. **Distinguish opinion from event.** A news headline ("Nvidia announces $500M Corning deal") is an event; a StockTwits post ("buying NVDA, this is going to moon") is opinion. Both are inputs but should be weighted differently in your conclusions.
+4. **Distinguish opinion from event.** A news headline ("Nvidia announces $500M Corning deal") is an event; quantitative sentiment indicators (综合得分, 参与意愿) are crowd-behavior measurements. Both are inputs but should be weighted differently in your conclusions.
 
-5. **Identify recurring narrative themes.** What topic keeps coming up across sources? That's the dominant narrative driving current sentiment.
+5. **Identify recurring narrative themes.** What topic keeps coming up in the news? That's the dominant narrative driving current sentiment. Complement it with the quantitative sentiment signals above.
 
-6. **Be honest about data limits.** If StockTwits returned only a handful of messages, or one or more sources returned an "<unavailable>" placeholder, the sentiment read is less robust — flag this explicitly in the `confidence` field and the narrative. If the sources are silent on a given subreddit, say so.
+6. **Be honest about data limits.** If one or more sources returned an "<unavailable>" placeholder, the sentiment read is less robust — flag this explicitly in the `confidence` field and the narrative. For non-A-share tickers, the Eastmoney sources will return a clear placeholder — explain that the analysis is based on news alone.
 
 7. **Identify catalysts and risks** that emerge across sources — news of upcoming earnings, product launches, competitive threats, macro headlines, etc.
 
@@ -190,7 +200,7 @@ Fill the following fields:
 - **overall_band**: Exactly one of Bullish / Mildly Bullish / Neutral / Mixed / Mildly Bearish / Bearish. Use Mixed when sources point in clearly different directions; Neutral only when all sources are genuinely silent.
 - **overall_score**: A number from 0 (maximally bearish) to 10 (maximally bullish); 5 is neutral. Keep it consistent with overall_band.
 - **confidence**: low / medium / high, based on data quality and sample size.
-- **narrative**: Full source-by-source breakdown, divergences, dominant narrative themes, catalysts and risks, and a markdown summary table of key sentiment signals (direction, source, supporting evidence).
+- **narrative**: Full source-by-source breakdown (news + Eastmoney hot rank + Guba sentiment indicators), divergences, dominant narrative themes, catalysts and risks, and a markdown summary table of key sentiment signals (direction, source, supporting evidence).
 
 {get_language_instruction()}"""
 

@@ -99,6 +99,7 @@ TOOLS_CATEGORIES = {
         "tools": [
             "get_indicators",
             "get_fund_flow",
+            "get_sector_fund_flow",
         ]
     },
     "fundamental_data": {
@@ -376,10 +377,11 @@ def route_to_vendor(method: str, *args, **kwargs):
     # Track whether we are serving an A-share ticker for targeted logging
     is_ashare = isinstance(symbol, str) and is_a_share_ticker(symbol)
 
-    # Skip A-share-only vendors for non-A-share tickers. smartmoney_db only
-    # carries local A-share data, and akshare only supports .SS/.SZ/.BJ symbols.
-    # Querying them for HK/US tickers is a wasted DB call + noisy error log.
-    if not is_ashare:
+    # Skip A-share-only vendors for non-A-share tickers, except for categories
+    # whose methods don't take a ticker as their first positional arg
+    # (macro_data, prediction_markets — these use indicator/event names instead).
+    skip_ashare_filter = category in ("macro_data", "prediction_markets")
+    if not is_ashare and not skip_ashare_filter:
         filtered = [v for v in vendor_chain if v not in ("smartmoney_db", "akshare")]
         if not filtered:
             # All vendors removed — this method has no HK/US-capable fallback.

@@ -104,7 +104,7 @@ class AnalysisDashboard:
 
     # ── State mutations ───────────────────────────────────────────
 
-    def init_for_analysis(self, selected_analysts: list[str]) -> None:
+    def init_for_analysis(self, selected_analysts: list[str], clear_messages: bool = True) -> None:
         self.selected_analysts = [a.lower() for a in selected_analysts]
         self.agent_status = {}
         for key in self.selected_analysts:
@@ -126,11 +126,17 @@ class AnalysisDashboard:
         self.stage_progress = 0.0
         self.overall_progress = 0.0
         self._tool_call_active.clear()
-        self.messages.clear()
-        self.tool_calls.clear()
+        if clear_messages:
+            self.messages.clear()
+            self.tool_calls.clear()
 
-    def reset_per_stock(self) -> None:
-        """清空单只股票的运行时状态（batch 切股时使用）。"""
+    def reset_per_stock(self, clear_messages: bool = True) -> None:
+        """清空单只股票的运行时状态（batch 切股时使用）。
+
+        Args:
+            clear_messages: 是否清空消息和工具调用历史。
+                在 batch 模式下设为 False 以保留跨标的的初始化消息。
+        """
         self.agent_status.clear()
         self.report_sections.clear()
         self.current_report = None
@@ -140,8 +146,9 @@ class AnalysisDashboard:
         self.stage_progress = 0.0
         self.overall_progress = 0.0
         self._tool_call_active.clear()
-        self.messages.clear()
-        self.tool_calls.clear()
+        if clear_messages:
+            self.messages.clear()
+            self.tool_calls.clear()
         self.selected_analysts.clear()
 
     def add_message(self, msg_type: str, content: str) -> None:
@@ -539,11 +546,16 @@ def render_messages_panel(layout: Layout, dashboard: AnalysisDashboard, batch_mo
     all_items = []
 
     if batch_mode:
-        # In batch mode: show only System / Data messages, skip tool calls
+        # Show messages from the pipeline + batch runner (Agent/Data/Info/System etc.)
         for ts, msg_type, content in dashboard.messages:
-            if msg_type in ("System", "Copy"):
-                content_str = str(content)[:200] if content else ""
-                all_items.append((ts, msg_type, content_str))
+            content_str = str(content)[:200] if content else ""
+            all_items.append((ts, msg_type, content_str))
+        # Also show the latest tool call per agent
+        for ts, tool_name, args in dashboard.tool_calls:
+            args_str = str(args)
+            if len(args_str) > 80:
+                args_str = args_str[:77] + "..."
+            all_items.append((ts, "Tool", f"{tool_name}: {args_str}"))
     else:
         for ts, tool_name, args in dashboard.tool_calls:
             args_str = str(args)
@@ -583,10 +595,13 @@ def render_messages_panel(layout: Layout, dashboard: AnalysisDashboard, batch_mo
         if focus_items and all_items:
             table.add_row("─" * 8, "─" * 10, "─" * 40, style="dim")
 
-    for ts, msg_type, content in all_items[:10]:
-        if not batch_mode and (ts, msg_type, content) in shown:
-            continue
-        table.add_row(ts, msg_type, Text(content, overflow="fold"))
+    if all_items:
+        for ts, msg_type, content in all_items[:10]:
+            if not batch_mode and (ts, msg_type, content) in shown:
+                continue
+            table.add_row(ts, msg_type, Text(content, overflow="fold"))
+    elif not batch_mode:
+        table.add_row("-", "等待", "等待运行时消息…", style="dim")
 
     layout["messages"].update(
         Panel(table, title="Messages & Tools", border_style="blue", padding=(1, 2))

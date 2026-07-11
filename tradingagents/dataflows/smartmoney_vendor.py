@@ -555,7 +555,48 @@ def get_restricted_release(symbol: str) -> str:
 
 
 def get_institutional_holdings(symbol: str) -> str:
-    raise RuntimeError("Institutional holdings not available in quant_core.db")
+    """Fetch institutional-holdings (机构持股) data from quant_core.db."""
+    code = _to_smartmoney_symbol(symbol)
+
+    df = _df_from_sql(
+        """
+        SELECT report_date AS Date, institution_count, type_counts
+        FROM institutional_holdings
+        WHERE ts_code = ?
+        ORDER BY report_date DESC
+        LIMIT 5
+        """,
+        (code,),
+    )
+
+    if df is None or df.empty:
+        raise RuntimeError(
+            f"No institutional-holdings data in quant_core.db for {symbol}"
+        )
+
+    lines = [
+        f"## {symbol.upper()} Institutional Holdings (机构持股) "
+        f"(source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)} report periods",
+        "",
+    ]
+    for _, row in df.iterrows():
+        lines.append(f"**Report Date**: {row['Date']}")
+        ic = row['institution_count']
+        lines.append(f"- 机构数量: {f'{ic:,.0f}' if pd.notna(ic) else 'N/A'}")
+        tc = row.get("type_counts")
+        if tc and str(tc).strip() and str(tc) != "nan":
+            import json
+
+            try:
+                parsed = json.loads(tc) if isinstance(tc, str) else tc
+                if isinstance(parsed, dict) and parsed:
+                    for k, v in parsed.items():
+                        lines.append(f"  - {k}: {v}")
+            except (json.JSONDecodeError, TypeError):
+                pass
+        lines.append("")
+    return "\n".join(lines)
 
 
 def get_northbound_hold(symbol: str) -> str:
@@ -688,7 +729,11 @@ def get_earnings_estimates(symbol: str) -> str:
     raise RuntimeError("Earnings estimates not available in quant_core.db")
 
 
-def get_macro_indicators() -> str:
+def get_macro_indicators(
+    indicator: str = "",
+    curr_date: str | None = None,
+    look_back_days: int | None = None,
+) -> str:
     raise RuntimeError("Macro indicators not available in quant_core.db")
 
 
@@ -698,6 +743,10 @@ def get_macro_indicators() -> str:
 
 def get_margin_trading(symbol: str) -> str:
     """Fetch margin-trading (融资融券) data from quant_core.db."""
+
+    def _fmt_num(value) -> str:
+        return f"{value:,.0f}" if pd.notna(value) else "N/A"
+
     code = _to_smartmoney_symbol(symbol)
 
     df = _df_from_sql(
@@ -723,10 +772,10 @@ def get_margin_trading(symbol: str) -> str:
     ]
     for _, row in df.iterrows():
         lines.append(f"**Date**: {row['Date']}")
-        lines.append(f"- 融资余额: {row['margin_balance']:,.0f}")
-        lines.append(f"- 融资买入额: {row['margin_buy']:,.0f}")
-        lines.append(f"- 融券余量: {row['short_balance']:,.0f}")
-        lines.append(f"- 融资融券余额: {row['total_balance']:,.0f}")
+        lines.append(f"- 融资余额: {_fmt_num(row['margin_balance'])}")
+        lines.append(f"- 融资买入额: {_fmt_num(row['margin_buy'])}")
+        lines.append(f"- 融券余量: {_fmt_num(row['short_balance'])}")
+        lines.append(f"- 融资融券余额: {_fmt_num(row['total_balance'])}")
         lines.append("")
     return "\n".join(lines)
 

@@ -8,6 +8,7 @@ monetary values pass through akshare_common.format_money_cn() so the unit
 from __future__ import annotations
 
 import logging
+import math
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Annotated
@@ -547,10 +548,8 @@ def get_fund_flow(symbol: str) -> str:
 def get_northbound_hold(symbol: str) -> str:
     """Fetch A-share northbound (Stock Connect) holding data."""
     code = to_akshare_symbol(symbol, "bare")
-    prefix = to_akshare_symbol(symbol, "lower_prefix")[:2]
-
     with _akshare_task_context(f"🌏 {symbol} 北向资金"), no_proxy():
-        df = _safe_call(ak.stock_hsgt_individual_em, stock=code, market=prefix)
+        df = _safe_call(ak.stock_hsgt_individual_em, symbol=code)
 
     if df is None or df.empty:
         return f"No northbound holding data found for {symbol} via akshare."
@@ -562,11 +561,11 @@ def get_northbound_hold(symbol: str) -> str:
         "",
     ]
     for _, row in df.iterrows():
-        lines.append(f"**Date**: {row.get('日期', 'N/A')}")
+        lines.append(f"**Date**: {row.get('持股日期', 'N/A')}")
         lines.append(f"- Holding Shares: {row.get('持股数量', 'N/A')}")
         lines.append(f"- Holding Market Value: {row.get('持股市值', 'N/A')}")
-        lines.append(f"- % of Tradable Shares: {row.get('占流通股比例', 'N/A')}%")
-        lines.append(f"- Net Buy (shares): {row.get('当日成交净买额', 'N/A')}")
+        lines.append(f"- % of Tradable Shares: {row.get('持股数量占A股百分比', 'N/A')}%")
+        lines.append(f"- Daily Net Buy Shares: {row.get('今日增持股数', 'N/A')}")
         lines.append("")
 
     return "\n".join(lines)
@@ -705,9 +704,20 @@ def get_industry_valuation(symbol: str) -> str:
 
 
 def get_macro_indicators(
-    indicator: Annotated[str, 'Macro indicator: "pmi", "cpi", "m2", "social_finance"'],
+    indicator: Annotated[
+        str,
+        'Macro indicator: "pmi", "cpi", "m2", "social_finance"',
+    ],
+    curr_date: str | None = None,
+    look_back_days: int | None = None,
 ) -> str:
-    """Fetch China macro quantitative indicators via akshare."""
+    """Fetch China macro quantitative indicators via akshare.
+
+    Raises NoMarketDataError for indicators not supported by akshare, so the
+    vendor fallback chain (e.g. FRED) is tried next.
+    """
+    from tradingagents.dataflows.errors import NoMarketDataError
+
     indicator = indicator.lower().strip()
 
     with _akshare_task_context(f"📈 宏观指标: {indicator}"), no_proxy():
@@ -720,7 +730,7 @@ def get_macro_indicators(
             title = "China Consumer Price Index (CPI)"
             cols = None  # use all cols
         elif indicator == "m2":
-            df = _safe_call(ak.macro_china_m2)
+            df = _safe_call(ak.macro_china_money_supply)
             title = "China M2 Money Supply"
             cols = None
         elif indicator in ("social_finance", "社融"):
@@ -728,7 +738,10 @@ def get_macro_indicators(
             title = "China Aggregate Social Financing"
             cols = None
         else:
-            return f"Unsupported macro indicator: {indicator}. Supported: pmi, cpi, m2, social_finance."
+            raise NoMarketDataError(
+                indicator,
+                detail=f"Not an akshare-supported China macro indicator: {indicator}",
+            )
 
     if df is None or df.empty:
         return f"No macro data available for indicator '{indicator}' via akshare."
@@ -778,7 +791,7 @@ def get_margin_trading(symbol: str) -> str:
     not a margin-trading eligible A-share or when no data is available.
     """
     code = to_akshare_symbol(symbol, "bare")
-    exchange = to_akshare_symbol(symbol, "prefix")
+    exchange = to_akshare_symbol(symbol, "lower_prefix")[:2]
     date_str = _nearest_trade_date()
 
     with _akshare_task_context(f"📈 {symbol} 融资融券"), no_proxy():
@@ -1063,12 +1076,20 @@ def get_research_reports(symbol: str) -> str:
         "",
     ]
     for _, row in df.iterrows():
-        lines.append(f"**Title**: {row.get('报告标题', 'N/A')}")
-        lines.append(f"- 机构: {row.get('机构名称', 'N/A')}")
-        lines.append(f"- 分析师: {row.get('分析师', 'N/A')}")
-        lines.append(f"- 评级: {row.get('评级', 'N/A')}")
-        lines.append(f"- 目标价: {row.get('目标价', 'N/A')}")
-        lines.append(f"- 发布日期: {row.get('发布日期', 'N/A')}")
+        lines.append(f"**{row.get('报告名称', 'N/A')}**")
+        lines.append(f"- 机构: {row.get('机构', 'N/A')}")
+        lines.append(f"- 东财评级: {row.get('东财评级', 'N/A')}")
+        lines.append(f"- 日期: {row.get('日期', 'N/A')}")
+        lines.append(f"- 行业: {row.get('行业', 'N/A')}")
+        # optional earnings forecast columns
+        for yr in ["2026", "2027", "2028"]:
+            eps_key = f"{yr}-盈利预测-收益"
+            pe_key = f"{yr}-盈利预测-市盈率"
+            eps = row.get(eps_key)
+            pe = row.get(pe_key)
+            if eps is not None and not (isinstance(eps, float) and math.isnan(eps)):
+                pe_str = f", PE: {pe:.1f}" if pe is not None and not (isinstance(pe, float) and math.isnan(pe)) else ""
+                lines.append(f"  - {yr}E EPS: {eps:.2f}{pe_str}")
         lines.append("")
 
     return "\n".join(lines)

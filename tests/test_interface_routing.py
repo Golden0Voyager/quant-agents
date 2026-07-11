@@ -348,8 +348,11 @@ class TestRouteToVendorEdgeCases:
             result = interface.route_to_vendor(
                 "get_macro_indicators", "AAPL", curr_date="2026-05-14"
             )
-        assert "DATA_UNAVAILABLE" in result
-        assert "optional" in result
+        # akshare is tried first (macro_data bypasses A-share filtering) and
+        # raises NoMarketDataError for "AAPL" (not a valid China macro indicator).
+        # Since NoMarketDataError takes precedence over ConnectionError in the
+        # error handler, the sentinel is NO_DATA_AVAILABLE, not DATA_UNAVAILABLE.
+        assert "NO_DATA_AVAILABLE" in result
 
     def test_empty_vendor_chain_raises_runtime_error(self):
         """

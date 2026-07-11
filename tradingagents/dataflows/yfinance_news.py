@@ -5,8 +5,10 @@ from datetime import datetime
 
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
+from yfinance.exceptions import YFRateLimitError
 
 from .config import get_config
+from .errors import VendorRateLimitError
 from .stockstats_utils import yf_retry
 from .symbol_utils import normalize_symbol
 
@@ -95,7 +97,7 @@ def get_news_yfinance(
     resolved = "" if canonical == ticker else f" (resolved to {canonical})"
     try:
         stock = yf.Ticker(canonical)
-        news = yf_retry(lambda: stock.get_news(count=article_limit))
+        news = yf_retry(lambda: stock.get_news(count=article_limit), max_retries=1)
 
         if not news:
             return f"No news found for {ticker}{resolved}"
@@ -127,6 +129,11 @@ def get_news_yfinance(
 
         return f"## {ticker}{resolved} News, from {start_date} to {end_date}:\n\n{news_str}"
 
+    except YFRateLimitError:
+        raise VendorRateLimitError(
+            f"Yahoo Finance rate-limited for ticker {ticker}. "
+            f"Vendor fallback to akshare will be attempted."
+        ) from None
     except Exception as e:
         return f"Error fetching news for {ticker}: {str(e)}"
 
@@ -165,7 +172,7 @@ def get_global_news_yfinance(
                 query=q,
                 news_count=limit,
                 enable_fuzzy_query=True,
-            ))
+            ), max_retries=1)
 
             if search.news:
                 for article in search.news:
@@ -215,5 +222,10 @@ def get_global_news_yfinance(
 
         return f"## Global Market News, from {start_date} to {curr_date}:\n\n{news_str}"
 
+    except YFRateLimitError:
+        raise VendorRateLimitError(
+            "Yahoo Finance rate-limited for global news search. "
+            "Vendor fallback will be attempted."
+        ) from None
     except Exception as e:
         return f"Error fetching global news: {str(e)}"

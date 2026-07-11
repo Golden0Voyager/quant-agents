@@ -31,3 +31,15 @@ def test_dashboard_reset_for_next_stock():
     bd.reset_for_next_stock()
     assert bd.agent_status == {}
     assert bd.current_report is None
+
+
+def test_reset_for_next_stock_preserves_messages():
+    """reset_for_next_stock 应保留批次消息（batch 模式下不切消息）。"""
+    bd = BatchDashboard(total=3, profile_name="test")
+    bd.add_message("System", "批次初始化")
+    bd.add_message("System", "数据预检")
+    assert len(bd.messages) == 2
+
+    bd.reset_for_next_stock()
+    assert len(bd.messages) == 2, "reset_for_next_stock 不应清空消息"
+    assert "数据预检" in str(bd.messages[1])

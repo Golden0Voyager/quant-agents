@@ -341,7 +341,7 @@ class BatchRunner:
         selected_analyst_keys = [a for a in ANALYST_ORDER if a in self.profile_config.get("analysts", [])]
         if not selected_analyst_keys:
             selected_analyst_keys = ["market"]
-        self.dashboard.init_for_analysis(selected_analyst_keys)
+        self.dashboard.init_for_analysis(selected_analyst_keys, clear_messages=False)
 
         stats_handler = StatsCallbackHandler()
         graph = TradingAgentsGraph(

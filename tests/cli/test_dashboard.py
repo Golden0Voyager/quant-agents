@@ -49,6 +49,28 @@ class TestAnalysisDashboardInit:
         assert dashboard.report_sections.get("market_report") is None
         assert len(dashboard.messages) == 0
 
+    def test_init_for_analysis_preserves_messages(self):
+        """init_for_analysis(clear_messages=False) 应保留已有消息。"""
+        dashboard = AnalysisDashboard()
+        dashboard.init_for_analysis(["market"])
+        dashboard.add_message("System", "消息应保留")
+        dashboard.add_message("Data", "另一条消息")
+
+        dashboard.init_for_analysis(["news"], clear_messages=False)
+        assert len(dashboard.messages) == 2
+        assert "消息应保留" in str(dashboard.messages[0])
+
+    def test_reset_per_stock_preserves_messages(self):
+        """reset_per_stock(clear_messages=False) 应保留已有消息。"""
+        dashboard = AnalysisDashboard()
+        dashboard.init_for_analysis(["market"])
+        dashboard.add_message("System", "跨标的消息")
+
+        dashboard.reset_per_stock(clear_messages=False)
+        assert len(dashboard.messages) == 1        # 消息保留
+        assert len(dashboard.selected_analysts) == 0  # 其他状态正常清除
+        assert dashboard.current_report is None
+
 
 @pytest.mark.unit
 class TestReportSectionUpdates:
