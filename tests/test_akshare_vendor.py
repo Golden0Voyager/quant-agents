@@ -801,7 +801,7 @@ class TestGetMacroIndicators(TestCase):
         from tradingagents.dataflows import akshare_vendor
         m2_df = pd.DataFrame([{"月份": "2026-04", "M2": 2_500_000}])
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
-            mock_ak.macro_china_m2.return_value = m2_df
+            mock_ak.macro_china_money_supply.return_value = m2_df
             result = akshare_vendor.get_macro_indicators("m2")
         assert "M2" in result
 
@@ -813,10 +813,12 @@ class TestGetMacroIndicators(TestCase):
             result = akshare_vendor.get_macro_indicators("social_finance")
         assert "Social Financing" in result
 
-    def test_unsupported_indicator(self):
-        from tradingagents.dataflows import akshare_vendor
-        result = akshare_vendor.get_macro_indicators("gdp")
-        assert "Unsupported" in result
+    def test_unsupported_indicator_raises(self):
+        from tradingagents.dataflows.akshare_vendor import get_macro_indicators
+        from tradingagents.dataflows.errors import NoMarketDataError
+        with self.assertRaises(NoMarketDataError) as ctx:
+            get_macro_indicators("gdp")
+        self.assertIn("gdp", str(ctx.exception))
 
     def test_empty_data_returns_message(self):
         from tradingagents.dataflows import akshare_vendor
@@ -852,20 +854,23 @@ class TestGetMarginTrading(TestCase):
         assert "融资余额" in result
 
     def test_szse_symbol(self):
+        """Use a real SZSE ticker without mocking to_akshare_symbol — verifies the
+        fix for the 'prefix' → 'lower_prefix' bug (ValueError was raised before)."""
         from tradingagents.dataflows import akshare_vendor
         with (
             patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak,
-            patch("tradingagents.dataflows.akshare_vendor.to_akshare_symbol",
-                  side_effect=lambda s, style: {"bare": "300454", "prefix": "sz"}.get(style, "sz")),
+            patch("tradingagents.dataflows.akshare_vendor.no_proxy", return_value=MagicMock()),
+            patch("tradingagents.dataflows.akshare_vendor._akshare_task_context",
+                  return_value=MagicMock(__enter__=lambda s: s, __exit__=lambda s, *a: None)),
         ):
             mock_ak.tool_trade_date_hist_sina.return_value = pd.DataFrame(
                 {"trade_date": ["2026-05-14"]}
             )
             mock_ak.stock_margin_detail_szse.return_value = pd.DataFrame([{
-                "证券代码": "300454", "融资余额": "50亿", "融资买入额": "2亿",
+                "证券代码": "000001", "融资余额": "50亿", "融资买入额": "2亿",
                 "融券余量": "5万", "融券余额": "0.2亿", "融资融券余额": "50.2亿",
             }])
-            result = akshare_vendor.get_margin_trading("300454.SZ")
+            result = akshare_vendor.get_margin_trading("000001.SZ")
         assert "Margin Trading" in result
         assert "融资余额" in result
 
@@ -1120,12 +1125,13 @@ class TestGetDividendHistory(TestCase):
 class TestGetResearchReports(TestCase):
     def setUp(self):
         self.rr_df = pd.DataFrame([{
-            "报告标题": "贵州茅台深度研究",
-            "机构名称": "中信证券",
-            "分析师": "张三",
-            "评级": "买入",
-            "目标价": 2000.00,
-            "发布日期": "2026-05-10",
+            "报告名称": "贵州茅台深度研究",
+            "机构": "中信证券",
+            "东财评级": "买入",
+            "日期": datetime(2026, 5, 10).date(),
+            "行业": "白酒Ⅱ",
+            "2026-盈利预测-收益": 66.68,
+            "2026-盈利预测-市盈率": 19.8,
         }])
 
     def test_returns_formatted_data(self):
@@ -1136,7 +1142,10 @@ class TestGetResearchReports(TestCase):
         assert "Research Reports" in result
         assert "贵州茅台深度研究" in result
         assert "中信证券" in result
-        assert "2000" in result
+        assert "买入" in result
+        assert "白酒Ⅱ" in result
+        assert "66.68" in result
+        assert "19.8" in result
 
     def test_empty_returns_message(self):
         from tradingagents.dataflows import akshare_vendor

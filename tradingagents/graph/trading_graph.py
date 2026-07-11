@@ -329,6 +329,9 @@ class TradingAgentsGraph:
         caller via ``_resolve_benchmark``). Returns ``(raw_return, alpha_return,
         actual_holding_days)`` or ``(None, None, None)`` if price data is
         unavailable (too recent, delisted, or network error).
+
+        For A-share tickers, uses ``load_ohlcv`` (smartmoney_db → akshare chain)
+        instead of ``yf.Ticker`` to avoid yfinance rate limits on A-share data.
         """
         from tradingagents.dataflows.symbol_utils import normalize_symbol
 
@@ -343,7 +346,25 @@ class TradingAgentsGraph:
             # Normalize so the realized-return lookup hits the same instrument
             # the analysis priced (e.g. XAUUSD -> GC=F) (#984). The benchmark is
             # already a canonical Yahoo symbol from ``_resolve_benchmark``.
-            stock = yf.Ticker(normalize_symbol(ticker)).history(start=trade_date, end=end_str)
+            canonical = normalize_symbol(ticker)
+
+            # A-share: use load_ohlcv (smartmoney_db → akshare) instead of yfinance
+            # to avoid rate-limit failures on batch runs (#PR).
+            from tradingagents.dataflows.akshare_common import is_a_share_ticker
+            from tradingagents.dataflows.stockstats_utils import load_ohlcv
+
+            if is_a_share_ticker(canonical):
+                full = load_ohlcv(canonical, end_str, refresh=False)
+                if full is not None and not full.empty and "Close" in full.columns:
+                    # load_ohlcv returns Date as a column; select rows in [trade_date, end_str].
+                    # iloc[] positional access works fine without a DatetimeIndex.
+                    mask = (full["Date"] >= trade_date) & (full["Date"] <= end_str)
+                    stock = full.loc[mask].copy()
+                else:
+                    stock = pd.DataFrame()
+            else:
+                stock = yf.Ticker(canonical).history(start=trade_date, end=end_str)
+
             bench = yf.Ticker(benchmark).history(start=trade_date, end=end_str)
 
             if len(stock) < 2 or len(bench) < 2:

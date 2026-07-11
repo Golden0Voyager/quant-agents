@@ -190,6 +190,16 @@ def _create_full_test_db(path):
         );
         INSERT INTO historical_valuation VALUES (1,'600519','2026-07-01',18.03,5.51,8.51,NULL);
         INSERT INTO historical_valuation VALUES (2,'600519','2026-06-30',17.92,5.47,8.45,4.39);
+
+        CREATE TABLE institutional_holdings (
+            ts_code TEXT NOT NULL,
+            report_date INTEGER NOT NULL,
+            institution_count INTEGER,
+            type_counts TEXT,
+            PRIMARY KEY (ts_code, report_date)
+        );
+        INSERT INTO institutional_holdings VALUES ('600519',20260331,1372,'{"基金持仓": 1352, "券商持仓": 20}');
+        INSERT INTO institutional_holdings VALUES ('600519',20251231,18,'{"券商持仓": 18}');
     """)
     conn.commit()
     conn.close()
@@ -382,6 +392,33 @@ class GetMarginTradingTests(unittest.TestCase):
         finally:
             os.unlink(db_path)
 
+    def test_handles_null_numeric_values(self):
+        """get_margin_trading should return 'N/A' for NULL DB values, not crash."""
+        from tradingagents.dataflows.smartmoney_vendor import get_margin_trading
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.executescript("""
+                CREATE TABLE margin_trading (
+                    ts_code TEXT, trade_date TEXT,
+                    margin_balance REAL, margin_buy REAL, margin_repay REAL,
+                    short_balance REAL, short_sell REAL, short_repay REAL, total_balance REAL,
+                    PRIMARY KEY (ts_code, trade_date)
+                );
+                INSERT INTO margin_trading VALUES ('600519','2026-06-19',1.0e10,5.0e8,4.0e8,NULL,2.0e5,1.0e5,NULL);
+            """)
+            conn.close()
+            with _PatchedVendor(db_path):
+                result = get_margin_trading("600519.SS")
+                # short_balance and total_balance are NULL → should show N/A
+                self.assertIn("N/A", result)
+                # margin_balance has a value → should be formatted normally
+                self.assertIn("10,000,000,000", result)
+        finally:
+            os.unlink(db_path)
+
 
 @pytest.mark.unit
 class GetDragonTigerTests(unittest.TestCase):
@@ -568,11 +605,28 @@ class RuntimeErrorStubsTests(unittest.TestCase):
             get_restricted_release("600519.SS")
         self.assertIn("Restricted release", str(ctx.exception))
 
-    def test_get_institutional_holdings_raises(self):
-        from tradingagents.dataflows.smartmoney_vendor import get_institutional_holdings
-        with self.assertRaises(RuntimeError) as ctx:
-            get_institutional_holdings("600519.SS")
-        self.assertIn("Institutional holdings", str(ctx.exception))
+    def test_get_institutional_holdings_from_db(self):
+        from tradingagents.dataflows.smartmoney_vendor import (
+            get_institutional_holdings,
+        )
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with patch(
+                "tradingagents.dataflows.smartmoney_vendor._DB_PATH", db_path
+            ):
+                result = get_institutional_holdings("600519.SS")
+            self.assertIn("600519.SS", result)
+            self.assertIn("机构持股", result)
+            self.assertIn("Institutional Holdings", result)
+            self.assertIn("1,372", result)
+            self.assertIn("基金持仓", result)
+            self.assertIn("券商持仓", result)
+            self.assertIn("20260331", result)
+        finally:
+            os.unlink(db_path)
 
     def test_get_northbound_hold_raises(self):
         from tradingagents.dataflows.smartmoney_vendor import get_northbound_hold
