@@ -383,32 +383,12 @@ def load_ohlcv(
                     symbol,
                 )
                 downloaded = _load_ohlcv_from_akshare(canonical, start_str, end_str)
-            if downloaded is None and os.getenv("DISABLE_YFINANCE_FALLBACK") != "1":
+            if downloaded is None:
                 logger.info(
-                    "akshare returned no data for A-share %s, falling back to yfinance",
+                    "akshare returned no data for A-share %s, no yfinance fallback "
+                    "(yfinance A-share coverage is unreliable and rate-limits aggressively)",
                     symbol,
                 )
-                try:
-                    downloaded = yf_retry(
-                        lambda: _silent_yf_download(
-                            canonical,
-                            start=start_str,
-                            end=end_str,
-                            multi_level_index=False,
-                            progress=False,
-                            auto_adjust=True,
-                        )
-                    )
-                    downloaded = _ensure_date_column(downloaded.reset_index())
-                    if downloaded.empty or "Close" not in downloaded.columns:
-                        downloaded = None
-                except Exception:
-                    logger.warning(
-                        "yfinance fallback failed for A-share %s",
-                        symbol,
-                        exc_info=True,
-                    )
-                    downloaded = None
         else:
             # Non-A-share: yfinance first (existing behavior)
             try:

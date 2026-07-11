@@ -99,6 +99,7 @@ TOOLS_CATEGORIES = {
         "tools": [
             "get_indicators",
             "get_fund_flow",
+            "get_sector_fund_flow",
         ]
     },
     "fundamental_data": {
