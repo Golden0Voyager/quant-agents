@@ -552,8 +552,10 @@ def get_index_daily(
 
     - Empty result (no rows for the requested code/date range): raises
       ``NoMarketDataError`` so ``route_to_vendor`` returns ``NO_DATA_AVAILABLE``.
-    - Query failure / schema mismatch / missing table: raises ``RuntimeError``
-      so the routing layer treats it as a vendor failure and tries fallbacks.
+    - Query failure / schema mismatch / missing table: also raises
+      ``NoMarketDataError``. Because ``get_index_daily`` only has the
+      ``smartmoney_db`` vendor (no fallback), a hard crash would abort the
+      agent call; degrading gracefully keeps the pipeline alive.
     """
     code = _to_smartmoney_symbol(index_code)
 
@@ -569,7 +571,8 @@ def get_index_daily(
     )
 
     if df is None:
-        raise RuntimeError(
+        raise NoMarketDataError(
+            index_code, index_code,
             f"index_daily query failed for {index_code} between {start_date} and {end_date}."
         )
 
@@ -582,14 +585,16 @@ def get_index_daily(
     required_cols = {"Date", "Open", "High", "Low", "Close", "Volume"}
     missing_cols = required_cols - set(df.columns)
     if missing_cols:
-        raise RuntimeError(
+        raise NoMarketDataError(
+            index_code, index_code,
             f"index_daily schema mismatch for {index_code}: missing columns {sorted(missing_cols)}."
         )
 
     numeric_cols = ("Open", "High", "Low", "Close", "Volume")
     for col in numeric_cols:
         if not pd.api.types.is_numeric_dtype(df[col]):
-            raise RuntimeError(
+            raise NoMarketDataError(
+                index_code, index_code,
                 f"index_daily schema mismatch for {index_code}: column {col!r} is not numeric."
             )
 
