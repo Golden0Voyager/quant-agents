@@ -503,13 +503,20 @@ class TestAnalystBoundToolsHaveCategories:
     def test_market_analyst_tools_all_categorized(self):
         from tradingagents.agents.utils.agent_utils import (
             get_fund_flow,
+            get_index_daily,
             get_indicators,
             get_sector_fund_flow,
             get_stock_data,
         )
         from tradingagents.dataflows import interface
 
-        for tool_fn in [get_stock_data, get_indicators, get_fund_flow, get_sector_fund_flow]:
+        for tool_fn in [
+            get_stock_data,
+            get_index_daily,
+            get_indicators,
+            get_fund_flow,
+            get_sector_fund_flow,
+        ]:
             cat = interface.get_category_for_method(tool_fn.name)
             assert cat is not None
 

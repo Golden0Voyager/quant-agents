@@ -22,6 +22,7 @@ from tradingagents.agents.utils.fundamental_data_tools import (  # noqa: F401
     get_income_statement,
     get_shareholder_count,
 )
+from tradingagents.agents.utils.index_data_tools import get_index_daily  # noqa: F401
 from tradingagents.agents.utils.industry_data_tools import get_industry_valuation  # noqa: F401
 from tradingagents.agents.utils.macro_data_tools import get_macro_indicators  # noqa: F401
 from tradingagents.agents.utils.market_breadth_tools import get_limit_up_down  # noqa: F401

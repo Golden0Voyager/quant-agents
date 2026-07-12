@@ -341,8 +341,9 @@ class TestCheckDataReadinessIntegration:
         """Multiple analysts sharing same data keys → only one item per key."""
         mock_load.return_value = pd.DataFrame({"Date": ["2026-07-03"], "Close": [10.0]})
         report = check_data_readiness("000001.SZ", "2026-07-03", ["market", "market"])
-        # "market" analyst listed twice but deduplicated: ohlcv, indicators, fund_flow, limit_up_down
-        assert len(report.items) == 4
+        # "market" analyst listed twice but deduplicated:
+        # ohlcv, indicators, fund_flow, limit_up_down, index_daily
+        assert len(report.items) == 5
 
     @patch("tradingagents.agents.utils.data_readiness.load_ohlcv")
     def test_warning_count_unavailable_item(self, mock_load):

@@ -529,6 +529,63 @@ def get_fund_flow(symbol: str) -> str:
 
 
 # ===========================================================================
+# Index data
+# ===========================================================================
+
+def get_index_daily(
+    index_code: Annotated[
+        str,
+        "A-share index code e.g. 000001.SS (SSE Composite), 399001.SZ (SZSE Component), "
+        "399006.SZ (ChiNext), 000688.SS (STAR Market). Exchange suffix is normalised to "
+        "the bare numeric code used in quant_core.db.",
+    ],
+    start_date: Annotated[str, "Start date YYYY-MM-DD"],
+    end_date: Annotated[str, "End date YYYY-MM-DD"],
+) -> str:
+    """Fetch A-share index daily OHLCV from quant_core.db.
+
+    Reads the ``index_daily`` table for major A-share indices. Expected schema:
+        ts_code TEXT, trade_date TEXT, open REAL, high REAL,
+        low REAL, close REAL, volume REAL
+
+    Returns a markdown OHLCV table for the requested index and date range.
+    Raises ``NoMarketDataError`` when data is missing or the schema mismatches, so
+    ``route_to_vendor`` can fall back to the next vendor and ultimately return
+    ``NO_DATA_AVAILABLE``.
+    """
+    code = _to_smartmoney_symbol(index_code)
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, open AS Open, high AS High,
+               low AS Low, close AS Close, volume AS Volume
+        FROM index_daily
+        WHERE ts_code = ? AND trade_date BETWEEN ? AND ?
+        ORDER BY trade_date DESC
+        """,
+        (code, start_date, end_date),
+    )
+
+    if df is None or df.empty:
+        raise NoMarketDataError(
+            index_code, index_code,
+            f"No index_daily data in quant_core.db between {start_date} and {end_date}."
+        )
+
+    df = df.set_index("Date")
+    for col in ("Open", "High", "Low", "Close"):
+        df[col] = df[col].round(2)
+
+    header = (
+        f"# Index data for {index_code.upper()} from {start_date} to {end_date}\n"
+        f"# Total records: {len(df)}\n"
+        f"# Source: quant_core.db (local SQLite)\n"
+        f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    )
+    return header + df.to_csv()
+
+
+# ===========================================================================
 # Market breadth
 # ===========================================================================
 

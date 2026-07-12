@@ -32,6 +32,14 @@ class ReadinessReport:
     warning_count: int = 0
 
 
+_MAJOR_INDEX_CODES = {
+    "000001": "上证指数",
+    "399001": "深证成指",
+    "399006": "创业板指",
+    "000688": "科创50",
+}
+
+
 # 分析师到所需数据源的映射
 ANALYST_DATA_REQUIREMENTS: dict[str, list[dict]] = {
     "market": [
@@ -39,6 +47,7 @@ ANALYST_DATA_REQUIREMENTS: dict[str, list[dict]] = {
         {"key": "indicators",    "label": "技术指标",    "cache": True, "derived": "ohlcv"},
         {"key": "fund_flow",     "label": "资金流向",    "cache": True},
         {"key": "limit_up_down", "label": "涨跌停统计",  "cache": True},
+        {"key": "index_daily",   "label": "指数日线",    "cache": True},
     ],
     "social": [
         {"key": "stocktwits",    "label": "StockTwits",  "cache": False},
@@ -175,6 +184,46 @@ def _check_limit_up_down(
     )
 
 
+def _check_index_daily(
+    ticker: str, trade_date: str, analyst: str
+) -> ReadinessItem:
+    """检查大盘/板块指数日线缓存（按主要指数代码，不按标的）。"""
+    if not is_a_share_ticker(ticker):
+        return ReadinessItem(
+            "指数日线", "realtime", "available",
+            "非A股标的，分析时获取", analyst
+        )
+    try:
+        from tradingagents.dataflows.smartmoney_vendor import _df_from_sql
+        total = 0
+        latest = None
+        for code in _MAJOR_INDEX_CODES:
+            df = _df_from_sql(
+                "SELECT COUNT(*) as cnt, MAX(trade_date) as latest "
+                "FROM index_daily WHERE ts_code = ? AND trade_date <= ?",
+                (code, trade_date),
+            )
+            if df is not None and not df.empty:
+                cnt = df.iloc[0]["cnt"]
+                if cnt and cnt > 0:
+                    total += int(cnt)
+                    row_latest = df.iloc[0]["latest"]
+                    if row_latest and (latest is None or str(row_latest) > str(latest)):
+                        latest = row_latest
+        if total > 0:
+            return ReadinessItem(
+                "指数日线", "cacheable", "cached",
+                f"{total} 条记录" + (f"，最新 {latest}" if latest else ""),
+                analyst,
+            )
+    except Exception as exc:
+        logger.debug("smartmoney_db check failed for index_daily: %s", exc)
+    return ReadinessItem(
+        "指数日线", "realtime", "available",
+        "无缓存，分析时实时获取", analyst
+    )
+
+
 def _check_fin_statements(ticker: str, analyst: str) -> ReadinessItem:
     """检查财务报表缓存。"""
     result = _check_smartmoney_table(
@@ -237,6 +286,8 @@ def check_data_readiness(
                 item = _check_northbound(ticker, analyst_key)
             elif req["key"] == "limit_up_down":
                 item = _check_limit_up_down(ticker, trade_date, analyst_key)
+            elif req["key"] == "index_daily":
+                item = _check_index_daily(ticker, trade_date, analyst_key)
             else:
                 # 实时数据 — 标记为"分析时获取"
                 item = ReadinessItem(

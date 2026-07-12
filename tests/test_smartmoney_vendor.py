@@ -220,6 +220,19 @@ def _create_full_test_db(path):
             down_limit_stocks TEXT
         );
         INSERT INTO limit_up_down VALUES ('2026-06-19', 85, 12, '600519,000858,002594', '000001,000002');
+
+        CREATE TABLE index_daily (
+            ts_code TEXT NOT NULL,
+            trade_date TEXT NOT NULL,
+            open REAL, high REAL, low REAL, close REAL, volume REAL,
+            PRIMARY KEY (ts_code, trade_date)
+        );
+        INSERT INTO index_daily VALUES ('000001','2026-06-15',3050.0,3060.0,3045.0,3055.0,2.5e9);
+        INSERT INTO index_daily VALUES ('000001','2026-06-16',3055.0,3070.0,3050.0,3065.0,2.6e9);
+        INSERT INTO index_daily VALUES ('000001','2026-06-17',3065.0,3080.0,3060.0,3075.0,2.7e9);
+        INSERT INTO index_daily VALUES ('000001','2026-06-18',3075.0,3090.0,3070.0,3085.0,2.8e9);
+        INSERT INTO index_daily VALUES ('000001','2026-06-19',3085.0,3100.0,3080.0,3095.0,2.9e9);
+        INSERT INTO index_daily VALUES ('399001','2026-06-19',9850.0,9900.0,9820.0,9880.0,3.1e9);
     """)
     conn.commit()
     conn.close()
@@ -955,6 +968,58 @@ class GetLimitUpDownTests(unittest.TestCase):
             with _PatchedVendor(db_path):
                 result = interface.route_to_vendor(
                     "get_limit_up_down", "2026-06-19"
+                )
+            self.assertIn("NO_DATA_AVAILABLE", result)
+        finally:
+            os.unlink(db_path)
+
+
+@pytest.mark.unit
+class GetIndexDailyTests(unittest.TestCase):
+    def test_returns_index_daily_data(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_index_daily
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = get_index_daily("000001.SS", "2026-06-15", "2026-06-19")
+            self.assertIn("000001.SS", result)
+            self.assertIn("Index data", result)
+            self.assertIn("3055.0", result)
+            self.assertIn("3095.0", result)
+            self.assertIn("Open", result)
+            self.assertIn("Close", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_raises_on_no_data(self):
+        from tradingagents.dataflows.errors import NoMarketDataError
+        from tradingagents.dataflows.smartmoney_vendor import get_index_daily
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path), self.assertRaises(NoMarketDataError):
+                get_index_daily("999999.SS", "2026-06-15", "2026-06-19")
+        finally:
+            os.unlink(db_path)
+
+    def test_db_error_returns_no_data_available(self):
+        from tradingagents.dataflows import interface
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            # Empty DB file that exists but has no index_daily table
+            conn = sqlite3.connect(db_path)
+            conn.execute("CREATE TABLE dummy (x int)")
+            conn.close()
+            with _PatchedVendor(db_path):
+                result = interface.route_to_vendor(
+                    "get_index_daily", "000001.SS", "2026-06-15", "2026-06-19"
                 )
             self.assertIn("NO_DATA_AVAILABLE", result)
         finally:

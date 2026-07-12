@@ -60,6 +60,7 @@ from .smartmoney_vendor import (
     get_fund_flow as get_smartmoney_fund_flow,
     get_fundamentals as get_smartmoney_fundamentals,
     get_income_statement as get_smartmoney_income_statement,
+    get_index_daily as get_smartmoney_index_daily,
     get_indicators as get_smartmoney_indicators,
     get_industry_valuation as get_smartmoney_industry_valuation,
     get_insider_transactions as get_smartmoney_insider_transactions,
@@ -92,7 +93,8 @@ TOOLS_CATEGORIES = {
     "core_stock_apis": {
         "description": "OHLCV stock price data",
         "tools": [
-            "get_stock_data"
+            "get_stock_data",
+            "get_index_daily",
         ]
     },
     "technical_indicators": {
@@ -187,6 +189,9 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
         "akshare": get_akshare_stock_data,
+    },
+    "get_index_daily": {
+        "smartmoney_db": get_smartmoney_index_daily,
     },
     # technical_indicators
     "get_indicators": {
