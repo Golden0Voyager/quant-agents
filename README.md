@@ -27,6 +27,16 @@
 
 ---
 
+## 🔌 数据中台集成 (Data Hub Integration)
+
+本项目与 `quant_data` 数据中台实现深层协同：
+1. **只读直连**：系统底层通过 [smartmoney_vendor.py](file:///Users/hainingyu/Code/quant_agents/tradingagents/dataflows/smartmoney_vendor.py) 开启**只读** SQLite 连接，直连数据中台的 `~/Code/quant_data/quant_core.db` 核心数据库。
+2. **数据共享**：在运行决策管线或回测时，优先在本地读取由 `quant_pipeline` 自动清洗抓取的日线 OHLCV、预计算技术指标、基本面财务三表（资产负债表、利润表、现金流量表）以及个股主力资金流向数据。
+3. **降级网络路由**：如果中台数据库 `quant_core.db` 中缺失某只股票的历史或当前数据，系统将自动回退到在线 API 抓取模式（即 `akshare` 或 `yfinance`），保证流水线的鲁棒性与开发效率。
+
+
+---
+
 ## A 股核心能力
 
 | 维度 | 能力 |
