@@ -61,7 +61,10 @@ class BatchRunner:
         self.batch_stats: dict = {
             "tokens_in": 0,
             "tokens_out": 0,
+            "llm_calls": 0,
             "cost_by_model": {},
+            "calls_by_model": {},
+            "tokens_by_model": {},
             "per_ticker": {},
         }
         self.dashboard = BatchDashboard(total=len(tickers), profile_name=profile_config.get("name", "default"))
@@ -655,15 +658,41 @@ class BatchRunner:
         in_tokens = stats.get("tokens_in", 0)
         out_tokens = stats.get("tokens_out", 0)
         cost_by_model = stats.get("cost_by_model")
+        llm_calls = stats.get("llm_calls", 0)
+        calls_by_model = stats.get("llm_calls_by_model")
+        tokens_by_model = stats.get("tokens_by_model")
         if not isinstance(in_tokens, (int, float)) or isinstance(in_tokens, bool):
             in_tokens = 0
         if not isinstance(out_tokens, (int, float)) or isinstance(out_tokens, bool):
             out_tokens = 0
         if not isinstance(cost_by_model, dict):
             cost_by_model = {}
+        if not isinstance(llm_calls, (int, float)) or isinstance(llm_calls, bool):
+            llm_calls = 0
+        if not isinstance(calls_by_model, dict):
+            calls_by_model = {}
+        if not isinstance(tokens_by_model, dict):
+            tokens_by_model = {}
         with self._lock:
             self.batch_stats["tokens_in"] += in_tokens
             self.batch_stats["tokens_out"] += out_tokens
+            self.batch_stats["llm_calls"] += llm_calls
+            for model, count in calls_by_model.items():
+                try:
+                    self.batch_stats["calls_by_model"][model] = self.batch_stats["calls_by_model"].get(
+                        model, 0
+                    ) + int(count)
+                except (TypeError, ValueError):
+                    continue
+            for model, bucket in tokens_by_model.items():
+                if not isinstance(bucket, dict):
+                    continue
+                try:
+                    prev = self.batch_stats["tokens_by_model"].setdefault(model, {"in": 0, "out": 0})
+                    prev["in"] += int(bucket.get("in", 0))
+                    prev["out"] += int(bucket.get("out", 0))
+                except (TypeError, ValueError):
+                    continue
             for model, cost in cost_by_model.items():
                 try:
                     self.batch_stats["cost_by_model"][model] = self.batch_stats["cost_by_model"].get(
@@ -674,8 +703,12 @@ class BatchRunner:
             self.batch_stats["per_ticker"][ticker] = {
                 "tokens_in": in_tokens,
                 "tokens_out": out_tokens,
+                "llm_calls": llm_calls,
                 "cost": stats.get("cost") if isinstance(stats.get("cost"), (int, float)) else None,
                 "cost_by_model": dict(cost_by_model),
+                "calls_by_model": dict(calls_by_model),
+                "tokens_by_model": {k: {"in": int(v.get("in", 0)), "out": int(v.get("out", 0))}
+                                    for k, v in tokens_by_model.items() if isinstance(v, dict)},
             }
 
     def _extract_summary_from_report(self, ticker: str, report_path: Path) -> None:

@@ -254,6 +254,7 @@ def _stats_handler_mock(tokens_in=1000, tokens_out=500, cost=0.01, cost_by_model
     handler = MagicMock()
     handler.get_stats.return_value = {
         "llm_calls": 4,
+        "llm_calls_by_model": {"gpt-5.4": 3, "deepseek-v4-flash": 1},
         "tool_calls": 2,
         "tokens_in": tokens_in,
         "tokens_out": tokens_out,
@@ -287,6 +288,31 @@ def test_accumulate_stats_sums_token_cost_per_model(tmp_path):
     assert runner.batch_stats["cost_by_model"]["deepseek-v4-flash"] == pytest.approx(0.005)
     assert runner.batch_stats["per_ticker"]["AAPL"]["tokens_in"] == 1000
     assert runner.batch_stats["per_ticker"]["MSFT"]["cost_by_model"]["deepseek-v4-flash"] == pytest.approx(0.005)
+
+
+def test_accumulate_stats_sums_calls_and_tokens_by_model(tmp_path):
+    """_accumulate_stats rolls up per-model calls and tokens."""
+    runner = BatchRunner(
+        tickers=["AAPL", "MSFT"],
+        profile_config={"llm_provider": "openai"},
+        output_dir=tmp_path / "reports",
+    )
+    h1 = _stats_handler_mock(tokens_in=1000, tokens_out=500, cost=0.01,
+                             cost_by_model={"gpt-5.4": 0.01})
+    h2 = _stats_handler_mock(tokens_in=2000, tokens_out=800, cost=0.02,
+                             cost_by_model={"gpt-5.4": 0.015, "deepseek-v4-flash": 0.005})
+
+    runner._accumulate_stats("AAPL", h1)
+    runner._accumulate_stats("MSFT", h2)
+
+    assert runner.batch_stats["llm_calls"] == 8
+    assert runner.batch_stats["calls_by_model"] == {"gpt-5.4": 6, "deepseek-v4-flash": 2}
+    assert runner.batch_stats["tokens_by_model"] == {
+        "gpt-5.4": {"in": 3000, "out": 1300},
+    }
+    assert runner.batch_stats["per_ticker"]["AAPL"]["llm_calls"] == 4
+    assert runner.batch_stats["per_ticker"]["AAPL"]["calls_by_model"] == {"gpt-5.4": 3, "deepseek-v4-flash": 1}
+    assert runner.batch_stats["per_ticker"]["MSFT"]["calls_by_model"] == {"gpt-5.4": 3, "deepseek-v4-flash": 1}
 
 
 def test_generate_summary_includes_token_cost_columns(tmp_path):
