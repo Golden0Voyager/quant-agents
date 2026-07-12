@@ -11,6 +11,7 @@ from rich.table import Table
 from tradingagents.dataflows.akshare_common import is_a_share_ticker
 from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.dataflows.stockstats_utils import load_ohlcv
+from tradingagents.ticker_resolver import resolve_ticker
 
 logger = logging.getLogger(__name__)
 
@@ -258,7 +259,12 @@ def check_batch_readiness(
     ready = 0
     for ticker in tickers:
         try:
-            report = check_data_readiness(ticker, trade_date, selected_analysts)
+            try:
+                resolved = resolve_ticker(ticker)
+                resolved_ticker = resolved["ticker"]
+            except Exception:
+                resolved_ticker = ticker
+            report = check_data_readiness(resolved_ticker, trade_date, selected_analysts)
             ohlcv_items = [i for i in report.items if i.label == "日K行情"]
             ohlcv_ok = ohlcv_items and ohlcv_items[0].status != "unavailable"
             if ohlcv_ok:
