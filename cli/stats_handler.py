@@ -74,6 +74,7 @@ class StatsCallbackHandler(BaseCallbackHandler):
         # cost $Y" in mixed-provider runs.
         self.tokens_by_model: dict[str, list[int]] = {}
         self.cost_by_model: dict[str, float] = {}
+        self.llm_calls_by_model: dict[str, int] = {}
 
     # ---- model-name capture ------------------------------------------
 
@@ -87,6 +88,8 @@ class StatsCallbackHandler(BaseCallbackHandler):
         model_name = _extract_model_name(serialized)
         with self._lock:
             self.llm_calls += 1
+            if model_name:
+                self.llm_calls_by_model[model_name] = self.llm_calls_by_model.get(model_name, 0) + 1
             self._current_model = model_name
 
     def on_llm_start(
@@ -98,11 +101,14 @@ class StatsCallbackHandler(BaseCallbackHandler):
         """Counter for non-chat LLM invocations (legacy text completions)."""
         with self._lock:
             self.llm_calls += 1
+            model_name = _extract_model_name(serialized)
+            if model_name:
+                self.llm_calls_by_model[model_name] = self.llm_calls_by_model.get(model_name, 0) + 1
             # Some integrations only set the model on the legacy
             # ``on_llm_start`` path; capture it there too so we don't
             # miss the model in cost estimation.
             if self._current_model is None:
-                self._current_model = _extract_model_name(serialized)
+                self._current_model = model_name
 
     # ---- token accumulation ------------------------------------------
 
@@ -187,6 +193,7 @@ class StatsCallbackHandler(BaseCallbackHandler):
             )
             return {
                 "llm_calls": self.llm_calls,
+                "llm_calls_by_model": dict(self.llm_calls_by_model),
                 "tool_calls": self.tool_calls,
                 "tokens_in": self.tokens_in,
                 "tokens_out": self.tokens_out,
