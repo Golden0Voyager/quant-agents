@@ -1143,9 +1143,10 @@ class BatchRunner:
                         f"| {model} | {calls} | {self._format_number(t_in)} | "
                         f"{self._format_number(t_out)} | {cost_cell} |"
                     )
+                total_cost_cell = f"${total_cost:.4f}" if cost_by_model else "—"
                 lines.append(
                     f"| **Total** | **{total_calls}** | **{self._format_number(total_tin)}↑** | "
-                    f"**{self._format_number(total_tout)}↓** | **${total_cost:.4f}** |"
+                    f"**{self._format_number(total_tout)}↓** | **{total_cost_cell}** |"
                 )
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -1216,8 +1217,8 @@ class BatchRunner:
         return _Adapter()
 
     @staticmethod
-    def _format_number(n: int) -> str:
-        """Render an integer with k/M abbreviation."""
+    def _format_number(n: int | float) -> str:
+        """Render a number with k/M abbreviation."""
         if n >= 1_000_000:
             return f"{n / 1_000_000:.1f}M"
         if n >= 1000:
