@@ -1039,9 +1039,13 @@ class BatchRunner:
                         "entry": None,
                         "stop": None,
                         "size": None,
+                        "llm_calls": None,
                         "tokens_in": None,
                         "tokens_out": None,
                         "cost": None,
+                        "calls_by_model": {},
+                        "tokens_by_model": {},
+                        "cost_by_model": {},
                         "status": "failed",
                         "error": self.failures[ticker],
                     }
@@ -1070,9 +1074,16 @@ class BatchRunner:
                         "entry": s.get("entry"),
                         "stop": s.get("stop"),
                         "size": s.get("size"),
+                        "llm_calls": per_ticker_stats.get("llm_calls"),
                         "tokens_in": per_ticker_stats.get("tokens_in"),
                         "tokens_out": per_ticker_stats.get("tokens_out"),
                         "cost": per_ticker_stats.get("cost"),
+                        "calls_by_model": dict(per_ticker_stats.get("calls_by_model", {})),
+                        "tokens_by_model": {
+                            k: {"in": v.get("in"), "out": v.get("out")}
+                            for k, v in (per_ticker_stats.get("tokens_by_model") or {}).items()
+                        },
+                        "cost_by_model": dict(per_ticker_stats.get("cost_by_model", {})),
                         "status": "success",
                         "error": None,
                     }
@@ -1089,9 +1100,10 @@ class BatchRunner:
             lines.append("\n## Batch Cost\n")
             tin = self.batch_stats["tokens_in"]
             tout = self.batch_stats["tokens_out"]
-            tin_str = f"{tin / 1000:.1f}k" if tin >= 1000 else str(tin)
-            tout_str = f"{tout / 1000:.1f}k" if tout >= 1000 else str(tout)
+            tin_str = self._format_number(tin)
+            tout_str = self._format_number(tout)
             lines.append(f"- **Total tokens**: {tin_str}↑ {tout_str}↓")
+            lines.append(f"- **Total LLM calls**: {self.batch_stats['llm_calls']}")
             cost_by_model = self.batch_stats["cost_by_model"]
             if cost_by_model:
                 total_cost = sum(cost_by_model.values())
@@ -1102,6 +1114,35 @@ class BatchRunner:
                     lines.append(f"  - {model}: ${cost:.4f}（¥{cost * cny_rate:.2f}）")
             else:
                 lines.append("- **Total cost**: — (no priced models in this batch)")
+
+            calls_by_model = self.batch_stats.get("calls_by_model", {})
+            tokens_by_model = self.batch_stats.get("tokens_by_model", {})
+            if calls_by_model or tokens_by_model:
+                lines.append("\n## Batch Usage\n")
+                lines.append("| Model | Calls | Tokens In | Tokens Out | Cost |")
+                lines.append("|-------|-------|-----------|------------|------|")
+                models = sorted(set(calls_by_model) | set(tokens_by_model) | set(cost_by_model))
+                total_calls = 0
+                total_tin = 0
+                total_tout = 0
+                total_cost = 0.0
+                for model in models:
+                    calls = calls_by_model.get(model, 0)
+                    t_in = tokens_by_model.get(model, {}).get("in", 0)
+                    t_out = tokens_by_model.get(model, {}).get("out", 0)
+                    cost = cost_by_model.get(model, 0.0)
+                    total_calls += calls
+                    total_tin += t_in
+                    total_tout += t_out
+                    total_cost += cost
+                    lines.append(
+                        f"| {model} | {calls} | {self._format_number(t_in)} | "
+                        f"{self._format_number(t_out)} | ${cost:.4f} |"
+                    )
+                lines.append(
+                    f"| **Total** | **{total_calls}** | **{self._format_number(total_tin)}↑** | "
+                    f"**{self._format_number(total_tout)}↓** | **${total_cost:.4f}** |"
+                )
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
         md_path = self.output_dir / "batch_summary.md"
@@ -1114,7 +1155,13 @@ class BatchRunner:
             "totals": {
                 "tokens_in": self.batch_stats.get("tokens_in", 0),
                 "tokens_out": self.batch_stats.get("tokens_out", 0),
+                "llm_calls": self.batch_stats.get("llm_calls", 0),
                 "cost_by_model": dict(self.batch_stats.get("cost_by_model", {})),
+                "calls_by_model": dict(self.batch_stats.get("calls_by_model", {})),
+                "tokens_by_model": {
+                    k: {"in": v.get("in"), "out": v.get("out")}
+                    for k, v in self.batch_stats.get("tokens_by_model", {}).items()
+                },
             },
         }
         json_output["totals"]["total_cost_usd"] = sum(json_output["totals"]["cost_by_model"].values())
@@ -1157,6 +1204,15 @@ class BatchRunner:
                 }
 
         return _Adapter()
+
+    @staticmethod
+    def _format_number(n: int) -> str:
+        """Render an integer with k/M abbreviation."""
+        if n >= 1_000_000:
+            return f"{n / 1_000_000:.1f}M"
+        if n >= 1000:
+            return f"{n / 1000:.1f}k"
+        return str(n)
 
     @staticmethod
     def _format_token_cost_cells(stats: dict) -> tuple[str, str]:

@@ -339,8 +339,45 @@ def test_generate_summary_includes_token_cost_columns(tmp_path):
     assert "1.5k" in content and "600" in content, "per-ticker token numbers missing"
     assert "$0.0120" in content, "per-ticker cost missing"
     assert "## Batch Cost" in content
-    assert "gpt-5.4" in content and "deepseek" not in content  # only gpt-5.4 in this run
+    assert "gpt-5.4" in content
+    # deepseek-v4-flash has calls but no cost, so it appears in the usage table
+    usage_start = content.index("## Batch Usage")
+    assert "deepseek-v4-flash" in content[usage_start:]
     assert "$0.0120" in content[content.index("## Batch Cost"):]  # footer total present
+    assert "## Batch Usage" in content
+    assert "| Calls |" in content
+    assert "| Tokens In |" in content
+    assert "| Tokens Out |" in content
+
+
+def test_generate_summary_json_includes_usage_fields(tmp_path):
+    """batch_summary.json totals and rows include calls/tokens by model."""
+    runner = BatchRunner(
+        tickers=["AAPL"],
+        profile_config={"llm_provider": "openai"},
+        output_dir=tmp_path / "reports",
+    )
+    runner.summaries = {
+        "AAPL": {"rating": "Buy", "entry": "210", "stop": "200", "size": "5%", "company": "Apple"},
+    }
+    runner._accumulate_stats(
+        "AAPL",
+        _stats_handler_mock(tokens_in=1500, tokens_out=600, cost=0.012,
+                             cost_by_model={"gpt-5.4": 0.012}),
+    )
+
+    runner.generate_summary()
+    json_path = runner.output_dir / "batch_summary.json"
+    import json
+    data = json.loads(json_path.read_text(encoding="utf-8"))
+
+    assert data["totals"]["llm_calls"] == 4
+    assert data["totals"]["calls_by_model"] == {"gpt-5.4": 3, "deepseek-v4-flash": 1}
+    assert data["totals"]["tokens_by_model"] == {"gpt-5.4": {"in": 1500, "out": 600}}
+    row = data["rows"][0]
+    assert row["llm_calls"] == 4
+    assert row["calls_by_model"] == {"gpt-5.4": 3, "deepseek-v4-flash": 1}
+    assert row["tokens_by_model"] == {"gpt-5.4": {"in": 1500, "out": 600}}
 
 
 def test_generate_summary_no_stats_omits_optional_columns(tmp_path):
