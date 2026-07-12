@@ -1007,21 +1007,36 @@ class GetIndexDailyTests(unittest.TestCase):
         finally:
             os.unlink(db_path)
 
-    def test_db_error_returns_no_data_available(self):
+    def test_empty_result_returns_no_data_available(self):
         from tradingagents.dataflows import interface
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
         try:
-            # Empty DB file that exists but has no index_daily table
-            conn = sqlite3.connect(db_path)
-            conn.execute("CREATE TABLE dummy (x int)")
-            conn.close()
+            _create_full_test_db(db_path)
             with _PatchedVendor(db_path):
+                # Valid table, but no rows match the requested code/date range.
                 result = interface.route_to_vendor(
-                    "get_index_daily", "000001.SS", "2026-06-15", "2026-06-19"
+                    "get_index_daily", "999999.SS", "2026-06-15", "2026-06-19"
                 )
             self.assertIn("NO_DATA_AVAILABLE", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_schema_failure_raises_runtimeerror(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_index_daily
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            # Simulate a query failure / schema issue that causes _df_from_sql
+            # to return None (e.g. missing table or bad columns).
+            with _PatchedVendor(db_path), patch(
+                "tradingagents.dataflows.smartmoney_vendor._df_from_sql",
+                return_value=None,
+            ), self.assertRaises(RuntimeError):
+                get_index_daily("000001.SS", "2026-06-15", "2026-06-19")
         finally:
             os.unlink(db_path)
 

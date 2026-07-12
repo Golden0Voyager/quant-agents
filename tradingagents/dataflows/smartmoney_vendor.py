@@ -549,9 +549,11 @@ def get_index_daily(
         low REAL, close REAL, volume REAL
 
     Returns a markdown OHLCV table for the requested index and date range.
-    Raises ``NoMarketDataError`` when data is missing or the schema mismatches, so
-    ``route_to_vendor`` can fall back to the next vendor and ultimately return
-    ``NO_DATA_AVAILABLE``.
+
+    - Empty result (no rows for the requested code/date range): raises
+      ``NoMarketDataError`` so ``route_to_vendor`` returns ``NO_DATA_AVAILABLE``.
+    - Query failure / schema mismatch / missing table: raises ``RuntimeError``
+      so the routing layer treats it as a vendor failure and tries fallbacks.
     """
     code = _to_smartmoney_symbol(index_code)
 
@@ -566,11 +568,30 @@ def get_index_daily(
         (code, start_date, end_date),
     )
 
-    if df is None or df.empty:
+    if df is None:
+        raise RuntimeError(
+            f"index_daily query failed for {index_code} between {start_date} and {end_date}."
+        )
+
+    if df.empty:
         raise NoMarketDataError(
             index_code, index_code,
             f"No index_daily data in quant_core.db between {start_date} and {end_date}."
         )
+
+    required_cols = {"Date", "Open", "High", "Low", "Close", "Volume"}
+    missing_cols = required_cols - set(df.columns)
+    if missing_cols:
+        raise RuntimeError(
+            f"index_daily schema mismatch for {index_code}: missing columns {sorted(missing_cols)}."
+        )
+
+    numeric_cols = ("Open", "High", "Low", "Close", "Volume")
+    for col in numeric_cols:
+        if not pd.api.types.is_numeric_dtype(df[col]):
+            raise RuntimeError(
+                f"index_daily schema mismatch for {index_code}: column {col!r} is not numeric."
+            )
 
     df = df.set_index("Date")
     for col in ("Open", "High", "Low", "Close"):
