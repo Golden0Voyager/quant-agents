@@ -24,6 +24,7 @@ from tradingagents.agents.utils.fundamental_data_tools import (  # noqa: F401
 )
 from tradingagents.agents.utils.industry_data_tools import get_industry_valuation  # noqa: F401
 from tradingagents.agents.utils.macro_data_tools import get_macro_indicators  # noqa: F401
+from tradingagents.agents.utils.market_breadth_tools import get_limit_up_down  # noqa: F401
 from tradingagents.agents.utils.market_data_validation_tools import get_verified_market_snapshot  # noqa: F401
 from tradingagents.agents.utils.news_data_tools import (  # noqa: F401
     get_block_trade,

@@ -19,6 +19,8 @@ from typing import Annotated
 
 import pandas as pd
 
+from tradingagents.dataflows.errors import NoMarketDataError
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -522,6 +524,70 @@ def get_fund_flow(symbol: str) -> str:
             f"({row['large_pct']:.2f}%)"
         )
         lines.append("")
+
+    return "\n".join(lines)
+
+
+# ===========================================================================
+# Market breadth
+# ===========================================================================
+
+def get_limit_up_down(trade_date: str) -> str:
+    """Fetch market-wide limit-up/limit-down stats for a trading date.
+
+    Reads the ``limit_up_down`` table, which aggregates daily A-share
+    limit-up and limit-down counts. Returns a markdown summary for the
+    Market Analyst / Sentiment Analyst to gauge short-term market emotion.
+
+    Expected schema:
+        trade_date TEXT, limit_up_count INTEGER, limit_down_count INTEGER
+    Optional columns (rendered when present):
+        up_limit_stocks TEXT, down_limit_stocks TEXT
+    """
+    df = _df_from_sql(
+        """
+        SELECT trade_date, limit_up_count, limit_down_count,
+               up_limit_stocks, down_limit_stocks
+        FROM limit_up_down
+        WHERE trade_date = ?
+        LIMIT 1
+        """,
+        (trade_date,),
+    )
+
+    if df is None or df.empty:
+        raise NoMarketDataError(
+            trade_date, trade_date,
+            f"No limit-up/limit-down data in quant_core.db for {trade_date}."
+        )
+
+    row = df.iloc[0]
+    lines = [
+        f"## A-Share Limit-Up / Limit-Down Stats for {trade_date} "
+        f"(source: quant_core.db / local SQLite)",
+        "",
+    ]
+
+    up = row.get("limit_up_count")
+    down = row.get("limit_down_count")
+    if pd.notna(up):
+        lines.append(f"- **Limit-up stocks**: {int(up)}")
+    if pd.notna(down):
+        lines.append(f"- **Limit-down stocks**: {int(down)}")
+
+    up_stocks = row.get("up_limit_stocks")
+    if up_stocks and str(up_stocks).strip() and str(up_stocks) != "nan":
+        lines.append("")
+        lines.append("**Sample limit-up stocks:**")
+        for line in str(up_stocks).split(",")[:10]:
+            lines.append(f"- {line.strip()}")
+
+    down_stocks = row.get("down_limit_stocks")
+    if down_stocks and str(down_stocks).strip() and str(down_stocks) != "nan":
+        lines.append("")
+        lines.append("**Sample limit-down stocks:**")
+        for line in str(down_stocks).split(",")[:10]:
+            lines.append(f"- {line.strip()}")
 
     return "\n".join(lines)
 

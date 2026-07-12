@@ -63,6 +63,7 @@ from .smartmoney_vendor import (
     get_indicators as get_smartmoney_indicators,
     get_industry_valuation as get_smartmoney_industry_valuation,
     get_insider_transactions as get_smartmoney_insider_transactions,
+    get_limit_up_down as get_smartmoney_limit_up_down,
     get_institutional_holdings as get_smartmoney_institutional_holdings,
     get_macro_indicators as get_smartmoney_macro_indicators,
     get_margin_trading as get_smartmoney_margin_trading,
@@ -95,11 +96,12 @@ TOOLS_CATEGORIES = {
         ]
     },
     "technical_indicators": {
-        "description": "Technical analysis indicators",
+        "description": "Technical analysis indicators and market breadth",
         "tools": [
             "get_indicators",
             "get_fund_flow",
             "get_sector_fund_flow",
+            "get_limit_up_down",
         ]
     },
     "fundamental_data": {
@@ -212,6 +214,9 @@ VENDOR_METHODS = {
     "get_sector_fund_flow": {
         "smartmoney_db": get_smartmoney_sector_fund_flow,
         "akshare": get_akshare_sector_fund_flow,
+    },
+    "get_limit_up_down": {
+        "smartmoney_db": get_smartmoney_limit_up_down,
     },
     "get_shareholder_count": {
         "smartmoney_db": get_smartmoney_shareholder_count,
@@ -384,8 +389,11 @@ def route_to_vendor(method: str, *args, **kwargs):
 
     # Skip A-share-only vendors for non-A-share tickers, except for categories
     # whose methods don't take a ticker as their first positional arg
-    # (macro_data, prediction_markets — these use indicator/event names instead).
-    skip_ashare_filter = category in ("macro_data", "prediction_markets")
+    # (macro_data, prediction_markets — these use indicator/event names instead),
+    # or specific methods whose first argument is not a ticker (e.g. a trade date).
+    skip_ashare_filter = category in ("macro_data", "prediction_markets") or method in {
+        "get_limit_up_down",
+    }
     if not is_ashare and not skip_ashare_filter:
         filtered = [v for v in vendor_chain if v not in ("smartmoney_db", "akshare")]
         if not filtered:

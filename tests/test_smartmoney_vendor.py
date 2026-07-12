@@ -211,6 +211,15 @@ def _create_full_test_db(path):
         );
         INSERT INTO north_flow VALUES ('600519','2026-06-19',1.2e8,8.0e7,4.0e7);
         INSERT INTO north_flow VALUES ('600519','2026-06-18',9.0e7,1.0e8,-1.0e7);
+
+        CREATE TABLE limit_up_down (
+            trade_date TEXT PRIMARY KEY,
+            limit_up_count INTEGER,
+            limit_down_count INTEGER,
+            up_limit_stocks TEXT,
+            down_limit_stocks TEXT
+        );
+        INSERT INTO limit_up_down VALUES ('2026-06-19', 85, 12, '600519,000858,002594', '000001,000002');
     """)
     conn.commit()
     conn.close()
@@ -895,6 +904,59 @@ class GetNorthboundHoldTests(unittest.TestCase):
             _create_full_test_db(db_path)
             with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
                 get_northbound_hold("999999.SS")
+        finally:
+            os.unlink(db_path)
+
+
+@pytest.mark.unit
+class GetLimitUpDownTests(unittest.TestCase):
+    def test_returns_limit_up_down_data(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_limit_up_down
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = get_limit_up_down("2026-06-19")
+            self.assertIn("Limit-Up / Limit-Down", result)
+            self.assertIn("85", result)
+            self.assertIn("12", result)
+            self.assertIn("600519", result)
+            self.assertIn("000001", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_missing_date_returns_no_data_available(self):
+        from tradingagents.dataflows import interface
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = interface.route_to_vendor(
+                    "get_limit_up_down", "2026-06-20"
+                )
+            self.assertIn("NO_DATA_AVAILABLE", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_db_error_returns_no_data_available(self):
+        from tradingagents.dataflows import interface
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            # Empty DB file that exists but has no limit_up_down table
+            conn = sqlite3.connect(db_path)
+            conn.execute("CREATE TABLE dummy (x int)")
+            conn.close()
+            with _PatchedVendor(db_path):
+                result = interface.route_to_vendor(
+                    "get_limit_up_down", "2026-06-19"
+                )
+            self.assertIn("NO_DATA_AVAILABLE", result)
         finally:
             os.unlink(db_path)
 

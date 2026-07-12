@@ -38,6 +38,7 @@ ANALYST_DATA_REQUIREMENTS: dict[str, list[dict]] = {
         {"key": "ohlcv",         "label": "日K行情",     "cache": True},
         {"key": "indicators",    "label": "技术指标",    "cache": True, "derived": "ohlcv"},
         {"key": "fund_flow",     "label": "资金流向",    "cache": True},
+        {"key": "limit_up_down", "label": "涨跌停统计",  "cache": True},
     ],
     "social": [
         {"key": "stocktwits",    "label": "StockTwits",  "cache": False},
@@ -144,6 +145,36 @@ def _check_northbound(ticker: str, analyst: str) -> ReadinessItem:
     )
 
 
+def _check_limit_up_down(
+    ticker: str, trade_date: str, analyst: str
+) -> ReadinessItem:
+    """检查涨跌停统计缓存（按日期，不按标的）。"""
+    if not is_a_share_ticker(ticker):
+        return ReadinessItem(
+            "涨跌停统计", "realtime", "available",
+            "非A股标的，分析时获取", analyst
+        )
+    try:
+        from tradingagents.dataflows.smartmoney_vendor import _df_from_sql
+        df = _df_from_sql(
+            "SELECT COUNT(*) as cnt FROM limit_up_down WHERE trade_date = ?",
+            (trade_date,),
+        )
+        if df is not None and not df.empty:
+            cnt = df.iloc[0]["cnt"]
+            if cnt and cnt > 0:
+                return ReadinessItem(
+                    "涨跌停统计", "cacheable", "cached",
+                    f"{cnt} 条记录", analyst,
+                )
+    except Exception as exc:
+        logger.debug("smartmoney_db check failed for limit_up_down: %s", exc)
+    return ReadinessItem(
+        "涨跌停统计", "realtime", "available",
+        "无缓存，分析时实时获取", analyst
+    )
+
+
 def _check_fin_statements(ticker: str, analyst: str) -> ReadinessItem:
     """检查财务报表缓存。"""
     result = _check_smartmoney_table(
@@ -204,6 +235,8 @@ def check_data_readiness(
                 item = _check_fin_statements(ticker, analyst_key)
             elif req["key"] == "northbound":
                 item = _check_northbound(ticker, analyst_key)
+            elif req["key"] == "limit_up_down":
+                item = _check_limit_up_down(ticker, trade_date, analyst_key)
             else:
                 # 实时数据 — 标记为"分析时获取"
                 item = ReadinessItem(
