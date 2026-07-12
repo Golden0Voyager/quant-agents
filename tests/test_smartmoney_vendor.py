@@ -200,6 +200,17 @@ def _create_full_test_db(path):
         );
         INSERT INTO institutional_holdings VALUES ('600519',20260331,1372,'{"基金持仓": 1352, "券商持仓": 20}');
         INSERT INTO institutional_holdings VALUES ('600519',20251231,18,'{"券商持仓": 18}');
+
+        CREATE TABLE north_flow (
+            ts_code TEXT NOT NULL,
+            trade_date TEXT NOT NULL,
+            buy_amount REAL,
+            sell_amount REAL,
+            net_amount REAL,
+            PRIMARY KEY (ts_code, trade_date)
+        );
+        INSERT INTO north_flow VALUES ('600519','2026-06-19',1.2e8,8.0e7,4.0e7);
+        INSERT INTO north_flow VALUES ('600519','2026-06-18',9.0e7,1.0e8,-1.0e7);
     """)
     conn.commit()
     conn.close()
@@ -628,11 +639,11 @@ class RuntimeErrorStubsTests(unittest.TestCase):
         finally:
             os.unlink(db_path)
 
-    def test_get_northbound_hold_raises(self):
+    def test_get_northbound_hold_raises_when_db_missing(self):
         from tradingagents.dataflows.smartmoney_vendor import get_northbound_hold
         with self.assertRaises(RuntimeError) as ctx:
             get_northbound_hold("600519.SS")
-        self.assertIn("Northbound holdings", str(ctx.exception))
+        self.assertIn("northbound", str(ctx.exception))
 
     def test_get_news_raises(self):
         from tradingagents.dataflows.smartmoney_vendor import get_news
@@ -852,6 +863,38 @@ class GetIndicatorsTests(unittest.TestCase):
             conn.close()
             with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
                 get_indicators("600519.SS", "rsi6", "2026-06-19", 5)
+        finally:
+            os.unlink(db_path)
+
+
+
+@pytest.mark.unit
+class GetNorthboundHoldTests(unittest.TestCase):
+    def test_returns_northbound_flow_data(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_northbound_hold
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = get_northbound_hold("600519.SS")
+                self.assertIn("600519", result)
+                self.assertIn("Northbound", result)
+                self.assertIn("Buy Amount", result)
+                self.assertIn("Net Amount", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_raises_on_no_data(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_northbound_hold
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
+                get_northbound_hold("999999.SS")
         finally:
             os.unlink(db_path)
 

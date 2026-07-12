@@ -600,7 +600,57 @@ def get_institutional_holdings(symbol: str) -> str:
 
 
 def get_northbound_hold(symbol: str) -> str:
-    raise RuntimeError("Northbound holdings not available in quant_core.db")
+    """Fetch northbound (Stock Connect) flow for an A-share from quant_core.db.
+
+    Reads the ``north_flow`` table, which tracks daily buy/sell/net amounts of
+    foreign investors via HKEX Stock Connect. Falls back to akshare if the
+    local table is missing or empty.
+
+    The expected schema is:
+        ts_code TEXT, trade_date TEXT,
+        buy_amount REAL, sell_amount REAL, net_amount REAL
+    If the columns differ, the query fails gracefully and the vendor router
+    falls back to the next configured vendor.
+    """
+    code = _to_smartmoney_symbol(symbol)
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, buy_amount, sell_amount, net_amount
+        FROM north_flow
+        WHERE ts_code = ?
+        ORDER BY trade_date DESC
+        LIMIT 10
+        """,
+        (code,),
+    )
+
+    if df is None or df.empty:
+        raise RuntimeError(
+            f"No northbound flow data in quant_core.db for {symbol}. "
+            "Route to_vendor will fall back to akshare."
+        )
+
+    lines = [
+        f"## {symbol.upper()} Northbound (Stock Connect) Flow "
+        f"(source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)} trading days",
+        "",
+    ]
+
+    for _, row in df.iterrows():
+        lines.append(f"**Date**: {row['Date']}")
+        for col, label in [
+            ("buy_amount", "Buy Amount"),
+            ("sell_amount", "Sell Amount"),
+            ("net_amount", "Net Amount"),
+        ]:
+            v = row.get(col)
+            if pd.notna(v):
+                lines.append(f"- {label}: {v:,.0f}")
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 def get_industry_valuation(symbol: str) -> str:

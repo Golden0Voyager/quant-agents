@@ -55,7 +55,7 @@ ANALYST_DATA_REQUIREMENTS: dict[str, list[dict]] = {
         {"key": "margin_trading","label": "融资融券",    "cache": False},
         {"key": "shareholders",  "label": "股东户数",    "cache": False},
         {"key": "pledge",        "label": "股权质押",    "cache": False},
-        {"key": "northbound",    "label": "北向资金",    "cache": False},
+        {"key": "northbound",    "label": "北向资金",    "cache": True},
     ],
     "industry": [
         {"key": "industry_val",  "label": "行业估值",    "cache": False},
@@ -133,6 +133,17 @@ def _check_fund_flow(ticker: str, analyst: str) -> ReadinessItem:
     )
 
 
+def _check_northbound(ticker: str, analyst: str) -> ReadinessItem:
+    """检查北向资金缓存。"""
+    result = _check_smartmoney_table(ticker, "north_flow", "北向资金", analyst)
+    if result:
+        return result
+    return ReadinessItem(
+        "北向资金", "realtime", "available",
+        "无缓存，分析时实时获取", analyst
+    )
+
+
 def _check_fin_statements(ticker: str, analyst: str) -> ReadinessItem:
     """检查财务报表缓存。"""
     result = _check_smartmoney_table(
@@ -191,6 +202,8 @@ def check_data_readiness(
                 item = _check_fund_flow(ticker, analyst_key)
             elif req["key"] == "fin_statements":
                 item = _check_fin_statements(ticker, analyst_key)
+            elif req["key"] == "northbound":
+                item = _check_northbound(ticker, analyst_key)
             else:
                 # 实时数据 — 标记为"分析时获取"
                 item = ReadinessItem(
