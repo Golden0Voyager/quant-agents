@@ -200,6 +200,39 @@ def _create_full_test_db(path):
         );
         INSERT INTO institutional_holdings VALUES ('600519',20260331,1372,'{"基金持仓": 1352, "券商持仓": 20}');
         INSERT INTO institutional_holdings VALUES ('600519',20251231,18,'{"券商持仓": 18}');
+
+        CREATE TABLE north_flow (
+            ts_code TEXT NOT NULL,
+            trade_date TEXT NOT NULL,
+            buy_amount REAL,
+            sell_amount REAL,
+            net_amount REAL,
+            PRIMARY KEY (ts_code, trade_date)
+        );
+        INSERT INTO north_flow VALUES ('600519','2026-06-19',1.2e8,8.0e7,4.0e7);
+        INSERT INTO north_flow VALUES ('600519','2026-06-18',9.0e7,1.0e8,-1.0e7);
+
+        CREATE TABLE limit_up_down (
+            trade_date TEXT PRIMARY KEY,
+            limit_up_count INTEGER,
+            limit_down_count INTEGER,
+            up_limit_stocks TEXT,
+            down_limit_stocks TEXT
+        );
+        INSERT INTO limit_up_down VALUES ('2026-06-19', 85, 12, '600519,000858,002594', '000001,000002');
+
+        CREATE TABLE index_daily (
+            ts_code TEXT NOT NULL,
+            trade_date TEXT NOT NULL,
+            open REAL, high REAL, low REAL, close REAL, volume REAL,
+            PRIMARY KEY (ts_code, trade_date)
+        );
+        INSERT INTO index_daily VALUES ('000001','2026-06-15',3050.0,3060.0,3045.0,3055.0,2.5e9);
+        INSERT INTO index_daily VALUES ('000001','2026-06-16',3055.0,3070.0,3050.0,3065.0,2.6e9);
+        INSERT INTO index_daily VALUES ('000001','2026-06-17',3065.0,3080.0,3060.0,3075.0,2.7e9);
+        INSERT INTO index_daily VALUES ('000001','2026-06-18',3075.0,3090.0,3070.0,3085.0,2.8e9);
+        INSERT INTO index_daily VALUES ('000001','2026-06-19',3085.0,3100.0,3080.0,3095.0,2.9e9);
+        INSERT INTO index_daily VALUES ('399001','2026-06-19',9850.0,9900.0,9820.0,9880.0,3.1e9);
     """)
     conn.commit()
     conn.close()
@@ -628,11 +661,12 @@ class RuntimeErrorStubsTests(unittest.TestCase):
         finally:
             os.unlink(db_path)
 
-    def test_get_northbound_hold_raises(self):
+    def test_get_northbound_hold_raises_no_data_when_db_missing(self):
+        from tradingagents.dataflows.errors import NoMarketDataError
         from tradingagents.dataflows.smartmoney_vendor import get_northbound_hold
-        with self.assertRaises(RuntimeError) as ctx:
+        with self.assertRaises(NoMarketDataError) as ctx:
             get_northbound_hold("600519.SS")
-        self.assertIn("Northbound holdings", str(ctx.exception))
+        self.assertIn("northbound", str(ctx.exception))
 
     def test_get_news_raises(self):
         from tradingagents.dataflows.smartmoney_vendor import get_news
@@ -852,6 +886,186 @@ class GetIndicatorsTests(unittest.TestCase):
             conn.close()
             with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
                 get_indicators("600519.SS", "rsi6", "2026-06-19", 5)
+        finally:
+            os.unlink(db_path)
+
+
+
+@pytest.mark.unit
+class GetNorthboundHoldTests(unittest.TestCase):
+    def test_returns_northbound_flow_data(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_northbound_hold
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = get_northbound_hold("600519.SS")
+                self.assertIn("600519", result)
+                self.assertIn("Northbound", result)
+                self.assertIn("Buy Amount", result)
+                self.assertIn("Net Amount", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_raises_on_no_data(self):
+        from tradingagents.dataflows.errors import NoMarketDataError
+        from tradingagents.dataflows.smartmoney_vendor import get_northbound_hold
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path), self.assertRaises(NoMarketDataError):
+                get_northbound_hold("999999.SS")
+        finally:
+            os.unlink(db_path)
+
+    def test_route_to_vendor_returns_no_data_available(self):
+        from tradingagents.dataflows import interface
+        from tradingagents.dataflows.errors import NoMarketDataError
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path), patch(
+                "tradingagents.dataflows.interface.VENDOR_METHODS",
+                {
+                    **interface.VENDOR_METHODS,
+                    "get_northbound_hold": {
+                        "smartmoney_db": interface.VENDOR_METHODS["get_northbound_hold"]["smartmoney_db"],
+                        "akshare": lambda *a, **k: (_ for _ in ()).throw(
+                            NoMarketDataError(a[0] if a else "", "", "No akshare data")
+                        ),
+                    },
+                },
+            ):
+                result = interface.route_to_vendor("get_northbound_hold", "999999.SS")
+            self.assertIn("NO_DATA_AVAILABLE", result)
+            self.assertIn("999999.SS", result)
+        finally:
+            os.unlink(db_path)
+
+
+@pytest.mark.unit
+class GetLimitUpDownTests(unittest.TestCase):
+    def test_returns_limit_up_down_data(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_limit_up_down
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = get_limit_up_down("2026-06-19")
+            self.assertIn("Limit-Up / Limit-Down", result)
+            self.assertIn("85", result)
+            self.assertIn("12", result)
+            self.assertIn("600519", result)
+            self.assertIn("000001", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_missing_date_returns_no_data_available(self):
+        from tradingagents.dataflows import interface
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = interface.route_to_vendor(
+                    "get_limit_up_down", "2026-06-20"
+                )
+            self.assertIn("NO_DATA_AVAILABLE", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_db_error_returns_no_data_available(self):
+        from tradingagents.dataflows import interface
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            # Empty DB file that exists but has no limit_up_down table
+            conn = sqlite3.connect(db_path)
+            conn.execute("CREATE TABLE dummy (x int)")
+            conn.close()
+            with _PatchedVendor(db_path):
+                result = interface.route_to_vendor(
+                    "get_limit_up_down", "2026-06-19"
+                )
+            self.assertIn("NO_DATA_AVAILABLE", result)
+        finally:
+            os.unlink(db_path)
+
+
+@pytest.mark.unit
+class GetIndexDailyTests(unittest.TestCase):
+    def test_returns_index_daily_data(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_index_daily
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = get_index_daily("000001.SS", "2026-06-15", "2026-06-19")
+            self.assertIn("000001.SS", result)
+            self.assertIn("Index data", result)
+            self.assertIn("3055.0", result)
+            self.assertIn("3095.0", result)
+            self.assertIn("Open", result)
+            self.assertIn("Close", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_raises_on_no_data(self):
+        from tradingagents.dataflows.errors import NoMarketDataError
+        from tradingagents.dataflows.smartmoney_vendor import get_index_daily
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path), self.assertRaises(NoMarketDataError):
+                get_index_daily("999999.SS", "2026-06-15", "2026-06-19")
+        finally:
+            os.unlink(db_path)
+
+    def test_empty_result_returns_no_data_available(self):
+        from tradingagents.dataflows import interface
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                # Valid table, but no rows match the requested code/date range.
+                result = interface.route_to_vendor(
+                    "get_index_daily", "999999.SS", "2026-06-15", "2026-06-19"
+                )
+            self.assertIn("NO_DATA_AVAILABLE", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_schema_failure_returns_no_data_available(self):
+        from tradingagents.dataflows import interface
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            # Empty DB file with no index_daily table simulates a schema/DB failure.
+            conn = sqlite3.connect(db_path)
+            conn.execute("CREATE TABLE dummy (x int)")
+            conn.close()
+            with _PatchedVendor(db_path):
+                result = interface.route_to_vendor(
+                    "get_index_daily", "000001.SS", "2026-06-15", "2026-06-19"
+                )
+            self.assertIn("NO_DATA_AVAILABLE", result)
         finally:
             os.unlink(db_path)
 

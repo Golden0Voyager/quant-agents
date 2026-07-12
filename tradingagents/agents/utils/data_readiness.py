@@ -32,12 +32,22 @@ class ReadinessReport:
     warning_count: int = 0
 
 
+_MAJOR_INDEX_CODES = frozenset({
+    "000001",
+    "399001",
+    "399006",
+    "000688",
+})
+
+
 # 分析师到所需数据源的映射
 ANALYST_DATA_REQUIREMENTS: dict[str, list[dict]] = {
     "market": [
         {"key": "ohlcv",         "label": "日K行情",     "cache": True},
         {"key": "indicators",    "label": "技术指标",    "cache": True, "derived": "ohlcv"},
         {"key": "fund_flow",     "label": "资金流向",    "cache": True},
+        {"key": "limit_up_down", "label": "涨跌停统计",  "cache": True},
+        {"key": "index_daily",   "label": "指数日线",    "cache": True},
     ],
     "social": [
         {"key": "stocktwits",    "label": "StockTwits",  "cache": False},
@@ -55,7 +65,7 @@ ANALYST_DATA_REQUIREMENTS: dict[str, list[dict]] = {
         {"key": "margin_trading","label": "融资融券",    "cache": False},
         {"key": "shareholders",  "label": "股东户数",    "cache": False},
         {"key": "pledge",        "label": "股权质押",    "cache": False},
-        {"key": "northbound",    "label": "北向资金",    "cache": False},
+        {"key": "northbound",    "label": "北向资金",    "cache": True},
     ],
     "industry": [
         {"key": "industry_val",  "label": "行业估值",    "cache": False},
@@ -133,6 +143,82 @@ def _check_fund_flow(ticker: str, analyst: str) -> ReadinessItem:
     )
 
 
+def _check_northbound(ticker: str, analyst: str) -> ReadinessItem:
+    """检查北向资金缓存。"""
+    result = _check_smartmoney_table(ticker, "north_flow", "北向资金", analyst)
+    if result:
+        return result
+    return ReadinessItem(
+        "北向资金", "realtime", "available",
+        "无缓存，分析时实时获取", analyst
+    )
+
+
+def _check_limit_up_down(
+    ticker: str, trade_date: str, analyst: str
+) -> ReadinessItem:
+    """检查涨跌停统计缓存（按日期，不按标的）。"""
+    if not is_a_share_ticker(ticker):
+        return ReadinessItem(
+            "涨跌停统计", "realtime", "available",
+            "非A股标的，分析时获取", analyst
+        )
+    try:
+        from tradingagents.dataflows.smartmoney_vendor import _df_from_sql
+        df = _df_from_sql(
+            "SELECT COUNT(*) as cnt FROM limit_up_down WHERE trade_date = ?",
+            (trade_date,),
+        )
+        if df is not None and not df.empty:
+            cnt = df.iloc[0]["cnt"]
+            if cnt and cnt > 0:
+                return ReadinessItem(
+                    "涨跌停统计", "cacheable", "cached",
+                    f"{cnt} 条记录", analyst,
+                )
+    except Exception as exc:
+        logger.debug("smartmoney_db check failed for limit_up_down: %s", exc)
+    return ReadinessItem(
+        "涨跌停统计", "realtime", "available",
+        "无缓存，分析时实时获取", analyst
+    )
+
+
+def _check_index_daily(
+    ticker: str, trade_date: str, analyst: str
+) -> ReadinessItem:
+    """检查大盘/板块指数日线缓存（按主要指数代码，不按标的）。"""
+    if not is_a_share_ticker(ticker):
+        return ReadinessItem(
+            "指数日线", "realtime", "available",
+            "非A股标的，分析时获取", analyst
+        )
+    try:
+        from tradingagents.dataflows.smartmoney_vendor import _df_from_sql
+        placeholders = ",".join("?" * len(_MAJOR_INDEX_CODES))
+        df = _df_from_sql(
+            f"SELECT COUNT(*) as cnt, MAX(trade_date) as latest "
+            f"FROM index_daily WHERE ts_code IN ({placeholders}) AND trade_date <= ?",
+            tuple(_MAJOR_INDEX_CODES) + (trade_date,),
+        )
+        if df is not None and not df.empty:
+            cnt = df.iloc[0]["cnt"]
+            latest = df.iloc[0]["latest"]
+            if cnt and cnt > 0:
+                latest_str = str(latest) if latest else ""
+                return ReadinessItem(
+                    "指数日线", "cacheable", "cached",
+                    f"{int(cnt)} 条记录" + (f"，最新 {latest_str}" if latest_str else ""),
+                    analyst,
+                )
+    except Exception as exc:
+        logger.debug("smartmoney_db check failed for index_daily: %s", exc)
+    return ReadinessItem(
+        "指数日线", "realtime", "available",
+        "无缓存，分析时实时获取", analyst
+    )
+
+
 def _check_fin_statements(ticker: str, analyst: str) -> ReadinessItem:
     """检查财务报表缓存。"""
     result = _check_smartmoney_table(
@@ -191,6 +277,12 @@ def check_data_readiness(
                 item = _check_fund_flow(ticker, analyst_key)
             elif req["key"] == "fin_statements":
                 item = _check_fin_statements(ticker, analyst_key)
+            elif req["key"] == "northbound":
+                item = _check_northbound(ticker, analyst_key)
+            elif req["key"] == "limit_up_down":
+                item = _check_limit_up_down(ticker, trade_date, analyst_key)
+            elif req["key"] == "index_daily":
+                item = _check_index_daily(ticker, trade_date, analyst_key)
             else:
                 # 实时数据 — 标记为"分析时获取"
                 item = ReadinessItem(

@@ -16,6 +16,8 @@ from tradingagents.agents.utils.data_readiness import (
     ANALYST_DATA_REQUIREMENTS,
     ReadinessItem,
     ReadinessReport,
+    _check_index_daily,
+    _check_limit_up_down,
     check_batch_readiness,
     check_data_readiness,
     display_readiness_report,
@@ -258,6 +260,131 @@ class TestCheckFinStatements:
 
 
 # ===========================================================================
+# _check_limit_up_down
+# ===========================================================================
+
+
+class TestCheckLimitUpDown:
+    """Test _check_limit_up_down branches."""
+
+    @patch("tradingagents.agents.utils.data_readiness.is_a_share_ticker")
+    def test_non_ashare_limit_up_down_falls_through(
+        self, mock_is_a_share
+    ):
+        """Non-A-share: limit_up_down shows '实时获取'."""
+        mock_is_a_share.return_value = False
+
+        item = _check_limit_up_down("AAPL", "2026-07-03", "market")
+        assert item.status == "available"
+        assert "非A股标的" in item.details
+
+    @patch("tradingagents.agents.utils.data_readiness.is_a_share_ticker")
+    @patch("tradingagents.dataflows.smartmoney_vendor._df_from_sql")
+    def test_ashare_limit_up_down_cached(
+        self, mock_df, mock_is_a_share
+    ):
+        """A-share with data in limit_up_down returns cached status."""
+        mock_is_a_share.return_value = True
+        mock_df.return_value = pd.DataFrame({"cnt": [85]})
+
+        item = _check_limit_up_down("000001.SZ", "2026-07-03", "market")
+        assert item.status == "cached"
+        assert "85 条记录" in item.details
+
+    @patch("tradingagents.agents.utils.data_readiness.is_a_share_ticker")
+    @patch("tradingagents.dataflows.smartmoney_vendor._df_from_sql")
+    def test_ashare_limit_up_down_empty_result(
+        self, mock_df, mock_is_a_share
+    ):
+        """A-share with zero cnt falls through to 'available'."""
+        mock_is_a_share.return_value = True
+        mock_df.return_value = pd.DataFrame({"cnt": [0]})
+
+        item = _check_limit_up_down("000001.SZ", "2026-07-03", "market")
+        assert item.status == "available"
+        assert "实时获取" in item.details
+
+    @patch("tradingagents.agents.utils.data_readiness.is_a_share_ticker")
+    @patch("tradingagents.dataflows.smartmoney_vendor._df_from_sql")
+    def test_ashare_limit_up_down_exception(
+        self, mock_df, mock_is_a_share
+    ):
+        """Exception in smartmoney_db query falls through gracefully."""
+        mock_is_a_share.return_value = True
+        mock_df.side_effect = RuntimeError("db unavailable")
+
+        item = _check_limit_up_down("000001.SZ", "2026-07-03", "market")
+        assert item.status == "available"
+        assert "实时获取" in item.details
+
+
+# ===========================================================================
+# _check_index_daily
+# ===========================================================================
+
+
+class TestCheckIndexDaily:
+    """Test _check_index_daily branches."""
+
+    @patch("tradingagents.agents.utils.data_readiness.is_a_share_ticker")
+    def test_non_ashare_index_daily_falls_through(
+        self, mock_is_a_share
+    ):
+        """Non-A-share: index_daily shows '实时获取'."""
+        mock_is_a_share.return_value = False
+
+        item = _check_index_daily("AAPL", "2026-07-03", "market")
+        assert item.status == "available"
+        assert "非A股标的" in item.details
+
+    @patch("tradingagents.agents.utils.data_readiness.is_a_share_ticker")
+    @patch("tradingagents.dataflows.smartmoney_vendor._df_from_sql")
+    def test_ashare_index_daily_cached(
+        self, mock_df, mock_is_a_share
+    ):
+        """A-share with data in index_daily returns cached status."""
+        mock_is_a_share.return_value = True
+        mock_df.return_value = pd.DataFrame({
+            "cnt": [20],
+            "latest": ["2026-07-02"],
+        })
+
+        item = _check_index_daily("000001.SZ", "2026-07-03", "market")
+        assert item.status == "cached"
+        assert "20 条记录" in item.details
+        assert "2026-07-02" in item.details
+
+    @patch("tradingagents.agents.utils.data_readiness.is_a_share_ticker")
+    @patch("tradingagents.dataflows.smartmoney_vendor._df_from_sql")
+    def test_ashare_index_daily_empty_result(
+        self, mock_df, mock_is_a_share
+    ):
+        """A-share with zero cnt falls through to 'available'."""
+        mock_is_a_share.return_value = True
+        mock_df.return_value = pd.DataFrame({
+            "cnt": [0],
+            "latest": [None],
+        })
+
+        item = _check_index_daily("000001.SZ", "2026-07-03", "market")
+        assert item.status == "available"
+        assert "实时获取" in item.details
+
+    @patch("tradingagents.agents.utils.data_readiness.is_a_share_ticker")
+    @patch("tradingagents.dataflows.smartmoney_vendor._df_from_sql")
+    def test_ashare_index_daily_exception(
+        self, mock_df, mock_is_a_share
+    ):
+        """Exception in smartmoney_db query falls through gracefully."""
+        mock_is_a_share.return_value = True
+        mock_df.side_effect = RuntimeError("db unavailable")
+
+        item = _check_index_daily("000001.SZ", "2026-07-03", "market")
+        assert item.status == "available"
+        assert "实时获取" in item.details
+
+
+# ===========================================================================
 # _check_derived
 # ===========================================================================
 
@@ -341,8 +468,9 @@ class TestCheckDataReadinessIntegration:
         """Multiple analysts sharing same data keys → only one item per key."""
         mock_load.return_value = pd.DataFrame({"Date": ["2026-07-03"], "Close": [10.0]})
         report = check_data_readiness("000001.SZ", "2026-07-03", ["market", "market"])
-        # "market" analyst listed twice but deduplicated: ohlcv, indicators, fund_flow
-        assert len(report.items) == 3
+        # "market" analyst listed twice but deduplicated:
+        # ohlcv, indicators, fund_flow, limit_up_down, index_daily
+        assert len(report.items) == 5
 
     @patch("tradingagents.agents.utils.data_readiness.load_ohlcv")
     def test_warning_count_unavailable_item(self, mock_load):

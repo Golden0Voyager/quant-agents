@@ -19,6 +19,8 @@ from typing import Annotated
 
 import pandas as pd
 
+from tradingagents.dataflows.errors import NoMarketDataError
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -527,6 +529,152 @@ def get_fund_flow(symbol: str) -> str:
 
 
 # ===========================================================================
+# Index data
+# ===========================================================================
+
+def get_index_daily(
+    index_code: Annotated[
+        str,
+        "A-share index code e.g. 000001.SS (SSE Composite), 399001.SZ (SZSE Component), "
+        "399006.SZ (ChiNext), 000688.SS (STAR Market). Exchange suffix is normalised to "
+        "the bare numeric code used in quant_core.db.",
+    ],
+    start_date: Annotated[str, "Start date YYYY-MM-DD"],
+    end_date: Annotated[str, "End date YYYY-MM-DD"],
+) -> str:
+    """Fetch A-share index daily OHLCV from quant_core.db.
+
+    Reads the ``index_daily`` table for major A-share indices. Expected schema:
+        ts_code TEXT, trade_date TEXT, open REAL, high REAL,
+        low REAL, close REAL, volume REAL
+
+    Returns a CSV-formatted OHLCV table for the requested index and date range.
+
+    - Empty result (no rows for the requested code/date range): raises
+      ``NoMarketDataError`` so ``route_to_vendor`` returns ``NO_DATA_AVAILABLE``.
+    - Query failure / schema mismatch / missing table: also raises
+      ``NoMarketDataError``. Because ``get_index_daily`` only has the
+      ``smartmoney_db`` vendor (no fallback), a hard crash would abort the
+      agent call; degrading gracefully keeps the pipeline alive.
+    """
+    code = _to_smartmoney_symbol(index_code)
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, open AS Open, high AS High,
+               low AS Low, close AS Close, volume AS Volume
+        FROM index_daily
+        WHERE ts_code = ? AND trade_date BETWEEN ? AND ?
+        ORDER BY trade_date DESC
+        """,
+        (code, start_date, end_date),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            index_code, index_code,
+            f"index_daily query failed for {index_code} between {start_date} and {end_date}."
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            index_code, index_code,
+            f"No index_daily data in quant_core.db between {start_date} and {end_date}."
+        )
+
+    required_cols = {"Date", "Open", "High", "Low", "Close", "Volume"}
+    missing_cols = required_cols - set(df.columns)
+    if missing_cols:
+        raise NoMarketDataError(
+            index_code, index_code,
+            f"index_daily schema mismatch for {index_code}: missing columns {sorted(missing_cols)}."
+        )
+
+    numeric_cols = ("Open", "High", "Low", "Close", "Volume")
+    for col in numeric_cols:
+        if not pd.api.types.is_numeric_dtype(df[col]):
+            raise NoMarketDataError(
+                index_code, index_code,
+                f"index_daily schema mismatch for {index_code}: column {col!r} is not numeric."
+            )
+
+    df = df.set_index("Date")
+    for col in ("Open", "High", "Low", "Close"):
+        df[col] = df[col].round(2)
+
+    header = (
+        f"# Index data for {index_code.upper()} from {start_date} to {end_date}\n"
+        f"# Total records: {len(df)}\n"
+        f"# Source: quant_core.db (local SQLite)\n\n"
+    )
+    return header + df.to_csv()
+
+
+# ===========================================================================
+# Market breadth
+# ===========================================================================
+
+def get_limit_up_down(trade_date: str) -> str:
+    """Fetch market-wide limit-up/limit-down stats for a trading date.
+
+    Reads the ``limit_up_down`` table, which aggregates daily A-share
+    limit-up and limit-down counts. Returns a markdown summary for the
+    Market Analyst / Sentiment Analyst to gauge short-term market emotion.
+
+    Expected schema:
+        trade_date TEXT, limit_up_count INTEGER, limit_down_count INTEGER
+    Optional columns (rendered when present):
+        up_limit_stocks TEXT, down_limit_stocks TEXT
+    """
+    df = _df_from_sql(
+        """
+        SELECT trade_date, limit_up_count, limit_down_count,
+               up_limit_stocks, down_limit_stocks
+        FROM limit_up_down
+        WHERE trade_date = ?
+        LIMIT 1
+        """,
+        (trade_date,),
+    )
+
+    if df is None or df.empty:
+        raise NoMarketDataError(
+            trade_date, trade_date,
+            f"No limit-up/limit-down data in quant_core.db for {trade_date}."
+        )
+
+    row = df.iloc[0]
+    lines = [
+        f"## A-Share Limit-Up / Limit-Down Stats for {trade_date} "
+        f"(source: quant_core.db / local SQLite)",
+        "",
+    ]
+
+    up = row.get("limit_up_count")
+    down = row.get("limit_down_count")
+    if pd.notna(up):
+        lines.append(f"- **Limit-up stocks**: {int(up)}")
+    if pd.notna(down):
+        lines.append(f"- **Limit-down stocks**: {int(down)}")
+
+    up_stocks = row.get("up_limit_stocks")
+    if pd.notna(up_stocks) and str(up_stocks).strip():
+        lines.append("")
+        lines.append("**Sample limit-up stocks:**")
+        for line in str(up_stocks).split(",")[:10]:
+            lines.append(f"- {line.strip()}")
+
+    down_stocks = row.get("down_limit_stocks")
+    if pd.notna(down_stocks) and str(down_stocks).strip():
+        lines.append("")
+        lines.append("**Sample limit-down stocks:**")
+        for line in str(down_stocks).split(",")[:10]:
+            lines.append(f"- {line.strip()}")
+
+    return "\n".join(lines)
+
+
+# ===========================================================================
 # News / Governance — not stored in quant_core.db
 # ===========================================================================
 
@@ -600,7 +748,58 @@ def get_institutional_holdings(symbol: str) -> str:
 
 
 def get_northbound_hold(symbol: str) -> str:
-    raise RuntimeError("Northbound holdings not available in quant_core.db")
+    """Fetch northbound (Stock Connect) flow for an A-share from quant_core.db.
+
+    Reads the ``north_flow`` table, which tracks daily buy/sell/net amounts of
+    foreign investors via HKEX Stock Connect.
+
+    The expected schema is:
+        ts_code TEXT, trade_date TEXT,
+        buy_amount REAL, sell_amount REAL, net_amount REAL
+
+    - Missing/empty result or schema failure: raises ``NoMarketDataError`` so
+      ``route_to_vendor`` returns ``NO_DATA_AVAILABLE`` (or falls back to the
+      next configured vendor, e.g. akshare).
+    """
+    code = _to_smartmoney_symbol(symbol)
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, buy_amount, sell_amount, net_amount
+        FROM north_flow
+        WHERE ts_code = ?
+        ORDER BY trade_date DESC
+        LIMIT 10
+        """,
+        (code,),
+    )
+
+    if df is None or df.empty:
+        raise NoMarketDataError(
+            symbol, symbol,
+            "No northbound flow data in quant_core.db for the requested symbol."
+        )
+
+    lines = [
+        f"## {symbol.upper()} Northbound (Stock Connect) Flow "
+        f"(source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)} trading days",
+        "",
+    ]
+
+    for _, row in df.iterrows():
+        lines.append(f"**Date**: {row['Date']}")
+        for col, label in [
+            ("buy_amount", "Buy Amount"),
+            ("sell_amount", "Sell Amount"),
+            ("net_amount", "Net Amount"),
+        ]:
+            v = row.get(col)
+            if pd.notna(v):
+                lines.append(f"- {label}: {v:,.0f}")
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 def get_industry_valuation(symbol: str) -> str:
