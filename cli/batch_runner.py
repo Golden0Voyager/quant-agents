@@ -1192,15 +1192,21 @@ class BatchRunner:
             def get_stats(inner_self) -> dict:
                 snapshot = outer.batch_stats
                 cost_by_model = dict(snapshot.get("cost_by_model") or {})
+                calls_by_model = dict(snapshot.get("calls_by_model") or {})
+                tokens_by_model = {
+                    k: {"in": v.get("in", 0), "out": v.get("out", 0)}
+                    for k, v in (snapshot.get("tokens_by_model") or {}).items()
+                }
                 total_cost = sum(cost_by_model.values()) if cost_by_model else None
                 return {
-                    "llm_calls": 0,
+                    "llm_calls": snapshot.get("llm_calls", 0),
                     "tool_calls": 0,
                     "tokens_in": snapshot.get("tokens_in", 0),
                     "tokens_out": snapshot.get("tokens_out", 0),
                     "cost": total_cost,
                     "cost_by_model": cost_by_model,
-                    "tokens_by_model": {},
+                    "calls_by_model": calls_by_model,
+                    "tokens_by_model": tokens_by_model,
                 }
 
         return _Adapter()

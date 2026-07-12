@@ -417,8 +417,11 @@ def test_batch_stats_adapter_exposes_running_totals(tmp_path):
     snap = adapter.get_stats()
     assert snap["tokens_in"] == 1000
     assert snap["tokens_out"] == 400
+    assert snap["llm_calls"] == 4
     assert snap["cost"] == pytest.approx(0.01)
     assert snap["cost_by_model"] == {"gpt-5.4": pytest.approx(0.01)}
+    assert snap["calls_by_model"] == {"gpt-5.4": 3, "deepseek-v4-flash": 1}
+    assert snap["tokens_by_model"] == {"gpt-5.4": {"in": 1000, "out": 400}}
 
     # After a second ticker is accumulated, the adapter reflects the
     # running total — not just the per-ticker snapshot.
@@ -430,10 +433,13 @@ def test_batch_stats_adapter_exposes_running_totals(tmp_path):
     snap2 = adapter.get_stats()
     assert snap2["tokens_in"] == 3000
     assert snap2["tokens_out"] == 1000
+    assert snap2["llm_calls"] == 8
     assert snap2["cost"] == pytest.approx(0.03)
     # Adapter reads self.batch_stats lazily, so it now contains BOTH models.
     assert snap2["cost_by_model"]["gpt-5.4"] == pytest.approx(0.01)
     assert snap2["cost_by_model"]["deepseek-v4-flash"] == pytest.approx(0.02)
+    assert snap2["calls_by_model"] == {"gpt-5.4": 6, "deepseek-v4-flash": 2}
+    assert snap2["tokens_by_model"] == {"gpt-5.4": {"in": 3000, "out": 1000}}
 
 
 def test_run_single_selects_analysts_from_profile(tmp_path):
