@@ -38,3 +38,19 @@ def test_llm_calls_by_model_tracks_chat_model_calls():
         "deepseek-v4-flash": 2,
         "Qwen/Qwen3.5-397B-A17B": 1,
     }
+
+
+def test_llm_calls_by_model_tracks_legacy_llm_start():
+    """Legacy ``on_llm_start`` path also increments per-model call counts."""
+    handler = StatsCallbackHandler()
+    serialized = {"kwargs": {"model_name": "gpt-5.4"}}
+
+    handler.on_llm_start(serialized, [])
+    handler.on_llm_end(_make_response("gpt-5.4", 50, 25))
+
+    handler.on_llm_start(serialized, [])
+    handler.on_llm_end(_make_response("gpt-5.4", 30, 15))
+
+    stats = handler.get_stats()
+    assert stats["llm_calls"] == 2
+    assert stats["llm_calls_by_model"] == {"gpt-5.4": 2}

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -368,7 +369,6 @@ def test_generate_summary_json_includes_usage_fields(tmp_path):
 
     runner.generate_summary()
     json_path = runner.output_dir / "batch_summary.json"
-    import json
     data = json.loads(json_path.read_text(encoding="utf-8"))
 
     assert data["totals"]["llm_calls"] == 4

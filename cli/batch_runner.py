@@ -1080,7 +1080,7 @@ class BatchRunner:
                         "cost": per_ticker_stats.get("cost"),
                         "calls_by_model": dict(per_ticker_stats.get("calls_by_model", {})),
                         "tokens_by_model": {
-                            k: {"in": v.get("in"), "out": v.get("out")}
+                            k: {"in": int(v.get("in", 0)), "out": int(v.get("out", 0))}
                             for k, v in (per_ticker_stats.get("tokens_by_model") or {}).items()
                         },
                         "cost_by_model": dict(per_ticker_stats.get("cost_by_model", {})),
@@ -1130,14 +1130,18 @@ class BatchRunner:
                     calls = calls_by_model.get(model, 0)
                     t_in = tokens_by_model.get(model, {}).get("in", 0)
                     t_out = tokens_by_model.get(model, {}).get("out", 0)
-                    cost = cost_by_model.get(model, 0.0)
+                    cost = cost_by_model.get(model)
                     total_calls += calls
                     total_tin += t_in
                     total_tout += t_out
-                    total_cost += cost
+                    if cost is not None:
+                        total_cost += cost
+                        cost_cell = f"${cost:.4f}"
+                    else:
+                        cost_cell = "—"
                     lines.append(
                         f"| {model} | {calls} | {self._format_number(t_in)} | "
-                        f"{self._format_number(t_out)} | ${cost:.4f} |"
+                        f"{self._format_number(t_out)} | {cost_cell} |"
                     )
                 lines.append(
                     f"| **Total** | **{total_calls}** | **{self._format_number(total_tin)}↑** | "
@@ -1159,7 +1163,7 @@ class BatchRunner:
                 "cost_by_model": dict(self.batch_stats.get("cost_by_model", {})),
                 "calls_by_model": dict(self.batch_stats.get("calls_by_model", {})),
                 "tokens_by_model": {
-                    k: {"in": v.get("in"), "out": v.get("out")}
+                    k: {"in": int(v.get("in", 0)), "out": int(v.get("out", 0))}
                     for k, v in self.batch_stats.get("tokens_by_model", {}).items()
                 },
             },
@@ -1226,9 +1230,10 @@ class BatchRunner:
         in_tokens = stats.get("tokens_in") or 0
         out_tokens = stats.get("tokens_out") or 0
         if in_tokens or out_tokens:
-            tin = f"{in_tokens / 1000:.1f}k" if in_tokens >= 1000 else str(in_tokens)
-            tout = f"{out_tokens / 1000:.1f}k" if out_tokens >= 1000 else str(out_tokens)
-            tokens_cell = f"{tin}↑ {tout}↓"
+            tokens_cell = (
+                f"{BatchRunner._format_number(in_tokens)}↑ "
+                f"{BatchRunner._format_number(out_tokens)}↓"
+            )
         else:
             tokens_cell = "—"
         cost = stats.get("cost")

@@ -85,11 +85,10 @@ class StatsCallbackHandler(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         """Record the model name being called so on_llm_end can price it."""
-        model_name = _extract_model_name(serialized)
         with self._lock:
             self.llm_calls += 1
-            if model_name:
-                self.llm_calls_by_model[model_name] = self.llm_calls_by_model.get(model_name, 0) + 1
+            model_name = _extract_model_name(serialized) or "unknown"
+            self.llm_calls_by_model[model_name] = self.llm_calls_by_model.get(model_name, 0) + 1
             self._current_model = model_name
 
     def on_llm_start(
@@ -101,9 +100,8 @@ class StatsCallbackHandler(BaseCallbackHandler):
         """Counter for non-chat LLM invocations (legacy text completions)."""
         with self._lock:
             self.llm_calls += 1
-            model_name = _extract_model_name(serialized)
-            if model_name:
-                self.llm_calls_by_model[model_name] = self.llm_calls_by_model.get(model_name, 0) + 1
+            model_name = _extract_model_name(serialized) or "unknown"
+            self.llm_calls_by_model[model_name] = self.llm_calls_by_model.get(model_name, 0) + 1
             # Some integrations only set the model on the legacy
             # ``on_llm_start`` path; capture it there too so we don't
             # miss the model in cost estimation.
