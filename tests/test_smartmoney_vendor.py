@@ -661,9 +661,10 @@ class RuntimeErrorStubsTests(unittest.TestCase):
         finally:
             os.unlink(db_path)
 
-    def test_get_northbound_hold_raises_when_db_missing(self):
+    def test_get_northbound_hold_raises_no_data_when_db_missing(self):
+        from tradingagents.dataflows.errors import NoMarketDataError
         from tradingagents.dataflows.smartmoney_vendor import get_northbound_hold
-        with self.assertRaises(RuntimeError) as ctx:
+        with self.assertRaises(NoMarketDataError) as ctx:
             get_northbound_hold("600519.SS")
         self.assertIn("northbound", str(ctx.exception))
 
@@ -909,14 +910,41 @@ class GetNorthboundHoldTests(unittest.TestCase):
             os.unlink(db_path)
 
     def test_raises_on_no_data(self):
+        from tradingagents.dataflows.errors import NoMarketDataError
         from tradingagents.dataflows.smartmoney_vendor import get_northbound_hold
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
         try:
             _create_full_test_db(db_path)
-            with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
+            with _PatchedVendor(db_path), self.assertRaises(NoMarketDataError):
                 get_northbound_hold("999999.SS")
+        finally:
+            os.unlink(db_path)
+
+    def test_route_to_vendor_returns_no_data_available(self):
+        from tradingagents.dataflows import interface
+        from tradingagents.dataflows.errors import NoMarketDataError
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path), patch(
+                "tradingagents.dataflows.interface.VENDOR_METHODS",
+                {
+                    **interface.VENDOR_METHODS,
+                    "get_northbound_hold": {
+                        "smartmoney_db": interface.VENDOR_METHODS["get_northbound_hold"]["smartmoney_db"],
+                        "akshare": lambda *a, **k: (_ for _ in ()).throw(
+                            NoMarketDataError(a[0] if a else "", "", "No akshare data")
+                        ),
+                    },
+                },
+            ):
+                result = interface.route_to_vendor("get_northbound_hold", "999999.SS")
+            self.assertIn("NO_DATA_AVAILABLE", result)
+            self.assertIn("999999.SS", result)
         finally:
             os.unlink(db_path)
 

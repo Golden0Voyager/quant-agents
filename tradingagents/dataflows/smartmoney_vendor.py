@@ -751,14 +751,15 @@ def get_northbound_hold(symbol: str) -> str:
     """Fetch northbound (Stock Connect) flow for an A-share from quant_core.db.
 
     Reads the ``north_flow`` table, which tracks daily buy/sell/net amounts of
-    foreign investors via HKEX Stock Connect. Falls back to akshare if the
-    local table is missing or empty.
+    foreign investors via HKEX Stock Connect.
 
     The expected schema is:
         ts_code TEXT, trade_date TEXT,
         buy_amount REAL, sell_amount REAL, net_amount REAL
-    If the columns differ, the query fails gracefully and the vendor router
-    falls back to the next configured vendor.
+
+    - Missing/empty result or schema failure: raises ``NoMarketDataError`` so
+      ``route_to_vendor`` returns ``NO_DATA_AVAILABLE`` (or falls back to the
+      next configured vendor, e.g. akshare).
     """
     code = _to_smartmoney_symbol(symbol)
 
@@ -774,9 +775,9 @@ def get_northbound_hold(symbol: str) -> str:
     )
 
     if df is None or df.empty:
-        raise RuntimeError(
-            f"No northbound flow data in quant_core.db for {symbol}. "
-            "Route to_vendor will fall back to akshare."
+        raise NoMarketDataError(
+            symbol, symbol,
+            "No northbound flow data in quant_core.db for the requested symbol."
         )
 
     lines = [
