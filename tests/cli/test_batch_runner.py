@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -254,6 +255,7 @@ def _stats_handler_mock(tokens_in=1000, tokens_out=500, cost=0.01, cost_by_model
     handler = MagicMock()
     handler.get_stats.return_value = {
         "llm_calls": 4,
+        "llm_calls_by_model": {"gpt-5.4": 3, "deepseek-v4-flash": 1},
         "tool_calls": 2,
         "tokens_in": tokens_in,
         "tokens_out": tokens_out,
@@ -289,6 +291,31 @@ def test_accumulate_stats_sums_token_cost_per_model(tmp_path):
     assert runner.batch_stats["per_ticker"]["MSFT"]["cost_by_model"]["deepseek-v4-flash"] == pytest.approx(0.005)
 
 
+def test_accumulate_stats_sums_calls_and_tokens_by_model(tmp_path):
+    """_accumulate_stats rolls up per-model calls and tokens."""
+    runner = BatchRunner(
+        tickers=["AAPL", "MSFT"],
+        profile_config={"llm_provider": "openai"},
+        output_dir=tmp_path / "reports",
+    )
+    h1 = _stats_handler_mock(tokens_in=1000, tokens_out=500, cost=0.01,
+                             cost_by_model={"gpt-5.4": 0.01})
+    h2 = _stats_handler_mock(tokens_in=2000, tokens_out=800, cost=0.02,
+                             cost_by_model={"gpt-5.4": 0.015, "deepseek-v4-flash": 0.005})
+
+    runner._accumulate_stats("AAPL", h1)
+    runner._accumulate_stats("MSFT", h2)
+
+    assert runner.batch_stats["llm_calls"] == 8
+    assert runner.batch_stats["calls_by_model"] == {"gpt-5.4": 6, "deepseek-v4-flash": 2}
+    assert runner.batch_stats["tokens_by_model"] == {
+        "gpt-5.4": {"in": 3000, "out": 1300},
+    }
+    assert runner.batch_stats["per_ticker"]["AAPL"]["llm_calls"] == 4
+    assert runner.batch_stats["per_ticker"]["AAPL"]["calls_by_model"] == {"gpt-5.4": 3, "deepseek-v4-flash": 1}
+    assert runner.batch_stats["per_ticker"]["MSFT"]["calls_by_model"] == {"gpt-5.4": 3, "deepseek-v4-flash": 1}
+
+
 def test_generate_summary_includes_token_cost_columns(tmp_path):
     """Per-ticker Tokens/Cost columns + footer batch total in batch_summary.md."""
     runner = BatchRunner(
@@ -313,8 +340,44 @@ def test_generate_summary_includes_token_cost_columns(tmp_path):
     assert "1.5k" in content and "600" in content, "per-ticker token numbers missing"
     assert "$0.0120" in content, "per-ticker cost missing"
     assert "## Batch Cost" in content
-    assert "gpt-5.4" in content and "deepseek" not in content  # only gpt-5.4 in this run
+    assert "gpt-5.4" in content
+    # deepseek-v4-flash has calls but no cost, so it appears in the usage table
+    usage_start = content.index("## Batch Usage")
+    assert "deepseek-v4-flash" in content[usage_start:]
     assert "$0.0120" in content[content.index("## Batch Cost"):]  # footer total present
+    assert "## Batch Usage" in content
+    assert "| Calls |" in content
+    assert "| Tokens In |" in content
+    assert "| Tokens Out |" in content
+
+
+def test_generate_summary_json_includes_usage_fields(tmp_path):
+    """batch_summary.json totals and rows include calls/tokens by model."""
+    runner = BatchRunner(
+        tickers=["AAPL"],
+        profile_config={"llm_provider": "openai"},
+        output_dir=tmp_path / "reports",
+    )
+    runner.summaries = {
+        "AAPL": {"rating": "Buy", "entry": "210", "stop": "200", "size": "5%", "company": "Apple"},
+    }
+    runner._accumulate_stats(
+        "AAPL",
+        _stats_handler_mock(tokens_in=1500, tokens_out=600, cost=0.012,
+                             cost_by_model={"gpt-5.4": 0.012}),
+    )
+
+    runner.generate_summary()
+    json_path = runner.output_dir / "batch_summary.json"
+    data = json.loads(json_path.read_text(encoding="utf-8"))
+
+    assert data["totals"]["llm_calls"] == 4
+    assert data["totals"]["calls_by_model"] == {"gpt-5.4": 3, "deepseek-v4-flash": 1}
+    assert data["totals"]["tokens_by_model"] == {"gpt-5.4": {"in": 1500, "out": 600}}
+    row = data["rows"][0]
+    assert row["llm_calls"] == 4
+    assert row["calls_by_model"] == {"gpt-5.4": 3, "deepseek-v4-flash": 1}
+    assert row["tokens_by_model"] == {"gpt-5.4": {"in": 1500, "out": 600}}
 
 
 def test_generate_summary_no_stats_omits_optional_columns(tmp_path):
@@ -354,8 +417,11 @@ def test_batch_stats_adapter_exposes_running_totals(tmp_path):
     snap = adapter.get_stats()
     assert snap["tokens_in"] == 1000
     assert snap["tokens_out"] == 400
+    assert snap["llm_calls"] == 4
     assert snap["cost"] == pytest.approx(0.01)
     assert snap["cost_by_model"] == {"gpt-5.4": pytest.approx(0.01)}
+    assert snap["calls_by_model"] == {"gpt-5.4": 3, "deepseek-v4-flash": 1}
+    assert snap["tokens_by_model"] == {"gpt-5.4": {"in": 1000, "out": 400}}
 
     # After a second ticker is accumulated, the adapter reflects the
     # running total — not just the per-ticker snapshot.
@@ -367,10 +433,13 @@ def test_batch_stats_adapter_exposes_running_totals(tmp_path):
     snap2 = adapter.get_stats()
     assert snap2["tokens_in"] == 3000
     assert snap2["tokens_out"] == 1000
+    assert snap2["llm_calls"] == 8
     assert snap2["cost"] == pytest.approx(0.03)
     # Adapter reads self.batch_stats lazily, so it now contains BOTH models.
     assert snap2["cost_by_model"]["gpt-5.4"] == pytest.approx(0.01)
     assert snap2["cost_by_model"]["deepseek-v4-flash"] == pytest.approx(0.02)
+    assert snap2["calls_by_model"] == {"gpt-5.4": 6, "deepseek-v4-flash": 2}
+    assert snap2["tokens_by_model"] == {"gpt-5.4": {"in": 3000, "out": 1000}}
 
 
 def test_run_single_selects_analysts_from_profile(tmp_path):
