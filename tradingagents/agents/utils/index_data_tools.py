@@ -28,6 +28,6 @@ def get_index_daily(
         end_date: End date in yyyy-mm-dd format.
 
     Returns:
-        str: A formatted OHLCV table for the requested index and date range.
+        str: A CSV-formatted OHLCV table for the requested index and date range.
     """
     return route_to_vendor("get_index_daily", index_code, start_date, end_date)

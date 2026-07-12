@@ -548,7 +548,7 @@ def get_index_daily(
         ts_code TEXT, trade_date TEXT, open REAL, high REAL,
         low REAL, close REAL, volume REAL
 
-    Returns a markdown OHLCV table for the requested index and date range.
+    Returns a CSV-formatted OHLCV table for the requested index and date range.
 
     - Empty result (no rows for the requested code/date range): raises
       ``NoMarketDataError`` so ``route_to_vendor`` returns ``NO_DATA_AVAILABLE``.
@@ -605,8 +605,7 @@ def get_index_daily(
     header = (
         f"# Index data for {index_code.upper()} from {start_date} to {end_date}\n"
         f"# Total records: {len(df)}\n"
-        f"# Source: quant_core.db (local SQLite)\n"
-        f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"# Source: quant_core.db (local SQLite)\n\n"
     )
     return header + df.to_csv()
 
@@ -659,14 +658,14 @@ def get_limit_up_down(trade_date: str) -> str:
         lines.append(f"- **Limit-down stocks**: {int(down)}")
 
     up_stocks = row.get("up_limit_stocks")
-    if up_stocks and str(up_stocks).strip() and str(up_stocks) != "nan":
+    if pd.notna(up_stocks) and str(up_stocks).strip():
         lines.append("")
         lines.append("**Sample limit-up stocks:**")
         for line in str(up_stocks).split(",")[:10]:
             lines.append(f"- {line.strip()}")
 
     down_stocks = row.get("down_limit_stocks")
-    if down_stocks and str(down_stocks).strip() and str(down_stocks) != "nan":
+    if pd.notna(down_stocks) and str(down_stocks).strip():
         lines.append("")
         lines.append("**Sample limit-down stocks:**")
         for line in str(down_stocks).split(",")[:10]:

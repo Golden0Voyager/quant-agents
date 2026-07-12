@@ -10,7 +10,7 @@ def get_limit_up_down(
     trade_date: Annotated[
         str,
         "Trading date in YYYY-MM-DD format. "
-        "Defaults to today if not provided; caller should pass the analysis date.",
+        "Caller should pass the analysis date.",
     ],
 ) -> str:
     """
