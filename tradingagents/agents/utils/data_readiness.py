@@ -32,12 +32,12 @@ class ReadinessReport:
     warning_count: int = 0
 
 
-_MAJOR_INDEX_CODES = {
-    "000001": "上证指数",
-    "399001": "深证成指",
-    "399006": "创业板指",
-    "000688": "科创50",
-}
+_MAJOR_INDEX_CODES = frozenset({
+    "000001",
+    "399001",
+    "399006",
+    "000688",
+})
 
 
 # 分析师到所需数据源的映射
@@ -195,27 +195,22 @@ def _check_index_daily(
         )
     try:
         from tradingagents.dataflows.smartmoney_vendor import _df_from_sql
-        total = 0
-        latest = None
-        for code in _MAJOR_INDEX_CODES:
-            df = _df_from_sql(
-                "SELECT COUNT(*) as cnt, MAX(trade_date) as latest "
-                "FROM index_daily WHERE ts_code = ? AND trade_date <= ?",
-                (code, trade_date),
-            )
-            if df is not None and not df.empty:
-                cnt = df.iloc[0]["cnt"]
-                if cnt and cnt > 0:
-                    total += int(cnt)
-                    row_latest = df.iloc[0]["latest"]
-                    if row_latest and (latest is None or str(row_latest) > str(latest)):
-                        latest = row_latest
-        if total > 0:
-            return ReadinessItem(
-                "指数日线", "cacheable", "cached",
-                f"{total} 条记录" + (f"，最新 {latest}" if latest else ""),
-                analyst,
-            )
+        placeholders = ",".join("?" * len(_MAJOR_INDEX_CODES))
+        df = _df_from_sql(
+            f"SELECT COUNT(*) as cnt, MAX(trade_date) as latest "
+            f"FROM index_daily WHERE ts_code IN ({placeholders}) AND trade_date <= ?",
+            tuple(_MAJOR_INDEX_CODES) + (trade_date,),
+        )
+        if df is not None and not df.empty:
+            cnt = df.iloc[0]["cnt"]
+            latest = df.iloc[0]["latest"]
+            if cnt and cnt > 0:
+                latest_str = str(latest) if latest else ""
+                return ReadinessItem(
+                    "指数日线", "cacheable", "cached",
+                    f"{int(cnt)} 条记录" + (f"，最新 {latest_str}" if latest_str else ""),
+                    analyst,
+                )
     except Exception as exc:
         logger.debug("smartmoney_db check failed for index_daily: %s", exc)
     return ReadinessItem(
