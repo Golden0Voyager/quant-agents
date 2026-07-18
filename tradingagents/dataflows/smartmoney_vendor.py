@@ -937,10 +937,80 @@ def get_macro_indicators(
 
 
 # ===========================================================================
+# Research Reports (个股研报) — smartmoney_db fallback
+# ===========================================================================
+
+
+def get_research_reports(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
+    """Fetch A-share research reports from quant_core.db.
+
+    Reads the ``research_report`` table with schema:
+        ts_code TEXT, report_date TEXT, org_name TEXT,
+        rating TEXT, target_price REAL, title TEXT
+
+    If the table does not exist, is empty for the ticker, or the query
+    fails, raises ``RuntimeError`` so ``route_to_vendor`` falls through
+    to the next configured vendor (akshare).
+    """
+    code = _to_smartmoney_symbol(symbol)
+
+    params = [code]
+    date_filter = ""
+    if curr_date:
+        date_filter = " AND report_date <= ?"
+        params.append(curr_date)
+
+    df = _df_from_sql(
+        f"""
+        SELECT report_date, org_name, rating, target_price, title
+        FROM research_report
+        WHERE ts_code = ?{date_filter}
+        ORDER BY report_date DESC
+        LIMIT 10
+        """,
+        tuple(params),
+    )
+
+    if df is None or df.empty:
+        raise RuntimeError(
+            f"No research reports in quant_core.db for {symbol}. "
+            "Route to_vendor will fall back to akshare."
+        )
+
+    lines = [
+        f"## {symbol.upper()} Research Reports (source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)}",
+        "",
+    ]
+
+    for _, row in df.iterrows():
+        title = row.get("title", "N/A")
+        org = row.get("org_name", "N/A")
+        rating = row.get("rating", "N/A")
+        target_price = row.get("target_price")
+        report_date = row.get("report_date", "N/A")
+        lines.append(f"**{title}**")
+        lines.append(f"- 机构: {org}")
+        lines.append(f"- 评级: {rating}")
+        if pd.notna(target_price):
+            lines.append(f"- 目标价: {target_price:.2f}")
+        lines.append(f"- 日期: {report_date}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# ===========================================================================
 # Margin Trading (融资融券) — v2.2
 # ===========================================================================
 
-def get_margin_trading(symbol: str) -> str:
+def get_margin_trading(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch margin-trading (融资融券) data from quant_core.db."""
 
     def _fmt_num(value) -> str:
@@ -1138,4 +1208,57 @@ def get_shareholder_count(symbol: str) -> str:
         lines.append(f"- 环比变化: {row['holder_count_change_pct']:.2f}%")
         lines.append(f"- 人均持股: {row['avg_shares_per_holder']:,.0f}")
         lines.append("")
+    return "\n".join(lines)
+
+
+# ===========================================================================
+# Pledge Ratio (股权质押) — v2.2
+# ===========================================================================
+
+
+def get_pledge_ratio(symbol: str) -> str:
+    """Fetch A-share pledge-ratio data from quant_core.db.
+
+    Reads the ``stock_gpzy`` table with schema:
+        ts_code TEXT, pledge_date TEXT, pledger TEXT,
+        pledged_shares REAL, pct_of_holding REAL, pct_of_total REAL,
+        pledge_org TEXT
+
+    If the table does not exist, is empty, or the query fails, raises
+    ``RuntimeError`` so ``route_to_vendor`` falls through to akshare.
+    """
+    code = _to_smartmoney_symbol(symbol)
+
+    df = _df_from_sql(
+        """
+        SELECT pledge_date, pledger, pledged_shares,
+               pct_of_holding, pct_of_total, pledge_org
+        FROM stock_gpzy
+        WHERE ts_code = ?
+        ORDER BY pledge_date DESC
+        LIMIT 10
+        """,
+        (code,),
+    )
+
+    if df is None or df.empty:
+        raise RuntimeError(
+            f"No pledge-ratio data in quant_core.db for {symbol}. "
+            "Route will fall back to akshare."
+        )
+
+    lines = [
+        f"## {symbol.upper()} Pledge Ratio (source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)}",
+        "",
+    ]
+    for _, row in df.iterrows():
+        lines.append(f"**Pledger**: {row.get('pledger', 'N/A')}")
+        lines.append(f"- 质押日期: {row.get('pledge_date', 'N/A')}")
+        lines.append(f"- 质押数量: {row.get('pledged_shares', 'N/A')}")
+        lines.append(f"- 占所持比例: {row.get('pct_of_holding', 0):.2f}%")
+        lines.append(f"- 占总股本比例: {row.get('pct_of_total', 0):.2f}%")
+        lines.append(f"- 质押机构: {row.get('pledge_org', 'N/A')}")
+        lines.append("")
+
     return "\n".join(lines)

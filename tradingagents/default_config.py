@@ -21,6 +21,10 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_LLM_RETRY_ENABLED":    "llm_retry_enabled",
     "TRADINGAGENTS_LLM_RETRY_MAX_RETRIES": "llm_retry_max_retries",
     "TRADINGAGENTS_LLM_RETRY_BASE_DELAY": "llm_retry_base_delay",
+    "TRADINGAGENTS_RESULTS_DIR":          "results_dir",
+    "TRADINGAGENTS_CACHE_DIR":            "data_cache_dir",
+    "TRADINGAGENTS_MEMORY_LOG_PATH":      "memory_log_path",
+    "DISABLE_YFINANCE_FALLBACK":          "disable_yfinance_fallback",
     "INPUT_TOKEN_PRICE_PER_1M":           "input_token_price_per_1m",
     "OUTPUT_TOKEN_PRICE_PER_1M":          "output_token_price_per_1m",
 }
@@ -47,11 +51,14 @@ def _apply_env_overrides(config: dict) -> dict:
     return config
 
 
-DEFAULT_CONFIG = _apply_env_overrides({
+# Base configuration.  Use ``default_config()`` to obtain a deep copy with
+# environment overrides applied; ``DEFAULT_CONFIG`` is kept as a backward-
+# compatible alias to ``default_config()`` at import time.
+_BASE_CONFIG = {
     "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
-    "results_dir": os.getenv("TRADINGAGENTS_RESULTS_DIR", os.path.join(_TRADINGAGENTS_HOME, "logs")),
-    "data_cache_dir": os.getenv("TRADINGAGENTS_CACHE_DIR", os.path.join(_TRADINGAGENTS_HOME, "cache")),
-    "memory_log_path": os.getenv("TRADINGAGENTS_MEMORY_LOG_PATH", os.path.join(_TRADINGAGENTS_HOME, "memory", "trading_memory.md")),
+    "results_dir": os.path.join(_TRADINGAGENTS_HOME, "logs"),
+    "data_cache_dir": os.path.join(_TRADINGAGENTS_HOME, "cache"),
+    "memory_log_path": os.path.join(_TRADINGAGENTS_HOME, "memory", "trading_memory.md"),
     # Optional cap on the number of resolved memory log entries. When set,
     # the oldest resolved entries are pruned once this limit is exceeded.
     # Pending entries are never pruned. None disables rotation entirely.
@@ -143,12 +150,19 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "fundamental_data": "smartmoney_db,akshare,yfinance",
         "news_data": "akshare,yfinance",  # news not stored locally
         "macro_data": "akshare,fred",        # akshare → FRED fallback
-        "prediction_markets": "polymarket",  # Options: polymarket (keyless)
+        "research_opinion": "akshare,smartmoney_db",  # analyst reports: AkShare online → local DB fallback
     },
     # Tool-level configuration (takes precedence over category-level)
     "tool_vendors": {
-        # Example: "get_stock_data": "alpha_vantage",  # Override category default
+        # Redirect database-backed tools to use local DB (smartmoney_db) first
+        "get_margin_trading": "smartmoney_db,akshare",
+        "get_dragon_tiger": "smartmoney_db,akshare",
+        "get_block_trade": "smartmoney_db,akshare",
+        "get_institutional_holdings": "smartmoney_db,akshare",
+        "get_northbound_hold": "smartmoney_db,akshare",
     },
+    # When True, A-share vendor chains never fall back to yfinance.
+    "disable_yfinance_fallback": False,
     # Portfolio / holdings configuration
     "portfolio": {
         "data_path": os.path.expanduser("~/Code/quant_data/tradingagents_portfolio.json"),
