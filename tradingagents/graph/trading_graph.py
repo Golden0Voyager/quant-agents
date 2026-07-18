@@ -50,7 +50,7 @@ from .analyst_execution import (
     AnalystWallTimeTracker,
     build_analyst_execution_plan,
 )
-from .checkpointer import checkpoint_step, clear_checkpoint, get_checkpointer, thread_id
+from .checkpointer import checkpoint_step, clear_checkpoint, get_checkpointer, has_checkpoint, thread_id
 from .conditional_logic import ConditionalLogic
 from .propagation import Propagator
 from .reflection import Reflector
@@ -506,7 +506,17 @@ class TradingAgentsGraph:
         identity = resolve_instrument_identity(ticker)
         return build_instrument_context(ticker, asset_type, identity, confirmed_name=confirmed_name)
 
-    def propagate(self, company_name, trade_date, asset_type: str = "stock", confirmed_name: str | None = None):
+    def propagate(
+        self,
+        company_name,
+        trade_date,
+        asset_type: str = "stock",
+        confirmed_name: str | None = None,
+        on_chunk=None,
+        holdings_context: dict | None = None,
+        transactions_context: list | None = None,
+        company_display_name: str | None = None,
+    ):
         """Run the trading agents graph for a company on a specific date.
 
         ``asset_type`` selects between the stock pipeline (default) and the
@@ -519,6 +529,16 @@ class TradingAgentsGraph:
         ``confirmed_name`` is the user-confirmed company name (e.g. from
         akshare for A-shares). When provided, it overrides the yfinance
         identity to prevent name mismatches.
+
+        ``on_chunk`` is an optional callable invoked with the merged state
+        after every streamed node update, letting UI callers (batch runner)
+        render live progress through this same execution path. The dict is
+        the live merged state — callbacks must treat it as read-only.
+
+        ``holdings_context`` / ``transactions_context`` / ``company_display_name``
+        seed the initial state (portfolio position, transaction history, and
+        the resolved display name) for callers that have them, e.g. the batch
+        runner.
         """
         from tradingagents.ticker_resolver import resolve_ticker
 
@@ -574,7 +594,16 @@ class TradingAgentsGraph:
                 logger.info("Starting fresh for %s on %s", ticker, trade_date)
 
         try:
-            return self._run_graph(ticker, trade_date, asset_type=asset_type, confirmed_name=resolved_name)
+            return self._run_graph(
+                ticker,
+                trade_date,
+                asset_type=asset_type,
+                confirmed_name=resolved_name,
+                on_chunk=on_chunk,
+                holdings_context=holdings_context,
+                transactions_context=transactions_context,
+                company_display_name=company_display_name,
+            )
         finally:
             if self._checkpointer_ctx is not None:
                 self._checkpointer_ctx.__exit__(None, None, None)
@@ -596,8 +625,25 @@ class TradingAgentsGraph:
             )
         return write_report_tree(final_state, ticker, save_path)
 
-    def _run_graph(self, company_name, trade_date, asset_type: str = "stock", confirmed_name: str | None = None):
-        """Execute the graph and write the resulting state to disk and memory log."""
+    def _run_graph(
+        self,
+        company_name,
+        trade_date,
+        asset_type: str = "stock",
+        confirmed_name: str | None = None,
+        on_chunk=None,
+        holdings_context: dict | None = None,
+        transactions_context: list | None = None,
+        company_display_name: str | None = None,
+    ):
+        """Execute the graph and write the resulting state to disk and memory log.
+
+        ``on_chunk`` is an optional callable invoked with the merged state
+        after every streamed node update (same shape as a "values"-mode
+        chunk), so UI callers can render live progress through this shared
+        execution path. The dict is the live merged state — callbacks must
+        treat it as read-only.
+        """
         # Initialize state — inject memory log context for PM and the
         # deterministically resolved instrument identity for all agents.
         past_context = self.memory_log.get_past_context(company_name)
@@ -610,15 +656,35 @@ class TradingAgentsGraph:
             asset_type=asset_type,
             past_context=past_context,
             instrument_context=instrument_context,
+            holdings_context=holdings_context,
+            transactions_context=transactions_context,
         )
+        if company_display_name:
+            init_agent_state["company_name"] = company_display_name
+
+        # Config-level callbacks (tool execution tracking) ride on the same
+        # handlers passed to the LLM constructor; LangChain dedups identical
+        # handler instances when merging constructor + config callbacks, so
+        # this mirrors the CLI/batch wiring without double counting.
+        args = self.propagator.get_graph_args(callbacks=self.callbacks or None)
+
+        # Inject thread_id so same ticker+date resumes, different date starts fresh.
+        resume_from_checkpoint = False
+        if self.config.get("checkpoint_enabled"):
+            tid = thread_id(company_name, str(trade_date))
+            args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
+            resume_from_checkpoint = has_checkpoint(
+                self.config["data_cache_dir"], company_name, str(trade_date)
+            )
 
         # Build the verified market snapshot once, with a forced refresh, so
         # every downstream agent shares the same ground-truth data. The Market
         # Analyst's tool path now also uses load_ohlcv, so this snapshot and
         # the analyst's raw data come from the same source. If the initial state
         # already carries a snapshot (e.g. programmatic callers or tests), keep
-        # it instead of recomputing.
-        if not init_agent_state.get("verified_market_snapshot"):
+        # it instead of recomputing. On a checkpoint resume the snapshot is
+        # already in the checkpointed state, so skip the refresh entirely.
+        if not resume_from_checkpoint and not init_agent_state.get("verified_market_snapshot"):
             try:
                 from tradingagents.dataflows.market_data_validator import (
                     build_verified_market_snapshot,
@@ -639,12 +705,29 @@ class TradingAgentsGraph:
                     exc,
                 )
 
-        args = self.propagator.get_graph_args()
+        # Build the verified fundamentals snapshot once, reusing the configured
+        # vendor layer (smartmoney_db → akshare → ...). The Fundamentals Analyst
+        # and Portfolio Manager are told to ground any fundamental numbers in it.
+        if not resume_from_checkpoint and not init_agent_state.get("verified_fundamentals_snapshot"):
+            try:
+                from tradingagents.dataflows.market_data_validator import (
+                    build_verified_fundamentals_snapshot,
+                    render_fundamentals_snapshot,
+                )
 
-        # Inject thread_id so same ticker+date resumes, different date starts fresh.
-        if self.config.get("checkpoint_enabled"):
-            tid = thread_id(company_name, str(trade_date))
-            args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
+                fundamentals_dict = build_verified_fundamentals_snapshot(
+                    company_name, str(trade_date)
+                )
+                init_agent_state["verified_fundamentals_snapshot"] = (
+                    render_fundamentals_snapshot(fundamentals_dict)
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Could not build verified fundamentals snapshot for %s on %s: %s",
+                    company_name,
+                    trade_date,
+                    exc,
+                )
 
         # Always use stream() for per-node timing collection.
         # Override to "updates" mode so each chunk is {node_name: {changed_fields}}.
@@ -653,13 +736,33 @@ class TradingAgentsGraph:
         t_stream_start = _time.perf_counter()
         t_prev = t_stream_start
         stream_args = {**args, "stream_mode": "updates"}
+        stream_input: dict[str, Any] | None = init_agent_state
+
+        if resume_from_checkpoint:
+            # A checkpoint exists for this thread: stream(None) resumes after
+            # the last completed node instead of re-running the whole graph
+            # from START (which would redo every analyst LLM call). Seed the
+            # merged state from the checkpointed channel values so outputs of
+            # already-completed nodes survive into final_state.
+            try:
+                checkpoint_values = self.graph.get_state(args["config"]).values
+                if checkpoint_values:
+                    merged_state = {**init_agent_state, **checkpoint_values}
+                    stream_input = None
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Could not load checkpoint state for %s on %s; starting fresh: %s",
+                    company_name,
+                    trade_date,
+                    exc,
+                )
 
         # Wall-time tracker for per-analyst elapsed times.
         plan = build_analyst_execution_plan(self.selected_analysts)
         tracker = AnalystWallTimeTracker(plan)
         last_printed = None
 
-        for chunk in self.graph.stream(init_agent_state, **stream_args):
+        for chunk in self.graph.stream(stream_input, **stream_args):
             t_now = _time.perf_counter()
             # Each chunk is {node_name: state_update_dict}
             for node_name, state_update in chunk.items():
@@ -686,6 +789,8 @@ class TradingAgentsGraph:
                 if signature != last_printed:
                     msg.pretty_print()
                     last_printed = signature
+            if on_chunk is not None:
+                on_chunk(merged_state)
 
         final_state = merged_state
         self.node_timings = timings

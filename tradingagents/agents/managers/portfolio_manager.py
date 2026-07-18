@@ -20,12 +20,18 @@ from tradingagents.agents.utils.agent_utils import (
     get_or_build_data_quality_summary,
 )
 from tradingagents.agents.utils.structured import (
+    FALLBACK_MARKER,
     bind_structured,
     invoke_structured_or_freetext,
 )
 from tradingagents.dataflows.market_data_validator import build_verified_market_snapshot
 
 logger = logging.getLogger(__name__)
+
+# Maximum allowed deviation between a quoted entry/stop and the verified
+# snapshot Close. Mirrors the "~25%" rule stated in the PM prompt; anything
+# beyond it is stripped deterministically (see _enforce_snapshot_tolerance).
+ENTRY_STOP_TOLERANCE = 0.25
 
 
 def _extract_snapshot_close(snapshot: str | None) -> float | None:
@@ -46,6 +52,40 @@ def _extract_snapshot_close(snapshot: str | None) -> float | None:
         return float(match.group(1))
     except ValueError:
         return None
+
+
+def _enforce_snapshot_tolerance(
+    decision: PortfolioDecision, snapshot_close: float | None
+) -> tuple[PortfolioDecision, str | None]:
+    """Null out entry/stop that deviate from the verified close by more than 25%.
+
+    Deterministic backstop for the tolerance rule stated in the prompt: the
+    decision itself is kept, only the miscalibrated field is removed. Returns
+    the (possibly mutated) decision plus a markdown note describing the
+    removals, or ``None`` when nothing was stripped. Skips validation entirely
+    when no verified close is available.
+    """
+    if not snapshot_close:
+        return decision, None
+    stripped: list[str] = []
+    for field_name, label in (("entry_price", "entry price"), ("stop_loss", "stop-loss")):
+        value = getattr(decision, field_name)
+        if value is None:
+            continue
+        if abs(value - snapshot_close) / snapshot_close > ENTRY_STOP_TOLERANCE:
+            logger.warning(
+                "PM stripped %s=%s: deviates from verified close %s by more than %.0f%%",
+                field_name, value, snapshot_close, ENTRY_STOP_TOLERANCE * 100,
+            )
+            setattr(decision, field_name, None)
+            stripped.append(label)
+    if not stripped:
+        return decision, None
+    note = (
+        f"**Note**: {' and '.join(stripped)} removed: the quoted level deviated "
+        f"from the verified market close ({snapshot_close}) by more than 25%."
+    )
+    return decision, note
 
 
 def create_portfolio_manager(llm):
@@ -99,12 +139,21 @@ def create_portfolio_manager(llm):
                     ticker, trade_date, exc,
                 )
                 snapshot = None
-        _extract_snapshot_close(snapshot)
+        snapshot_close = _extract_snapshot_close(snapshot)
         snapshot_block = snapshot if snapshot else (
             "Verified market data is unavailable for this ticker on the "
             f"requested date ({trade_date}). Treat any Trader-quoted entry / "
             "stop as suspect and prefer leaving them null."
         )
+
+        fundamentals_snapshot_block = state.get("verified_fundamentals_snapshot", "")
+        if not fundamentals_snapshot_block:
+            fundamentals_snapshot_block = (
+                "Verified fundamentals snapshot is unavailable for this ticker on the "
+                f"requested date ({trade_date}). Any fundamental numbers cited by "
+                "analysts are unverified; set confidence to low."
+            )
+
         data_quality_summary = get_or_build_data_quality_summary(state)
 
         prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
@@ -135,6 +184,12 @@ def create_portfolio_manager(llm):
 
 ---
 
+**Verified Fundamentals Snapshot** (source of truth for any fundamental number):
+
+{fundamentals_snapshot_block}
+
+---
+
 **Data Quality of Analyst Reports:**
 {data_quality_summary}
 
@@ -142,9 +197,11 @@ def create_portfolio_manager(llm):
 
 **Decision Requirements:**
 - Extract the entry price, stop-loss, and position sizing from the Trader's transaction proposal above and populate the corresponding fields in your decision.
-- The Trader is required to quote entry and stop-loss from the snapshot below. If the Trader's quoted value differs from the snapshot's latest Close by more than ~25% in either direction, OR the snapshot is unavailable, leave entry_price and stop_loss as null rather than copying the suspect number. Do not estimate, extrapolate, or recall a price from training data, gross-margin ratios, or any other fundamental number.
+- The Trader is required to quote entry and stop-loss from the snapshot below. If the Trader's quoted value differs from the snapshot's latest Close by more than ~25% in either direction, OR the snapshot is unavailable, leave entry_price and stop_loss as null rather than copying the suspect number. This rule is also enforced in code: any entry_price or stop_loss you return that deviates from the verified Close by more than 25% will be automatically stripped from the decision. Do not estimate, extrapolate, or recall a price from training data, gross-margin ratios, or any other fundamental number.
 - If the Trader's proposal lacks any of these values, leave that field empty rather than estimating or inventing a number.
 - Position sizing may be a string (e.g. ``5% of portfolio``, ``1,000 shares``) and is not bound by the snapshot.
+- Provide a `confidence` level (low/medium/high). If the verified market snapshot or verified fundamentals snapshot is unavailable, or the evidence is mixed, set confidence to `low` or null.
+- Populate `data_sources` with the sources you actually used, e.g. ``market_snapshot``, ``fundamentals_snapshot``, ``trader_proposal``, ``risk_debate``. Do not claim a source you did not consult.
 - Ground every conclusion in specific evidence from the analysts.{get_language_instruction()}"""
 
         final_trade_decision = invoke_structured_or_freetext(
@@ -153,6 +210,9 @@ def create_portfolio_manager(llm):
             prompt,
             render_pm_decision,
             "Portfolio Manager",
+            validate=lambda decision: _enforce_snapshot_tolerance(
+                decision, snapshot_close
+            ),
         )
 
         new_risk_debate_state = {
@@ -171,6 +231,11 @@ def create_portfolio_manager(llm):
         return {
             "risk_debate_state": new_risk_debate_state,
             "final_trade_decision": final_trade_decision,
+            "structured_fallback_agents": (
+                ["Portfolio Manager"]
+                if FALLBACK_MARKER in final_trade_decision
+                else []
+            ),
         }
 
     return portfolio_manager_node

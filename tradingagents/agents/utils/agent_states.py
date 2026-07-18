@@ -1,3 +1,4 @@
+import operator
 from typing import Annotated
 
 from langgraph.graph import MessagesState
@@ -58,6 +59,9 @@ class AgentState(MessagesState):
     verified_market_snapshot: Annotated[
         str, "Pre-computed verified market snapshot shared across agents"
     ]
+    verified_fundamentals_snapshot: Annotated[
+        str, "Pre-computed verified fundamentals snapshot shared across agents"
+    ]
     sentiment_report: Annotated[str, "Report from the Sentiment Analyst"]
     news_report: Annotated[
         str, "Report from the News Researcher of current world affairs"
@@ -83,3 +87,6 @@ class AgentState(MessagesState):
     holdings_context: Annotated[dict, "Current holdings for position-aware analysis"]
     transactions_context: Annotated[list, "Transaction history for trade-aware analysis"]
     data_quality_summary: Annotated[str, "Report of data availability and reliability per analyst"]
+    structured_fallback_agents: Annotated[
+        list[str], operator.add
+    ]

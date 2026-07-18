@@ -17,6 +17,10 @@ def create_fundamentals_analyst(llm):
     def fundamentals_analyst_node(state):
         current_date = state["trade_date"]
         instrument_context = get_instrument_context_from_state(state)
+        fundamentals_snapshot_block = state.get("verified_fundamentals_snapshot") or (
+            "Verified fundamentals snapshot is unavailable. "
+            "Treat all fundamental numbers as unverified and set confidence to low."
+        )
 
         tools = [
             get_fundamentals,
@@ -46,7 +50,13 @@ def create_fundamentals_analyst(llm):
                 "Add a data_availability marker per data dimension in your "
                 "report: ✅ (data available), ⚠️ (data partial/sparse), "
                 "❌ (data unavailable)."
-            ) + get_language_instruction(),
+            )
+            + "\n\n## Verified Fundamentals Snapshot\n\n"
+            + fundamentals_snapshot_block
+            + "\n\nUse the numbers in this snapshot as the source of truth for any exact "
+            "fundamental claim (PE, PB, market cap, revenue, EPS, etc.). If the snapshot "
+            "is unavailable, state that explicitly and set your confidence to low."
+            + get_language_instruction(),
         )
 
         prompt = ChatPromptTemplate.from_messages(

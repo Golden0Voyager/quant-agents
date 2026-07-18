@@ -597,10 +597,16 @@ class PortfolioManagerEndToEndTests(unittest.TestCase):
     def test_works_when_structured_output_unavailable(
         self, mock_get_ctx, mock_build_snapshot, mock_bind, mock_invoke
     ):
-        mock_invoke.return_value = "Free-text fallback response."
+        mock_invoke.return_value = (
+            "<!--STRUCTURED_FALLBACK: schema validation failed, treat with low confidence-->\n"
+            "Free-text fallback response."
+        )
         node = create_portfolio_manager(_make_mock_llm())
         result = node(_make_state())
-        self.assertEqual(result["final_trade_decision"], "Free-text fallback response.")
+        self.assertIn("Free-text fallback response.", result["final_trade_decision"])
+        self.assertEqual(
+            result["structured_fallback_agents"], ["Portfolio Manager"]
+        )
 
     @patch("tradingagents.agents.managers.portfolio_manager.invoke_structured_or_freetext")
     @patch("tradingagents.agents.managers.portfolio_manager.bind_structured")
@@ -626,6 +632,83 @@ class PortfolioManagerEndToEndTests(unittest.TestCase):
 
         prompt = mock_invoke.call_args[0][2]
         self.assertIn("中文", prompt)
+
+
+@pytest.mark.unit
+class SnapshotToleranceEnforcementTests(unittest.TestCase):
+    """PM deterministically strips entry/stop that deviate >25% from the verified close.
+
+    These tests let the real ``invoke_structured_or_freetext`` run: only
+    ``bind_structured`` is mocked, returning a structured LLM whose
+    ``.invoke()`` yields a ready-made ``PortfolioDecision``.
+    """
+
+    @staticmethod
+    def _make_decision(entry=None, stop=None):
+        from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating
+
+        return PortfolioDecision(
+            rating=PortfolioRating.BUY,
+            executive_summary="summary",
+            investment_thesis="thesis",
+            entry_price=entry,
+            stop_loss=stop,
+        )
+
+    def _run_node(self, decision, snapshot=SAMPLE_SNAPSHOT):
+        with (
+            patch(
+                "tradingagents.agents.managers.portfolio_manager.bind_structured",
+            ) as mock_bind,
+            patch(
+                "tradingagents.agents.managers.portfolio_manager.build_verified_market_snapshot",
+                return_value=snapshot,
+            ),
+            patch(
+                "tradingagents.agents.managers.portfolio_manager.get_instrument_context_from_state",
+                return_value="The instrument to analyze is `AAPL`.",
+            ),
+        ):
+            mock_structured_llm = MagicMock()
+            mock_structured_llm.invoke.return_value = decision
+            mock_bind.return_value = mock_structured_llm
+            node = create_portfolio_manager(_make_mock_llm())
+            return node(_make_state())["final_trade_decision"]
+
+    def test_entry_within_tolerance_is_kept(self):
+        # Close = 152.35; 150.0 deviates ~1.5% — well inside 25%.
+        output = self._run_node(self._make_decision(entry=150.0, stop=140.0))
+        self.assertIn("**Entry**: 150.0", output)
+        self.assertIn("**Stop**: 140.0", output)
+        self.assertNotIn("**Note**:", output)
+
+    def test_entry_beyond_tolerance_is_stripped(self):
+        # 250.0 deviates ~64% from the 152.35 close.
+        output = self._run_node(self._make_decision(entry=250.0, stop=140.0))
+        self.assertNotIn("**Entry**:", output)
+        self.assertIn("**Stop**: 140.0", output)  # in-tolerance stop survives
+        self.assertIn("entry price removed", output)
+        self.assertIn("25%", output)
+
+    def test_stop_beyond_tolerance_is_stripped(self):
+        # 50.0 deviates ~67% from the 152.35 close.
+        output = self._run_node(self._make_decision(entry=150.0, stop=50.0))
+        self.assertIn("**Entry**: 150.0", output)
+        self.assertNotIn("**Stop**:", output)
+        self.assertIn("stop-loss removed", output)
+
+    def test_no_validation_when_snapshot_unavailable(self):
+        # Snapshot missing → no verified close → levels pass through untouched.
+        output = self._run_node(self._make_decision(entry=250.0, stop=50.0), snapshot=None)
+        self.assertIn("**Entry**: 250.0", output)
+        self.assertIn("**Stop**: 50.0", output)
+        self.assertNotIn("**Note**:", output)
+
+    def test_null_levels_are_untouched(self):
+        output = self._run_node(self._make_decision(entry=None, stop=None))
+        self.assertNotIn("**Entry**:", output)
+        self.assertNotIn("**Stop**:", output)
+        self.assertNotIn("**Note**:", output)
 
 
 if __name__ == "__main__":

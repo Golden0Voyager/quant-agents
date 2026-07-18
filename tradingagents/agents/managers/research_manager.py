@@ -9,6 +9,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_or_build_data_quality_summary,
 )
 from tradingagents.agents.utils.structured import (
+    FALLBACK_MARKER,
     bind_structured,
     invoke_structured_or_freetext,
 )
@@ -46,6 +47,12 @@ Commit to a clear stance whenever the debate's strongest arguments warrant one; 
 
 ---
 
+**Structured Output Requirements:**
+- Provide a `confidence` level (low / medium / high). If verified market data or key analyst data is unavailable, or the debate is evenly split, set confidence to `low` or leave it null.
+- List the key assumptions behind your recommendation in `key_assumptions`. These should be the facts or beliefs that, if wrong, would change the recommendation.
+
+---
+
 **Debate History:**
 {history}""" + get_language_instruction()
 
@@ -69,6 +76,9 @@ Commit to a clear stance whenever the debate's strongest arguments warrant one; 
         return {
             "investment_debate_state": new_investment_debate_state,
             "investment_plan": investment_plan,
+            "structured_fallback_agents": (
+                ["Research Manager"] if FALLBACK_MARKER in investment_plan else []
+            ),
         }
 
     return research_manager_node

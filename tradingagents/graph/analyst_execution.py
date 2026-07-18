@@ -154,19 +154,22 @@ _REPORT_QUALITY_RELIABLE = "reliable"
 _REPORT_QUALITY_NO_DATA = "no_data"
 _REPORT_QUALITY_SPARSE = "sparse"
 
+# Both sentinels mean the underlying data source could not deliver usable data.
+_DATA_UNAVAILABLE_SENTINELS = ("NO_DATA_AVAILABLE", "DATA_UNAVAILABLE")
+
 
 def validate_report_quality(report_key: str, report_text: str) -> str:
     """Classify an analyst report's data quality.
 
     Returns one of:
-    - ``"reliable"`` — report has >= 50 words and no NO_DATA_AVAILABLE sentinel.
-    - ``"no_data"`` — report is empty or contains the no-data sentinel.
+    - ``"reliable"`` — report has >= 50 words and no data-unavailable sentinel.
+    - ``"no_data"`` — report is empty or contains a data-unavailable sentinel.
     - ``"sparse"`` — report exists but has fewer than 50 words.
     """
     if not report_text or not report_text.strip():
         return _REPORT_QUALITY_NO_DATA
 
-    if "NO_DATA_AVAILABLE" in report_text:
+    if any(sentinel in report_text for sentinel in _DATA_UNAVAILABLE_SENTINELS):
         return _REPORT_QUALITY_NO_DATA
 
     word_count = len(report_text.split())
