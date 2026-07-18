@@ -6,9 +6,11 @@ depend on this module exclusively for cross-cutting concerns.
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
+import signal
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -57,6 +59,46 @@ def to_akshare_symbol(ticker: str, style: str) -> str:
     raise ValueError(f"Unknown style: {style!r}")
 
 
+def _call_with_timeout(func: Callable[[], T], timeout_seconds: float | None = None) -> T:
+    """Run ``func()`` with a hard timeout.
+
+    Uses ``signal.setitimer`` (SIGALRM) on Unix for sub-second precision,
+    falling back to ``concurrent.futures`` on platforms without POSIX timers.
+    A non-positive timeout disables the guard entirely.
+
+    When ``timeout_seconds`` is None the value is read from the
+    ``AKSHARE_TIMEOUT`` environment variable (default 30.0s).
+    """
+    if timeout_seconds is None:
+        try:
+            timeout_seconds = float(os.getenv("AKSHARE_TIMEOUT", "30.0"))
+        except ValueError:
+            timeout_seconds = 30.0
+    if timeout_seconds <= 0:
+        return func()
+
+    if hasattr(signal, "SIGALRM") and hasattr(signal, "setitimer"):
+        def _handler(signum, frame):
+            raise TimeoutError(
+                f"akshare call timed out after {timeout_seconds:.2f}s"
+            )
+
+        old_handler = signal.signal(signal.SIGALRM, _handler)
+        old_timer = signal.setitimer(signal.ITIMER_REAL, timeout_seconds, 0)
+        try:
+            return func()
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, *old_timer)
+            signal.signal(signal.SIGALRM, old_handler)
+
+    # Windows / platforms without setitimer
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(func)
+        return future.result(timeout=timeout_seconds)
+
+
 def _akshare_retry(
     func: Callable[[], T],
     max_retries: int = 3,
@@ -65,11 +107,24 @@ def _akshare_retry(
     """Execute an akshare call with exponential backoff on transient network errors."""
     import requests.exceptions as _re  # local import — requests is an akshare dependency
 
-    _network_errors = (ConnectionError, TimeoutError, _re.ConnectionError, _re.Timeout)
+    _network_errors: tuple[type[BaseException], ...] = (
+        ConnectionError,
+        TimeoutError,
+        _re.ConnectionError,
+        _re.Timeout,
+        _re.HTTPError,
+        _re.JSONDecodeError,
+        json.JSONDecodeError,
+    )
+    try:
+        import curl_cffi.errors as _curl_errors
+        _network_errors = _network_errors + (_curl_errors.CurlError,)
+    except Exception:
+        pass
 
     for attempt in range(max_retries + 1):
         try:
-            return func()
+            return _call_with_timeout(func)
         except _network_errors as exc:
             if attempt < max_retries:
                 delay = base_delay * (2 ** attempt)

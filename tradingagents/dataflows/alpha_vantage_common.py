@@ -6,7 +6,7 @@ from io import StringIO
 import pandas as pd
 import requests
 
-from .errors import VendorNotConfiguredError, VendorRateLimitError
+from .errors import NoMarketDataError, VendorNotConfiguredError, VendorRateLimitError
 
 API_BASE_URL = "https://www.alphavantage.co/query"
 
@@ -59,11 +59,22 @@ class AlphaVantageRateLimitError(VendorRateLimitError):
     """Raised when the Alpha Vantage API rate limit is exceeded."""
     pass
 
-def _make_api_request(function_name: str, params: dict) -> dict | str:
+def _make_api_request(function_name: str, params: dict, parse_json: bool = False) -> dict | str:
     """Helper function to make API requests and handle responses.
+
+    Args:
+        function_name: Alpha Vantage API function (e.g. "SMA").
+        params: Query parameters (symbol, datatype, ...).
+        parse_json: When True, return the parsed JSON dict for JSON responses
+            instead of the raw response text. Non-JSON (CSV) bodies are still
+            returned as raw text. Statement endpoints (BALANCE_SHEET etc.) use
+            this so callers can post-process the report lists.
 
     Raises:
         AlphaVantageRateLimitError: When API rate limit is exceeded
+        AlphaVantageNotConfiguredError: When the API key is invalid/missing
+        NoMarketDataError: When Alpha Vantage answers with an "Error Message"
+            payload (e.g. invalid symbol) instead of data
     """
     # Create a copy of params to avoid modifying the original
     api_params = params.copy()
@@ -111,6 +122,19 @@ def _make_api_request(function_name: str, params: dict) -> dict | str:
             # Reuse the existing "not configured" error so a bad key surfaces as
             # a real, actionable failure rather than a mislabeled rate limit (#991).
             raise AlphaVantageNotConfiguredError(f"Alpha Vantage API key invalid or missing: {notice}")
+
+    # An "Error Message" payload (e.g. invalid symbol) is an error, not data.
+    # Surface it so the routing layer can fall through to the next vendor
+    # instead of passing the error JSON downstream as if it were a result.
+    error_message = response_json.get("Error Message")
+    if error_message:
+        raise NoMarketDataError(
+            symbol=api_params.get("symbol") or api_params.get("tickers") or function_name,
+            detail=error_message,
+        )
+
+    if parse_json:
+        return response_json
 
     return response_text  # pragma: no cover  -- success path; tests mock raises or notice-classified responses instead
 

@@ -1,4 +1,5 @@
 from .alpha_vantage_common import AlphaVantageNotConfiguredError, _make_api_request
+from .errors import NoMarketDataError, VendorRateLimitError
 
 
 def get_indicator(
@@ -144,14 +145,17 @@ def get_indicator(
         # Parse CSV data and extract values for the date range
         lines = data.strip().split('\n')
         if len(lines) < 2:
-            return f"Error: No data returned for {indicator}"
+            raise NoMarketDataError(symbol, detail=f"No data returned for {indicator}")
 
         # Parse header and data
         header = [col.strip() for col in lines[0].split(',')]
         try:
             date_col_idx = header.index('time')
         except ValueError:
-            return f"Error: 'time' column not found in data for {indicator}. Available columns: {header}"
+            raise NoMarketDataError(
+                symbol,
+                detail=f"'time' column not found in data for {indicator}. Available columns: {header}",
+            ) from None
 
         # Map internal indicator names to expected CSV column names from Alpha Vantage
         col_name_map = {
@@ -171,7 +175,10 @@ def get_indicator(
             try:
                 value_col_idx = header.index(target_col_name)
             except ValueError:
-                return f"Error: Column '{target_col_name}' not found for indicator '{indicator}'. Available columns: {header}"
+                raise NoMarketDataError(
+                    symbol,
+                    detail=f"Column '{target_col_name}' not found for indicator '{indicator}'. Available columns: {header}",
+                ) from None
 
         result_data = []
         for line in lines[1:]:
@@ -199,7 +206,10 @@ def get_indicator(
             ind_string += f"{date_dt.strftime('%Y-%m-%d')}: {value}\n"
 
         if not ind_string:
-            ind_string = "No data available for the specified date range.\n"
+            raise NoMarketDataError(
+                symbol,
+                detail=f"No data available for the specified date range for {indicator}",
+            )
 
         result_str = (
             f"## {indicator.upper()} values from {before.strftime('%Y-%m-%d')} to {curr_date}:\n\n"
@@ -215,6 +225,13 @@ def get_indicator(
         # fall back / emit the no-data sentinel instead of returning this as a
         # successful-looking error string.
         raise
-    except Exception as e:
-        print(f"Error getting Alpha Vantage indicator data for {indicator}: {e}")
-        return f"Error retrieving {indicator} data: {str(e)}"
+    except VendorRateLimitError:
+        # Rate-limit was swallowed by the generic handler; re-raise so the
+        # router can skip to the next vendor.
+        raise
+    except NoMarketDataError:
+        raise
+    except Exception as exc:
+        raise NoMarketDataError(
+            symbol, detail=f"Alpha Vantage indicator error: {exc}"
+        ) from exc

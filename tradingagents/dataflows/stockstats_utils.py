@@ -79,8 +79,16 @@ def _clean_dataframe(data: pd.DataFrame) -> pd.DataFrame:
 
     price_cols = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in data.columns]
     data[price_cols] = data[price_cols].apply(pd.to_numeric, errors="coerce")
+
+    # Forward-fill missing OHLC prices; never back-fill with future prices.
+    ohlc_cols = [c for c in ["Open", "High", "Low", "Close"] if c in data.columns]
+    if ohlc_cols:
+        data[ohlc_cols] = data[ohlc_cols].ffill()
+    if "Volume" in data.columns:
+        data["Volume"] = data["Volume"].fillna(0)
+
+    # Drop rows that still lack a close (e.g. leading NaNs before any price).
     data = data.dropna(subset=["Close"])
-    data[price_cols] = data[price_cols].ffill().bfill()
 
     return data
 
@@ -286,13 +294,14 @@ def _cache_covers_requested_date(cached: pd.DataFrame, curr_date: str) -> bool:
     """
     if cached is None or cached.empty or "Date" not in cached.columns:
         return False
-    dates = pd.to_datetime(cached["Date"], errors="coerce").dropna()
+    dates = pd.to_datetime(cached["Date"], errors="coerce", format="%Y-%m-%d").dropna()
     if dates.empty:
         return False
     cached_latest = dates.max().normalize()
-    requested = pd.to_datetime(curr_date, errors="coerce").normalize()
+    requested = pd.to_datetime(curr_date, errors="coerce")
     if pd.isna(requested):
         return True
+    requested = requested.normalize()
     if cached_latest >= requested:
         return True
     # Cannot refresh future dates.
@@ -377,9 +386,20 @@ def load_ohlcv(
         if is_a_share:
             # A-share: local smartmoney DB → akshare → yfinance (last resort)
             downloaded = _load_ohlcv_from_smartmoney_db(canonical, start_str, end_str)
+            if downloaded is not None:
+                try:
+                    _assert_ohlcv_not_stale(downloaded, curr_date, symbol, canonical)
+                except NoMarketDataError:
+                    logger.info(
+                        "smartmoney_db OHLCV for %s is stale relative to %s; "
+                        "falling back to akshare",
+                        symbol,
+                        curr_date,
+                    )
+                    downloaded = None
             if downloaded is None:
                 logger.info(
-                    "smartmoney_db returned no data for A-share %s, trying akshare",
+                    "smartmoney_db returned no usable data for A-share %s, trying akshare",
                     symbol,
                 )
                 downloaded = _load_ohlcv_from_akshare(canonical, start_str, end_str)
@@ -415,6 +435,10 @@ def load_ohlcv(
 
         if downloaded is None or downloaded.empty or "Close" not in downloaded.columns:
             raise NoMarketDataError(symbol, canonical, "No data returned from any vendor")
+
+        # Validate freshness before writing to cache; a stale DB frame must not
+        # poison the on-disk cache (P1-4).
+        _assert_ohlcv_not_stale(downloaded, curr_date, symbol, canonical)
         downloaded.to_csv(data_file, index=False, encoding="utf-8")
         data = downloaded
 
