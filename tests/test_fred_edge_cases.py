@@ -244,7 +244,7 @@ class TestFredMetadataEdgeCases:
 class TestFredLookbackDefault:
 
     def test_none_lookback_uses_default(self):
-        """When look_back_days is None → uses DEFAULT_LOOKBACK_DAYS (365)."""
+        """When look_back_days is None → uses DEFAULT_LOOKBACK_DAYS (730)."""
         captured = {}
 
         def _capture(path, params):
@@ -257,8 +257,8 @@ class TestFredLookbackDefault:
 
         with mock.patch.object(fred, "_request", side_effect=_capture):
             fred.get_macro_data("unemployment", "2025-07-15")
-        # 365 days before 2025-07-15 = 2024-07-15
-        assert captured.get("observation_start") == "2024-07-15"
+        # 730 days before 2025-07-15 = 2023-07-16
+        assert captured.get("observation_start") == "2023-07-16"
 
     def test_explicit_lookback_passed_through(self):
         """When look_back_days is explicitly 90 → uses 90-day window."""

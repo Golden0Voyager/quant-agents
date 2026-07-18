@@ -181,11 +181,11 @@ class MetricsExtractor:
             r"net\s+profit\s+margin[:：\s]*(?:about)?\s*([\d.]+)\s*%",
         ],
         "roe": [
-            r"ROE|股本回报率[:：\s]*(?:约|约为|about)?\s*([\d.]+)\s*%",
+            r"(?:ROE|股本回报率)[:：\s]*(?:约|约为|about)?\s*([\d.]+)\s*%",
             r"\|\s*ROE\s*\|\s*(?:约|约为|about)?\s*([\d.]+)\s*%\s*\|",
         ],
         "roa": [
-            r"ROA|资产回报率[:：\s]*(?:约|约为|about)?\s*([\d.]+)\s*%",
+            r"(?:ROA|资产回报率)[:：\s]*(?:约|约为|about)?\s*([\d.]+)\s*%",
             r"\|\s*ROA\s*\|\s*(?:约|约为|about)?\s*([\d.]+)\s*%\s*\|",
         ],
         "total_assets": [
@@ -212,11 +212,11 @@ class MetricsExtractor:
             r"\|\s*总负债\s*\|\s*(?:约|约为|about)?\s*([\d.]+)\s*(?:亿元|亿)\s*\|",
         ],
         "debt_to_equity": [
-            r"负债权益比|Debt-to-Equity[:：\s]*(?:约|约为|about)?\s*([\d.]+)",
+            r"(?:负债权益比|Debt-to-Equity)[:：\s]*(?:约|约为|about)?\s*([\d.]+)",
             r"\|\s*负债权益比\s*\|\s*(?:约|约为|about)?\s*([\d.]+)\s*\|",
         ],
         "current_ratio": [
-            r"流动比率|Current\s+Ratio[:：\s]*(?:约|约为|about)?\s*([\d.]+)",
+            r"(?:流动比率|Current\s+Ratio)[:：\s]*(?:约|约为|about)?\s*([\d.]+)",
             r"\|\s*流动比率\s*\|\s*(?:约|约为|about)?\s*([\d.]+)\s*\|",
         ],
         "operating_cash_flow": [
@@ -224,7 +224,7 @@ class MetricsExtractor:
             r"\|\s*经营现金流\s*\|\s*(?:约|约为|about)?\s*([\-\d.]+)\s*(?:亿元|亿)\s*\|",
         ],
         "free_cash_flow": [
-            r"自由现金流|Free\s+Cash\s+Flow|FCF[:：\s]*(?:约|约为|about)?\s*([\-\d.]+)\s*(?:亿元|亿)",
+            r"(?:自由现金流|Free\s+Cash\s+Flow|FCF)[:：\s]*(?:约|约为|about)?\s*([\-\d.]+)\s*(?:亿元|亿)",
             r"\|\s*自由现金流\s*\|\s*(?:约|约为|about)?\s*([\-\d.]+)\s*(?:亿元|亿)\s*\|",
         ],
         "revenue_ttm": [
@@ -248,14 +248,14 @@ class MetricsExtractor:
             r"净利润增长[:：\s]*(?:约|约为|about)?\s*([\d.]+)\s*%",
         ],
         "eps_growth": [
-            r"EPS增长|每股收益增长[:：\s]*(?:约|约为|about)?\s*([\d.]+)\s*%",
+            r"(?:EPS增长|每股收益增长)[:：\s]*(?:约|约为|about)?\s*([\d.]+)\s*%",
             r"\|\s*预期EPS增长\s*\|\s*(?:约|约为|about)?\s*([\d.]+)\s*%\s*\|",
         ],
         "rd_ratio": [
             r"(?:研发费用|研发投入)[:：\s]*(?:约|约为|about)?\s*([\d.]+)\s*(?:亿元|亿)",
         ],
         "dividend_yield": [
-            r"股息率|dividend\s+yield[:：\s]*(?:约|约为|about)?\s*([\d.]+)\s*%",
+            r"(?:股息率|dividend\s+yield)[:：\s]*(?:约|约为|about)?\s*([\d.]+)\s*%",
         ],
     }
 
@@ -268,22 +268,36 @@ class MetricsExtractor:
         text = re.sub(r'[:：]\s*', ':', text)
         return text
 
-    def extract(self, text: str, ticker: str, file_path: str) -> FinancialMetrics:
-        """从文本中提取所有指标"""
+    def extract(self, text: str, ticker: str, file_path: str) -> tuple[FinancialMetrics, list[AuditIssue]]:
+        """从文本中提取所有指标，返回 (指标, 提取过程发现的问题)。
+
+        同一指标在文中多次出现时取首次出现（通常是分析师段落的原始数据，
+        避免取到后文 PM 转述的二手数字），并记录 WARNING。
+        """
         text = self._preprocess_text(text)
         metrics = FinancialMetrics(ticker=ticker, file_path=file_path)
+        issues: list[AuditIssue] = []
 
         for field_name, patterns in self.PATTERNS.items():
             for pattern in patterns:
                 matches = re.findall(pattern, text, re.IGNORECASE)
                 if matches:
-                    value_str = matches[-1]
+                    value_str = matches[0]
                     if isinstance(value_str, tuple):
                         value_str = value_str[0]
 
                     parsed = self._parse_value(value_str, field_name)
                     if parsed is not None:
                         setattr(metrics, field_name, parsed)
+                        if len(matches) > 1:
+                            issues.append(AuditIssue(
+                                severity="WARNING",
+                                rule_id="EXTRACT-002",
+                                message=f"指标'{field_name}'在文件中出现{len(matches)}次，已取首次出现值{parsed}",
+                                ticker=ticker,
+                                file_path=file_path,
+                                suggestion="确认首次出现为分析师原始数据，而非后文转述值"
+                            ))
                         break
 
         # 提取公司名称
@@ -291,7 +305,7 @@ class MetricsExtractor:
         if name_match:
             metrics.company_name = name_match.group(1).strip()
 
-        return metrics
+        return metrics, issues
 
     def _parse_value(self, value_str: str, field_name: str) -> float | None:
         """解析数值字符串"""
@@ -688,10 +702,18 @@ class ReportAuditor:
         cross_validate=True 时调用 akshare_realtime.fetch_realtime_snapshot
         对每只 A 股做 PE / 市值对照，命中偏差 > 10% 即追加 REALTIME-* issue。
         """
-        tickers = [d.name for d in self.batch_dir.iterdir() if d.is_dir() and d.name.isdigit()]
+        # 兼容纯代码目录(000100)与 名称_代码 目录(TCL科技_000100 / 万华化学_600309.SS)
+        ticker_dirs = {}
+        for d in self.batch_dir.iterdir():
+            if not d.is_dir():
+                continue
+            code = _parse_ticker_dir_name(d.name)
+            if code is not None:
+                ticker_dirs[code] = d.name
 
         if target_ticker:
-            tickers = [t for t in tickers if t == target_ticker]
+            target = _parse_ticker_dir_name(target_ticker) or target_ticker
+            ticker_dirs = {k: v for k, v in ticker_dirs.items() if k == target}
 
         snapshot_fn = None
         if cross_validate:
@@ -708,8 +730,8 @@ class ReportAuditor:
                 print(f"⚠️  cross-validate 模块加载失败，跳过实时对照: {exc}")
                 snapshot_fn = None
 
-        for ticker in sorted(tickers):
-            result = self._audit_ticker(ticker)
+        for ticker in sorted(ticker_dirs):
+            result = self._audit_ticker(ticker, ticker_dirs[ticker])
             if snapshot_fn is not None:
                 self._apply_realtime_validation(ticker, result, snapshot_fn)
             self.results[ticker] = result
@@ -743,9 +765,13 @@ class ReportAuditor:
                 if issue is not None:
                     result.issues.append(issue)
 
-    def _audit_ticker(self, ticker: str) -> AuditResult:
-        """审计单个股票的所有文件"""
-        ticker_dir = self.batch_dir / ticker
+    def _audit_ticker(self, ticker: str, dir_name: str) -> AuditResult:
+        """审计单个股票的所有文件
+
+        ticker 为解析出的代码（如 000100），dir_name 为实际目录名
+        （如 TCL科技_000100）。
+        """
+        ticker_dir = self.batch_dir / dir_name
         result = AuditResult(ticker=ticker)
 
         # 遍历所有MD文件
@@ -755,8 +781,20 @@ class ReportAuditor:
         for md_file in md_files:
             try:
                 text = md_file.read_text(encoding='utf-8')
-                metrics = self.extractor.extract(text, ticker, str(md_file))
+                metrics, extract_issues = self.extractor.extract(text, ticker, str(md_file))
                 result.metrics[str(md_file)] = metrics
+                result.issues.extend(extract_issues)
+
+                # 一个指标都没提取到 → 可能是目录发现或提取器失效的信号
+                if not _has_any_metric(metrics):
+                    result.issues.append(AuditIssue(
+                        severity="WARNING",
+                        rule_id="EXTRACT-001",
+                        message="未从该文件提取到任何财务指标",
+                        ticker=ticker,
+                        file_path=str(md_file),
+                        suggestion="若大量文件出现此警告，检查目录发现或提取规则是否失效"
+                    ))
 
                 # 运行验证规则
                 issues = ValidationRules.run_all(metrics)
@@ -944,6 +982,36 @@ def _qualify_a_share(code: str) -> str | None:
     if code.startswith(("82", "83", "87", "88", "43", "92")):
         return f"{code}.BJ"
     return None
+
+
+def _parse_ticker_dir_name(dir_name: str) -> str | None:
+    """从批次子目录名解析 ticker 代码，解析失败返回 None。
+
+    兼容两种目录命名（见 cli/batch_runner.py 的 _build_ticker_dir_name）：
+    - 纯代码: ``000100``
+    - 名称_代码: ``TCL科技_000100``、``万华化学_600309.SS``
+
+    A 股返回去除交易所后缀的 6 位数字（供 _qualify_a_share 使用）；
+    同时接受港股(1810.HK)与美股字母代码(AAPL)，避免误匹配其他目录。
+    """
+    code = dir_name.rsplit("_", 1)[-1].strip()
+    a_share = re.fullmatch(r"(\d{6})(?:\.(?:SS|SZ|BJ))?", code, re.IGNORECASE)
+    if a_share:
+        return a_share.group(1)
+    if re.fullmatch(r"\d{4,5}\.HK", code, re.IGNORECASE):
+        return code.upper()
+    if re.fullmatch(r"[A-Za-z]{1,5}(?:\.[A-Za-z]{1,3})?", code):
+        return code.upper()
+    return None
+
+
+def _has_any_metric(metrics: FinancialMetrics) -> bool:
+    """是否提取到了至少一个财务指标（不计 ticker/file_path/company_name 元数据）。"""
+    return any(
+        value is not None
+        for name, value in asdict(metrics).items()
+        if name not in ("ticker", "file_path", "company_name")
+    )
 
 
 def main():

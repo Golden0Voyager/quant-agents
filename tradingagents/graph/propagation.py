@@ -68,11 +68,13 @@ class Propagator:
             ),
             "market_report": "",
             "verified_market_snapshot": "",
+            "verified_fundamentals_snapshot": "",
             "fundamentals_report": "",
             "sentiment_report": "",
             "news_report": "",
             "governance_report": "",
             "industry_report": "",
+            "structured_fallback_agents": [],
         }
 
     def get_graph_args(self, callbacks: list | None = None) -> dict[str, Any]:

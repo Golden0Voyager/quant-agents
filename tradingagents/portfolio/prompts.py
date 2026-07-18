@@ -65,6 +65,8 @@ def build_pm_prompt(
         return ""
 
     h = portfolio.get_holding(ticker)
+    if h is None:
+        return ""
     lines = ["## 当前持仓信息", ""]
 
     if h.name:
@@ -109,6 +111,8 @@ def build_risk_prompt(
         return ""
 
     h = portfolio.get_holding(ticker)
+    if h is None:
+        return ""
     lines = ["## 当前风险相关信息", ""]
 
     if h.weight is not None:
@@ -139,6 +143,8 @@ def build_trader_prompt(
         return ""
 
     h = portfolio.get_holding(ticker)
+    if h is None:
+        return ""
     lines = ["## 交易执行参考", ""]
 
     lines.append(f"- 当前持仓: {h.shares:,.0f} 股，成本 {h.avg_cost:.3f}")
@@ -168,6 +174,8 @@ def build_market_prompt(ticker: str, portfolio: Portfolio | None) -> str:
         return ""
 
     h = portfolio.get_holding(ticker)
+    if h is None:
+        return ""
     lines = ["## 持仓成本参考", ""]
 
     lines.append(f"- 成本价: {h.avg_cost:.3f}")

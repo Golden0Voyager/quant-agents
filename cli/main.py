@@ -26,7 +26,7 @@ from cli.profiles import list_profiles, load_profile, save_profile
 from cli.stats_handler import StatsCallbackHandler
 from cli.utils import *
 from cli.watchlists import list_watchlists, load_watchlist, save_watchlist
-from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.default_config import DEFAULT_CONFIG, default_config
 from tradingagents.graph.analyst_execution import (
     AnalystWallTimeTracker,
     build_analyst_execution_plan,
@@ -778,7 +778,7 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
         return
 
     # Create config with selected research depth
-    config = DEFAULT_CONFIG.copy()
+    config = default_config()
     config["max_debate_rounds"] = selections["research_depth"]
     config["max_risk_discuss_rounds"] = selections["research_depth"]
     config["quick_think_llm"] = selections["shallow_thinker"]
@@ -1257,7 +1257,7 @@ def analyze(
             raise typer.Exit(1)
 
         # Merge config file settings with defaults
-        profile_config = DEFAULT_CONFIG.copy()
+        profile_config = default_config()
         profile_config.update({k: v for k, v in cfg.get("config", {}).items() if v is not None})
 
         run_batch_analysis(
@@ -1282,7 +1282,7 @@ def analyze(
                 console.print(f"[red]Failed to load profile '{profile}': {e}[/red]")
                 raise typer.Exit(1) from None
         else:
-            profile_config = DEFAULT_CONFIG.copy()
+            profile_config = default_config()
             profile_config["analysts"] = ["market"]
 
         # Load tickers

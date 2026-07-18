@@ -262,6 +262,75 @@ class TestAkshareRetry:
         assert result == "ok"
         assert len(calls) == 2
 
+    def test_http_error_retries_then_succeeds(self):
+        """requests.exceptions.HTTPError (502/504) should be retried."""
+        import requests.exceptions
+
+        from tradingagents.dataflows.akshare_common import _akshare_retry
+
+        calls = []
+        def flaky():
+            calls.append(1)
+            if len(calls) < 2:
+                resp = requests.models.Response()
+                resp.status_code = 502
+                raise requests.exceptions.HTTPError("502 Bad Gateway", response=resp)
+            return "ok"
+
+        with patch("tradingagents.dataflows.akshare_common.time.sleep"):
+            result = _akshare_retry(flaky)
+
+        assert result == "ok"
+        assert len(calls) == 2
+
+    def test_json_decode_error_retries_then_succeeds(self):
+        """requests.exceptions.JSONDecodeError (empty/non-JSON response) should be retried."""
+        import requests.exceptions
+
+        from tradingagents.dataflows.akshare_common import _akshare_retry
+
+        calls = []
+        def flaky():
+            calls.append(1)
+            if len(calls) < 2:
+                raise requests.exceptions.JSONDecodeError("Expecting value", "", 0)
+            return "ok"
+
+        with patch("tradingagents.dataflows.akshare_common.time.sleep"):
+            result = _akshare_retry(flaky)
+
+        assert result == "ok"
+        assert len(calls) == 2
+
+    def test_http_error_re_raised_after_max_retries(self):
+        """HTTPError re-raised after all retries exhausted."""
+        import requests.exceptions
+
+        from tradingagents.dataflows.akshare_common import _akshare_retry
+
+        resp = requests.models.Response()
+        resp.status_code = 502
+
+        def always_fails():
+            raise requests.exceptions.HTTPError("502 Bad Gateway", response=resp)
+
+        with patch("tradingagents.dataflows.akshare_common.time.sleep"), \
+             pytest.raises(requests.exceptions.HTTPError, match="502"):
+            _akshare_retry(always_fails, max_retries=3)
+
+    def test_json_decode_error_re_raised_after_max_retries(self):
+        """JSONDecodeError re-raised after all retries exhausted."""
+        import requests.exceptions
+
+        from tradingagents.dataflows.akshare_common import _akshare_retry
+
+        def always_fails():
+            raise requests.exceptions.JSONDecodeError("Expecting value", "", 0)
+
+        with patch("tradingagents.dataflows.akshare_common.time.sleep"), \
+             pytest.raises(requests.exceptions.JSONDecodeError):
+            _akshare_retry(always_fails, max_retries=3)
+
 
 # ---------------------------------------------------------------------------
 # akshare_common — no_proxy context manager

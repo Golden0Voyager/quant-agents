@@ -134,24 +134,21 @@ class GetYFinDataOnlineTests(unittest.TestCase):
             with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError):
                 get_YFin_data_online(self.symbol, self.start, self.end)
 
-    def test_invalid_dates_return_error_string(self):
+    def test_invalid_dates_raise_no_market_data(self):
         with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value=self.canonical):
             mock_ticker = MagicMock()
             mock_ticker.history.return_value = self.history_df
-            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                result = get_YFin_data_online(self.symbol, "bad-date", self.end)
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError):
+                get_YFin_data_online(self.symbol, "bad-date", self.end)
 
-        self.assertIn("Error retrieving stock data", result)
-
-    def test_generic_exception_returns_error_string(self):
+    def test_generic_exception_raises_no_market_data(self):
         with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value=self.canonical):
             mock_ticker = MagicMock()
             mock_ticker.history.side_effect = ConnectionError("network error")
-            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                result = get_YFin_data_online(self.symbol, self.start, self.end)
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError) as ctx:
+                get_YFin_data_online(self.symbol, self.start, self.end)
 
-        self.assertIn("Error retrieving stock data for AAPL", result)
-        self.assertIn("network error", result)
+        self.assertIn("network error", str(ctx.exception))
 
     def test_shows_resolved_symbol_when_different(self):
         with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="GC=F"):
@@ -322,14 +319,14 @@ class GetFundamentalsTests(unittest.TestCase):
         self.assertNotIn("Dividend Yield", result)
         self.assertNotIn("Beta", result)
 
-    def test_generic_exception_returns_error_string(self):
+    def test_generic_exception_raises_no_market_data(self):
         with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
             mock_ticker = MagicMock()
             type(mock_ticker).info = PropertyMock(side_effect=ConnectionError("no host"))
-            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                result = get_fundamentals("AAPL")
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError) as ctx:
+                get_fundamentals("AAPL")
 
-        self.assertIn("Error retrieving fundamentals", result)
+        self.assertIn("no host", str(ctx.exception))
 
 
 @pytest.mark.unit
@@ -363,13 +360,13 @@ class GetBalanceSheetTests(unittest.TestCase):
             with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError):
                 get_balance_sheet("FAKE", "quarterly")
 
-    def test_generic_exception_returns_error_string(self):
+    def test_generic_exception_raises_no_market_data(self):
         with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=RuntimeError("crash")):
             mock_ticker = MagicMock()
-            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                result = get_balance_sheet("AAPL", "quarterly")
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError) as ctx:
+                get_balance_sheet("AAPL", "quarterly")
 
-        self.assertIn("Error retrieving balance sheet", result)
+        self.assertIn("crash", str(ctx.exception))
 
     def test_defaults_to_quarterly(self):
         bs_df = _make_financials_df()
@@ -413,13 +410,13 @@ class GetCashflowTests(unittest.TestCase):
             with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError):
                 get_cashflow("FAKE", "quarterly")
 
-    def test_generic_exception_returns_error_string(self):
+    def test_generic_exception_raises_no_market_data(self):
         with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=RuntimeError("fail")):
             mock_ticker = MagicMock()
-            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                result = get_cashflow("AAPL")
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError) as ctx:
+                get_cashflow("AAPL")
 
-        self.assertIn("Error retrieving cash flow", result)
+        self.assertIn("fail", str(ctx.exception))
 
 
 @pytest.mark.unit
@@ -453,13 +450,13 @@ class GetIncomeStatementTests(unittest.TestCase):
             with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError):
                 get_income_statement("FAKE", "quarterly")
 
-    def test_generic_exception_returns_error_string(self):
+    def test_generic_exception_raises_no_market_data(self):
         with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=RuntimeError("broken")):
             mock_ticker = MagicMock()
-            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                result = get_income_statement("AAPL")
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError) as ctx:
+                get_income_statement("AAPL")
 
-        self.assertIn("Error retrieving income statement", result)
+        self.assertIn("broken", str(ctx.exception))
 
     def test_defaults_to_quarterly(self):
         is_df = _make_financials_df()
@@ -488,32 +485,28 @@ class GetInsiderTransactionsTests(unittest.TestCase):
         self.assertIn("Insider Transactions data for AAPL", result)
         self.assertIn("Transaction", result)
 
-    def test_none_data_returns_no_transactions_message(self):
+    def test_none_data_raises_no_market_data(self):
         with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
             mock_ticker = MagicMock()
             mock_ticker.insider_transactions = None
-            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                result = get_insider_transactions("AAPL")
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError):
+                get_insider_transactions("AAPL")
 
-        self.assertEqual(result, "No insider transactions reported for symbol 'AAPL'")
-
-    def test_empty_dataframe_returns_no_transactions_message(self):
+    def test_empty_dataframe_raises_no_market_data(self):
         empty = pd.DataFrame()
         with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=lambda f: f()):
             mock_ticker = MagicMock()
             mock_ticker.insider_transactions = empty
-            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                result = get_insider_transactions("AAPL")
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError):
+                get_insider_transactions("AAPL")
 
-        self.assertIn("No insider transactions reported", result)
-
-    def test_generic_exception_returns_error_string(self):
+    def test_generic_exception_raises_no_market_data(self):
         with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value="AAPL"), patch("tradingagents.dataflows.y_finance.yf_retry", side_effect=RuntimeError("boom")):
             mock_ticker = MagicMock()
-            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker):
-                result = get_insider_transactions("AAPL")
+            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError) as ctx:
+                get_insider_transactions("AAPL")
 
-        self.assertIn("Error retrieving insider transactions", result)
+        self.assertIn("boom", str(ctx.exception))
 
 
 @pytest.mark.unit

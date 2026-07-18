@@ -24,9 +24,10 @@ FRED_API_BASE = "https://api.stlouisfed.org/fred"
 # mirroring the Alpha Vantage client.
 REQUEST_TIMEOUT = 30
 
-# Default trailing window when the caller does not specify one. A year captures
-# the trend and the year-over-year base for most monthly/quarterly series.
-DEFAULT_LOOKBACK_DAYS = 365
+# Default trailing window when the caller does not specify one. Two years captures
+# multi-cycle trends for monthly/quarterly series (CPI, M2, employment) and provides
+# enough context for yearly comparisons beyond a single YoY.
+DEFAULT_LOOKBACK_DAYS = 730
 
 # Rows cap for the rendered table: recent values matter most for a decision, and
 # daily series (yields, VIX) over a long window would otherwise flood context.

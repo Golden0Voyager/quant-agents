@@ -249,16 +249,27 @@ def get_fundamentals(
     company_name = name_df["name"].iloc[0] if name_df is not None and not name_df.empty else code
     industry = name_df["industry"].iloc[0] if name_df is not None and not name_df.empty else "N/A"
 
-    # Get latest fundamentals
-    df = _df_from_sql(
-        """
-        SELECT * FROM fundamentals
-        WHERE ts_code = ?
-        ORDER BY trade_date DESC
-        LIMIT 1
-        """,
-        (code,),
-    )
+    # Get latest fundamentals on or before curr_date
+    if curr_date:
+        df = _df_from_sql(
+            """
+            SELECT * FROM fundamentals
+            WHERE ts_code = ? AND trade_date <= ?
+            ORDER BY trade_date DESC
+            LIMIT 1
+            """,
+            (code, curr_date),
+        )
+    else:
+        df = _df_from_sql(
+            """
+            SELECT * FROM fundamentals
+            WHERE ts_code = ?
+            ORDER BY trade_date DESC
+            LIMIT 1
+            """,
+            (code,),
+        )
 
     if df is None or df.empty:
         raise RuntimeError(f"No fundamentals in quant_core.db for {symbol}")
@@ -285,7 +296,8 @@ def get_fundamentals(
             if "cap" in col:
                 lines.append(f"- {label}: {v/1e8:{fmt}} 亿 (≈{v/1e9:.2f} billion CNY)")
             elif "%" in fmt:
-                lines.append(f"- {label}: {v*100:.2f}%")
+                # quant_core.db stores dividend_yield as a percent number already
+                lines.append(f"- {label}: {v:.2f}%")
             else:
                 lines.append(f"- {label}: {v:{fmt}}")
 
@@ -475,12 +487,21 @@ def get_income_statement(
 # Fund flow
 # ===========================================================================
 
-def get_fund_flow(symbol: str) -> str:
+def get_fund_flow(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch A-share individual stock fund flow from quant_core.db."""
     code = _to_smartmoney_symbol(symbol)
 
+    params = [code]
+    date_filter = ""
+    if curr_date:
+        date_filter = " AND trade_date <= ?"
+        params.append(curr_date)
+
     df = _df_from_sql(
-        """
+        f"""
         SELECT trade_date AS Date, main_net_inflow AS main_net,
                main_net_inflow_pct AS main_pct,
                super_large_net_inflow AS super_large_net,
@@ -489,11 +510,11 @@ def get_fund_flow(symbol: str) -> str:
                large_net_inflow_pct AS large_pct,
                is_simulated
         FROM fund_flow
-        WHERE ts_code = ?
+        WHERE ts_code = ?{date_filter}
         ORDER BY trade_date DESC
         LIMIT 5
         """,
-        (code,),
+        tuple(params),
     )
 
     if df is None or df.empty:
@@ -702,19 +723,28 @@ def get_restricted_release(symbol: str) -> str:
     raise RuntimeError("Restricted release not available in quant_core.db")
 
 
-def get_institutional_holdings(symbol: str) -> str:
+def get_institutional_holdings(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch institutional-holdings (机构持股) data from quant_core.db."""
     code = _to_smartmoney_symbol(symbol)
 
+    params = [code]
+    date_filter = ""
+    if curr_date:
+        date_filter = " AND report_date <= ?"
+        params.append(curr_date)
+
     df = _df_from_sql(
-        """
+        f"""
         SELECT report_date AS Date, institution_count, type_counts
         FROM institutional_holdings
-        WHERE ts_code = ?
+        WHERE ts_code = ?{date_filter}
         ORDER BY report_date DESC
         LIMIT 5
         """,
-        (code,),
+        tuple(params),
     )
 
     if df is None or df.empty:
@@ -747,7 +777,10 @@ def get_institutional_holdings(symbol: str) -> str:
     return "\n".join(lines)
 
 
-def get_northbound_hold(symbol: str) -> str:
+def get_northbound_hold(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch northbound (Stock Connect) flow for an A-share from quant_core.db.
 
     Reads the ``north_flow`` table, which tracks daily buy/sell/net amounts of
@@ -763,15 +796,21 @@ def get_northbound_hold(symbol: str) -> str:
     """
     code = _to_smartmoney_symbol(symbol)
 
+    params = [code]
+    date_filter = ""
+    if curr_date:
+        date_filter = " AND trade_date <= ?"
+        params.append(curr_date)
+
     df = _df_from_sql(
-        """
+        f"""
         SELECT trade_date AS Date, buy_amount, sell_amount, net_amount
         FROM north_flow
-        WHERE ts_code = ?
+        WHERE ts_code = ?{date_filter}
         ORDER BY trade_date DESC
         LIMIT 10
         """,
-        (code,),
+        tuple(params),
     )
 
     if df is None or df.empty:
@@ -937,10 +976,80 @@ def get_macro_indicators(
 
 
 # ===========================================================================
+# Research Reports (个股研报) — smartmoney_db fallback
+# ===========================================================================
+
+
+def get_research_reports(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
+    """Fetch A-share research reports from quant_core.db.
+
+    Reads the ``research_report`` table with schema:
+        ts_code TEXT, report_date TEXT, org_name TEXT,
+        rating TEXT, target_price REAL, title TEXT
+
+    If the table does not exist, is empty for the ticker, or the query
+    fails, raises ``RuntimeError`` so ``route_to_vendor`` falls through
+    to the next configured vendor (akshare).
+    """
+    code = _to_smartmoney_symbol(symbol)
+
+    params = [code]
+    date_filter = ""
+    if curr_date:
+        date_filter = " AND report_date <= ?"
+        params.append(curr_date)
+
+    df = _df_from_sql(
+        f"""
+        SELECT report_date, org_name, rating, target_price, title
+        FROM research_report
+        WHERE ts_code = ?{date_filter}
+        ORDER BY report_date DESC
+        LIMIT 10
+        """,
+        tuple(params),
+    )
+
+    if df is None or df.empty:
+        raise RuntimeError(
+            f"No research reports in quant_core.db for {symbol}. "
+            "Route to_vendor will fall back to akshare."
+        )
+
+    lines = [
+        f"## {symbol.upper()} Research Reports (source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)}",
+        "",
+    ]
+
+    for _, row in df.iterrows():
+        title = row.get("title", "N/A")
+        org = row.get("org_name", "N/A")
+        rating = row.get("rating", "N/A")
+        target_price = row.get("target_price")
+        report_date = row.get("report_date", "N/A")
+        lines.append(f"**{title}**")
+        lines.append(f"- 机构: {org}")
+        lines.append(f"- 评级: {rating}")
+        if pd.notna(target_price):
+            lines.append(f"- 目标价: {target_price:.2f}")
+        lines.append(f"- 日期: {report_date}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# ===========================================================================
 # Margin Trading (融资融券) — v2.2
 # ===========================================================================
 
-def get_margin_trading(symbol: str) -> str:
+def get_margin_trading(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch margin-trading (融资融券) data from quant_core.db."""
 
     def _fmt_num(value) -> str:
@@ -948,16 +1057,22 @@ def get_margin_trading(symbol: str) -> str:
 
     code = _to_smartmoney_symbol(symbol)
 
+    params = [code]
+    date_filter = ""
+    if curr_date:
+        date_filter = " AND trade_date <= ?"
+        params.append(curr_date)
+
     df = _df_from_sql(
-        """
+        f"""
         SELECT trade_date AS Date, margin_balance, margin_buy, margin_repay,
                short_balance, short_sell, short_repay, total_balance
         FROM margin_trading
-        WHERE ts_code = ?
+        WHERE ts_code = ?{date_filter}
         ORDER BY trade_date DESC
         LIMIT 5
         """,
-        (code,),
+        tuple(params),
     )
 
     if df is None or df.empty:
@@ -983,20 +1098,29 @@ def get_margin_trading(symbol: str) -> str:
 # Dragon Tiger (龙虎榜) — v2.2
 # ===========================================================================
 
-def get_dragon_tiger(symbol: str) -> str:
+def get_dragon_tiger(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch dragon-tiger-board (龙虎榜) data from quant_core.db."""
     code = _to_smartmoney_symbol(symbol)
 
+    params = [code]
+    date_filter = ""
+    if curr_date:
+        date_filter = " AND trade_date <= ?"
+        params.append(curr_date)
+
     df = _df_from_sql(
-        """
+        f"""
         SELECT trade_date AS Date, close_price, pct_change, net_buy_amount,
                buy_amount, sell_amount, turnover_rate, market_cap, reason
         FROM dragon_tiger
-        WHERE ts_code = ?
+        WHERE ts_code = ?{date_filter}
         ORDER BY trade_date DESC
         LIMIT 5
         """,
-        (code,),
+        tuple(params),
     )
 
     if df is None or df.empty:
@@ -1023,20 +1147,29 @@ def get_dragon_tiger(symbol: str) -> str:
 # Block Trade (大宗交易) — v2.2
 # ===========================================================================
 
-def get_block_trade(symbol: str) -> str:
+def get_block_trade(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch block-trade (大宗交易) data from quant_core.db."""
     code = _to_smartmoney_symbol(symbol)
 
+    params = [code]
+    date_filter = ""
+    if curr_date:
+        date_filter = " AND trade_date <= ?"
+        params.append(curr_date)
+
     df = _df_from_sql(
-        """
+        f"""
         SELECT trade_date AS Date, deal_price, close_price, discount_rate,
                volume, amount, buyer_branch, seller_branch
         FROM block_trade
-        WHERE ts_code = ?
+        WHERE ts_code = ?{date_filter}
         ORDER BY trade_date DESC
         LIMIT 5
         """,
-        (code,),
+        tuple(params),
     )
 
     if df is None or df.empty:
@@ -1107,20 +1240,29 @@ def get_sector_fund_flow(sector_name: str) -> str:
 # Shareholder Count (股东户数) — v2.2
 # ===========================================================================
 
-def get_shareholder_count(symbol: str) -> str:
+def get_shareholder_count(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch shareholder-count (股东户数) from quant_core.db."""
     code = _to_smartmoney_symbol(symbol)
 
+    params = [code]
+    date_filter = ""
+    if curr_date:
+        date_filter = " AND report_date <= ?"
+        params.append(curr_date)
+
     df = _df_from_sql(
-        """
+        f"""
         SELECT report_date AS Date, holder_count, holder_count_change_pct,
                avg_shares_per_holder
         FROM shareholder_count
-        WHERE ts_code = ?
+        WHERE ts_code = ?{date_filter}
         ORDER BY report_date DESC
         LIMIT 4
         """,
-        (code,),
+        tuple(params),
     )
 
     if df is None or df.empty:
@@ -1138,4 +1280,57 @@ def get_shareholder_count(symbol: str) -> str:
         lines.append(f"- 环比变化: {row['holder_count_change_pct']:.2f}%")
         lines.append(f"- 人均持股: {row['avg_shares_per_holder']:,.0f}")
         lines.append("")
+    return "\n".join(lines)
+
+
+# ===========================================================================
+# Pledge Ratio (股权质押) — v2.2
+# ===========================================================================
+
+
+def get_pledge_ratio(symbol: str) -> str:
+    """Fetch A-share pledge-ratio data from quant_core.db.
+
+    Reads the ``stock_gpzy`` table with schema:
+        ts_code TEXT, pledge_date TEXT, pledger TEXT,
+        pledged_shares REAL, pct_of_holding REAL, pct_of_total REAL,
+        pledge_org TEXT
+
+    If the table does not exist, is empty, or the query fails, raises
+    ``RuntimeError`` so ``route_to_vendor`` falls through to akshare.
+    """
+    code = _to_smartmoney_symbol(symbol)
+
+    df = _df_from_sql(
+        """
+        SELECT pledge_date, pledger, pledged_shares,
+               pct_of_holding, pct_of_total, pledge_org
+        FROM stock_gpzy
+        WHERE ts_code = ?
+        ORDER BY pledge_date DESC
+        LIMIT 10
+        """,
+        (code,),
+    )
+
+    if df is None or df.empty:
+        raise RuntimeError(
+            f"No pledge-ratio data in quant_core.db for {symbol}. "
+            "Route will fall back to akshare."
+        )
+
+    lines = [
+        f"## {symbol.upper()} Pledge Ratio (source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)}",
+        "",
+    ]
+    for _, row in df.iterrows():
+        lines.append(f"**Pledger**: {row.get('pledger', 'N/A')}")
+        lines.append(f"- 质押日期: {row.get('pledge_date', 'N/A')}")
+        lines.append(f"- 质押数量: {row.get('pledged_shares', 'N/A')}")
+        lines.append(f"- 占所持比例: {row.get('pct_of_holding', 0):.2f}%")
+        lines.append(f"- 占总股本比例: {row.get('pct_of_total', 0):.2f}%")
+        lines.append(f"- 质押机构: {row.get('pledge_org', 'N/A')}")
+        lines.append("")
+
     return "\n".join(lines)

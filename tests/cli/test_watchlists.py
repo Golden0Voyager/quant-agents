@@ -7,6 +7,8 @@ from cli.watchlists import (
     save_watchlist,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _mock_watchlists_dir(tmp_path, monkeypatch):

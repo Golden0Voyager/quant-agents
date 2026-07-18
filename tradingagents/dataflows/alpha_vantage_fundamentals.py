@@ -37,19 +37,37 @@ def get_fundamentals(ticker: str, curr_date: str = None) -> str:
 
 
 def get_balance_sheet(ticker: str, freq: str = "quarterly", curr_date: str = None):
-    """Retrieve balance sheet data for a given ticker symbol using Alpha Vantage."""
-    result = _make_api_request("BALANCE_SHEET", {"symbol": ticker})
+    """Retrieve balance sheet data for a given ticker symbol using Alpha Vantage.
+
+    Returns the parsed JSON dict with annualReports/quarterlyReports filtered
+    to fiscal periods ending on or before ``curr_date`` (prevents look-ahead
+    bias); if the response body is not JSON, the raw text is returned
+    unfiltered.
+    """
+    result = _make_api_request("BALANCE_SHEET", {"symbol": ticker}, parse_json=True)
     return _filter_reports_by_date(result, curr_date)
 
 
 def get_cashflow(ticker: str, freq: str = "quarterly", curr_date: str = None):
-    """Retrieve cash flow statement data for a given ticker symbol using Alpha Vantage."""
-    result = _make_api_request("CASH_FLOW", {"symbol": ticker})
+    """Retrieve cash flow statement data for a given ticker symbol using Alpha Vantage.
+
+    Returns the parsed JSON dict with annualReports/quarterlyReports filtered
+    to fiscal periods ending on or before ``curr_date`` (prevents look-ahead
+    bias); if the response body is not JSON, the raw text is returned
+    unfiltered.
+    """
+    result = _make_api_request("CASH_FLOW", {"symbol": ticker}, parse_json=True)
     return _filter_reports_by_date(result, curr_date)
 
 
 def get_income_statement(ticker: str, freq: str = "quarterly", curr_date: str = None):
-    """Retrieve income statement data for a given ticker symbol using Alpha Vantage."""
-    result = _make_api_request("INCOME_STATEMENT", {"symbol": ticker})
+    """Retrieve income statement data for a given ticker symbol using Alpha Vantage.
+
+    Returns the parsed JSON dict with annualReports/quarterlyReports filtered
+    to fiscal periods ending on or before ``curr_date`` (prevents look-ahead
+    bias); if the response body is not JSON, the raw text is returned
+    unfiltered.
+    """
+    result = _make_api_request("INCOME_STATEMENT", {"symbol": ticker}, parse_json=True)
     return _filter_reports_by_date(result, curr_date)
 

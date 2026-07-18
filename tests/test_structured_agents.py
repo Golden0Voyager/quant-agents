@@ -22,6 +22,7 @@ from tradingagents.agents.schemas import (
     SentimentReport,
     TraderAction,
     TraderProposal,
+    render_pm_decision,
     render_research_plan,
     render_sentiment_report,
     render_trader_proposal,
@@ -66,6 +67,19 @@ class TestRenderTraderProposal:
         assert "Stop Loss" not in md
         assert "Position Sizing" not in md
         assert "FINAL TRANSACTION PROPOSAL: **SELL**" in md
+
+    def test_render_includes_confidence_and_price_source(self):
+        p = TraderProposal(
+            action=TraderAction.BUY,
+            reasoning="Technical breakout.",
+            entry_price=100.0,
+            stop_loss=95.0,
+            confidence="high",
+            price_source="Close from verified market snapshot",
+        )
+        md = render_trader_proposal(p)
+        assert "**Confidence**: high" in md
+        assert "**Price Source**: Close from verified market snapshot" in md
 
 
 @pytest.mark.unit
@@ -121,6 +135,18 @@ class TestRenderResearchPlan:
             md = render_research_plan(p)
             assert f"**Recommendation**: {rating.value}" in md
 
+    def test_render_includes_confidence_and_key_assumptions(self):
+        p = ResearchPlan(
+            recommendation=PortfolioRating.OVERWEIGHT,
+            rationale="r",
+            strategic_actions="s",
+            confidence="medium",
+            key_assumptions=["Revenue growth stable", "Rates unchanged"],
+        )
+        md = render_research_plan(p)
+        assert "**Confidence**: medium" in md
+        assert "**Key Assumptions**: Revenue growth stable, Rates unchanged" in md
+
 
 # ---------------------------------------------------------------------------
 # Trader agent: structured happy path + fallback
@@ -166,7 +192,8 @@ def test_invoke_structured_falls_back_when_result_is_none():
     out = invoke_structured_or_freetext(
         structured, plain, "prompt", render=lambda r: r.rating, agent_name="t"
     )
-    assert out == "FREETEXT"
+    assert "STRUCTURED_FALLBACK" in out
+    assert "FREETEXT" in out
     plain.invoke.assert_called_once()
 
 
@@ -209,8 +236,12 @@ class TestTraderAgent:
         llm.with_structured_output.side_effect = NotImplementedError("provider unsupported")
         llm.invoke.return_value = MagicMock(content=plain_response)
         trader = create_trader(llm)
-        result = trader(_make_trader_state())
-        assert result["trader_investment_plan"] == plain_response
+        state = _make_trader_state()
+        result = trader(state)
+        assert "STRUCTURED_FALLBACK" in result["trader_investment_plan"]
+        assert plain_response in result["trader_investment_plan"]
+        assert result["structured_fallback_agents"] == ["Trader"]
+        assert "_structured_fallback" not in state
 
     def test_prompt_quotes_verified_snapshot(self, monkeypatch):
         """Regression for #bug-2026-06-06-price-hallucination: the Trader used to
@@ -345,8 +376,34 @@ class TestResearchManagerAgent:
         llm.with_structured_output.side_effect = NotImplementedError("provider unsupported")
         llm.invoke.return_value = MagicMock(content=plain_response)
         rm = create_research_manager(llm)
-        result = rm(_make_rm_state())
-        assert result["investment_plan"] == plain_response
+        state = _make_rm_state()
+        result = rm(state)
+        assert "STRUCTURED_FALLBACK" in result["investment_plan"]
+        assert plain_response in result["investment_plan"]
+        assert result["structured_fallback_agents"] == ["Research Manager"]
+        assert "_structured_fallback" not in state
+
+
+# ---------------------------------------------------------------------------
+# Portfolio Decision render
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestRenderPortfolioDecision:
+    def test_render_includes_confidence_and_data_sources(self):
+        from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating
+
+        d = PortfolioDecision(
+            rating=PortfolioRating.OVERWEIGHT,
+            executive_summary="Accumulate on dips.",
+            investment_thesis="Fundamentals support higher valuation.",
+            confidence="medium",
+            data_sources=["market_snapshot", "fundamentals_snapshot"],
+        )
+        md = render_pm_decision(d)
+        assert "**Confidence**: medium" in md
+        assert "**Data Sources**: market_snapshot, fundamentals_snapshot" in md
 
 
 # ---------------------------------------------------------------------------
@@ -431,6 +488,18 @@ def _structured_sentiment_llm(captured: dict, report: SentimentReport | None = N
 
 @pytest.mark.unit
 class TestSentimentAnalystAgent:
+    @pytest.fixture(autouse=True)
+    def _stub_sentiment_sources(self, monkeypatch):
+        from tradingagents.agents.analysts import sentiment_analyst as module
+
+        monkeypatch.setattr(module.get_news, "func", lambda *args: "NEWS_DATA")
+        monkeypatch.setattr(
+            module, "fetch_eastmoney_hot_rank", lambda ticker: "HOT_RANK_DATA"
+        )
+        monkeypatch.setattr(
+            module, "fetch_eastmoney_guba_sentiment", lambda ticker: "GUBA_DATA"
+        )
+
     def test_structured_path_produces_rendered_markdown(self):
         captured = {}
         report = SentimentReport(
@@ -460,7 +529,12 @@ class TestSentimentAnalystAgent:
         llm = MagicMock()
         llm.with_structured_output.side_effect = NotImplementedError("provider unsupported")
         llm.invoke.return_value = MagicMock(content=plain)
-        assert create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"] == plain
+        report = create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"]
+        assert "STRUCTURED_FALLBACK" in report
+        assert plain in report
+
+        result = create_sentiment_analyst(llm)(_make_sentiment_state())
+        assert result["structured_fallback_agents"] == ["Sentiment Analyst"]
 
     def test_falls_back_to_freetext_when_structured_call_fails(self):
         plain = "Fallback free-text sentiment."
@@ -469,7 +543,9 @@ class TestSentimentAnalystAgent:
         llm = MagicMock()
         llm.with_structured_output.return_value = structured
         llm.invoke.return_value = MagicMock(content=plain)
-        assert create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"] == plain
+        report = create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"]
+        assert "STRUCTURED_FALLBACK" in report
+        assert plain in report
 
     def test_falls_back_to_freetext_when_structured_call_hits_rate_limit(self):
         """Regression: transient provider errors from the structured path still fall back."""
@@ -479,7 +555,25 @@ class TestSentimentAnalystAgent:
         llm = MagicMock()
         llm.with_structured_output.return_value = structured
         llm.invoke.return_value = MagicMock(content=plain)
-        assert create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"] == plain
+        report = create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"]
+        assert "STRUCTURED_FALLBACK" in report
+        assert plain in report
+
+    def test_news_rate_limit_degrades_without_aborting_node(self, monkeypatch):
+        from tradingagents.agents.analysts import sentiment_analyst as module
+        from tradingagents.dataflows.errors import VendorRateLimitError
+
+        def raise_rate_limit(*args):
+            raise VendorRateLimitError("Yahoo Finance rate-limited for NVDA")
+
+        monkeypatch.setattr(module.get_news, "func", raise_rate_limit)
+        captured = {}
+        result = create_sentiment_analyst(_structured_sentiment_llm(captured))(
+            _make_sentiment_state()
+        )
+
+        assert "sentiment_report" in result
+        assert "DATA_UNAVAILABLE" in "\n".join(str(message) for message in captured["prompt"])
 
 
 @pytest.mark.unit
@@ -488,6 +582,18 @@ class TestSocialMediaAnalystShim:
 
     Covers ``sentiment_analyst.py`` lines 210-217.
     """
+
+    @pytest.fixture(autouse=True)
+    def _stub_sentiment_sources(self, monkeypatch):
+        from tradingagents.agents.analysts import sentiment_analyst as module
+
+        monkeypatch.setattr(module.get_news, "func", lambda *args: "NEWS_DATA")
+        monkeypatch.setattr(
+            module, "fetch_eastmoney_hot_rank", lambda ticker: "HOT_RANK_DATA"
+        )
+        monkeypatch.setattr(
+            module, "fetch_eastmoney_guba_sentiment", lambda ticker: "GUBA_DATA"
+        )
 
     def test_returns_callable(self):
         from tradingagents.agents.analysts.sentiment_analyst import create_social_media_analyst

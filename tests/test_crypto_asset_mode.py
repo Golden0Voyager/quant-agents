@@ -1,8 +1,12 @@
 import unittest
 
+import pytest
+
 from cli.models import AnalystType, AssetType
 from cli.utils import detect_asset_type, filter_analysts_for_asset_type
 from tradingagents.graph.propagation import Propagator
+
+pytestmark = pytest.mark.unit
 
 
 class CryptoAssetModeTests(unittest.TestCase):

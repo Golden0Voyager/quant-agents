@@ -28,6 +28,8 @@ See: https://github.com/TauricResearch/TradingAgents/issues/557
 See: https://github.com/TauricResearch/TradingAgents/issues/796
 """
 
+import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from langchain_core.messages import AIMessage
@@ -41,6 +43,7 @@ from tradingagents.agents.utils.agent_utils import (
     sanitize_company_name_in_report,
 )
 from tradingagents.agents.utils.structured import (
+    FALLBACK_MARKER,
     bind_structured,
     invoke_structured_or_freetext,
 )
@@ -49,9 +52,27 @@ from tradingagents.dataflows.eastmoney_sentiment import (
     fetch_eastmoney_hot_rank,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _seven_days_back(trade_date: str) -> str:
     return (datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
+
+
+def _safe_prefetch(label: str, fetch: Callable[[], str]) -> str:
+    """Fetch optional sentiment enrichment without aborting the analyst node."""
+    try:
+        result = fetch()
+        if result:
+            return result
+        detail = "empty response"
+    except Exception as exc:  # noqa: BLE001 - enrichment must degrade gracefully
+        logger.warning("Sentiment %s prefetch failed: %s", label, exc)
+        detail = type(exc).__name__
+    return (
+        f"DATA_UNAVAILABLE: {label} could not be retrieved ({detail}). "
+        "Proceed without it; do not fabricate values."
+    )
 
 
 def create_sentiment_analyst(llm):
@@ -71,12 +92,18 @@ def create_sentiment_analyst(llm):
         start_date = _seven_days_back(end_date)
         instrument_context = get_instrument_context_from_state(state)
 
-        # Pre-fetch all three sources. Each fetcher degrades gracefully and
-        # returns a string (no exceptions surface from here), so the LLM
-        # always sees something — either real data or a clear placeholder.
-        news_block = get_news.func(ticker, start_date, end_date)
-        hot_rank_block = fetch_eastmoney_hot_rank(ticker)
-        guba_block = fetch_eastmoney_guba_sentiment(ticker)
+        # Treat all three sources as optional enrichment. Vendor/network
+        # failures become explicit prompt blocks instead of aborting the node.
+        news_block = _safe_prefetch(
+            "news", lambda: get_news.func(ticker, start_date, end_date)
+        )
+        hot_rank_block = _safe_prefetch(
+            "Eastmoney hot rank", lambda: fetch_eastmoney_hot_rank(ticker)
+        )
+        guba_block = _safe_prefetch(
+            "Eastmoney Guba sentiment",
+            lambda: fetch_eastmoney_guba_sentiment(ticker),
+        )
 
         system_message = _build_system_message(
             ticker=ticker,
@@ -126,6 +153,9 @@ def create_sentiment_analyst(llm):
         return {
             "messages": [AIMessage(content=report_text)],
             "sentiment_report": report_text,
+            "structured_fallback_agents": (
+                ["Sentiment Analyst"] if FALLBACK_MARKER in report_text else []
+            ),
         }
 
     return sentiment_analyst_node

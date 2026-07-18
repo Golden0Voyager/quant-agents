@@ -15,6 +15,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_or_build_data_quality_summary,
 )
 from tradingagents.agents.utils.structured import (
+    FALLBACK_MARKER,
     bind_structured,
     invoke_structured_or_freetext,
 )
@@ -136,7 +137,9 @@ def create_trader(llm):
                     "or other fundamental ratios. If the snapshot reports the data is unavailable, "
                     "you MUST set entry_price and stop_loss to null rather than guessing. Position "
                     "sizing should reflect the volatility implied by the snapshot (ATR) and the "
-                    "rating the research plan recommends."
+                    "rating the research plan recommends. "
+                    "Report a confidence level (low/medium/high) and a price_source that explains "
+                    "which verified price or data source was used for entry_price and stop_loss."
                     + get_language_instruction()
                 ),
             },
@@ -162,7 +165,11 @@ def create_trader(llm):
                     f"- Stop Loss: a specific price level quoted from the snapshot above, "
                     f"or null if the snapshot says data is unavailable.\n"
                     f"- Position Sizing: a concrete sizing instruction "
-                    f"(e.g., '5% of portfolio', '1,000 shares').\n\n"
+                    f"(e.g., '5% of portfolio', '1,000 shares').\n"
+                    f"- Confidence: low/medium/high. Use 'low' when the snapshot is unavailable "
+                    f"or the research plan is conflicted.\n"
+                    f"- Price Source: the exact verified price or source used for entry/stop, "
+                    f"e.g. 'Close from verified market snapshot' or 'null — snapshot unavailable'.\n\n"
                     f"Leverage these insights to make an informed and strategic decision."
                 ),
             },
@@ -180,6 +187,9 @@ def create_trader(llm):
             "messages": [AIMessage(content=trader_plan)],
             "trader_investment_plan": trader_plan,
             "sender": name,
+            "structured_fallback_agents": (
+                ["Trader"] if FALLBACK_MARKER in trader_plan else []
+            ),
         }
 
     return functools.partial(trader_node, name="Trader")

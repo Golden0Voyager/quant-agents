@@ -104,6 +104,10 @@ def get_restricted_release(
 @tool
 def get_institutional_holdings(
     ticker: Annotated[str, "Ticker symbol"],
+    curr_date: Annotated[
+        str | None,
+        "Analysis date (YYYY-MM-DD); only data on or before this date will be returned.",
+    ] = None,
 ) -> str:
     """
     Retrieve institutional holdings and top shareholder data for a given ticker.
@@ -111,15 +115,22 @@ def get_institutional_holdings(
     Uses the configured news_data vendor (akshare for A-shares).
     Args:
         ticker (str): Ticker symbol
+        curr_date (str | None): Analysis date (YYYY-MM-DD); only data on or before this date will be returned.
     Returns:
         str: A formatted report of institutional holdings
     """
-    return route_to_vendor("get_institutional_holdings", ticker)
+    if curr_date is None:
+        return route_to_vendor("get_institutional_holdings", ticker)
+    return route_to_vendor("get_institutional_holdings", ticker, curr_date)
 
 
 @tool
 def get_northbound_hold(
     ticker: Annotated[str, "Ticker symbol"],
+    curr_date: Annotated[
+        str | None,
+        "Analysis date (YYYY-MM-DD); only data on or before this date will be returned.",
+    ] = None,
 ) -> str:
     """
     Retrieve northbound (Stock Connect) foreign investor holding data.
@@ -127,15 +138,22 @@ def get_northbound_hold(
     Uses the configured news_data vendor (akshare for A-shares).
     Args:
         ticker (str): Ticker symbol
+        curr_date (str | None): Analysis date (YYYY-MM-DD); only data on or before this date will be returned.
     Returns:
         str: A formatted report of northbound holdings
     """
-    return route_to_vendor("get_northbound_hold", ticker)
+    if curr_date is None:
+        return route_to_vendor("get_northbound_hold", ticker)
+    return route_to_vendor("get_northbound_hold", ticker, curr_date)
 
 
 @tool
 def get_dragon_tiger(
     ticker: Annotated[str, "Ticker symbol"],
+    curr_date: Annotated[
+        str | None,
+        "Analysis date (YYYY-MM-DD); only data on or before this date will be returned.",
+    ] = None,
 ) -> str:
     """
     Retrieve dragon-tiger board (龙虎榜) data for a given ticker.
@@ -144,15 +162,22 @@ def get_dragon_tiger(
     Uses the configured news_data vendor (smartmoney_db local cache or akshare for A-shares).
     Args:
         ticker (str): Ticker symbol
+        curr_date (str | None): Analysis date (YYYY-MM-DD); only data on or before this date will be returned.
     Returns:
         str: A formatted report of dragon-tiger board appearances
     """
-    return route_to_vendor("get_dragon_tiger", ticker)
+    if curr_date is None:
+        return route_to_vendor("get_dragon_tiger", ticker)
+    return route_to_vendor("get_dragon_tiger", ticker, curr_date)
 
 
 @tool
 def get_block_trade(
     ticker: Annotated[str, "Ticker symbol"],
+    curr_date: Annotated[
+        str | None,
+        "Analysis date (YYYY-MM-DD); only data on or before this date will be returned.",
+    ] = None,
 ) -> str:
     """
     Retrieve block-trade (大宗交易) data for a given ticker.
@@ -161,10 +186,13 @@ def get_block_trade(
     Uses the configured news_data vendor (smartmoney_db local cache or akshare for A-shares).
     Args:
         ticker (str): Ticker symbol
+        curr_date (str | None): Analysis date (YYYY-MM-DD); only data on or before this date will be returned.
     Returns:
         str: A formatted report of block-trade transactions
     """
-    return route_to_vendor("get_block_trade", ticker)
+    if curr_date is None:
+        return route_to_vendor("get_block_trade", ticker)
+    return route_to_vendor("get_block_trade", ticker, curr_date)
 
 
 @tool
@@ -187,6 +215,10 @@ def get_pledge_ratio(
 @tool
 def get_research_reports(
     ticker: Annotated[str, "Ticker symbol"],
+    curr_date: Annotated[
+        str | None,
+        "Analysis date (YYYY-MM-DD); only data on or before this date will be returned.",
+    ] = None,
 ) -> str:
     """
     Retrieve research reports (个股研报) for a given ticker.
@@ -195,7 +227,10 @@ def get_research_reports(
     Uses the configured research_opinion vendor (akshare for A-shares, real-time).
     Args:
         ticker (str): Ticker symbol
+        curr_date (str | None): Analysis date (YYYY-MM-DD); only data on or before this date will be returned.
     Returns:
         str: A formatted report of research reports
     """
-    return route_to_vendor("get_research_reports", ticker)
+    if curr_date is None:
+        return route_to_vendor("get_research_reports", ticker)
+    return route_to_vendor("get_research_reports", ticker, curr_date)

@@ -412,6 +412,68 @@ class TestCheckDerived:
 
 
 # ===========================================================================
+# _check_northbound branch (line 150)
+# ===========================================================================
+
+
+class TestCheckNorthbound:
+    """Test _check_northbound early-return branch (line 150)."""
+
+    @patch("tradingagents.agents.utils.data_readiness.is_a_share_ticker")
+    @patch("tradingagents.dataflows.smartmoney_vendor._to_smartmoney_symbol")
+    @patch("tradingagents.dataflows.smartmoney_vendor._df_from_sql")
+    @patch("tradingagents.agents.utils.data_readiness.load_ohlcv")
+    def test_ashare_northbound_cached(
+        self, mock_load, mock_df, mock_to_sym, mock_is_a_share
+    ):
+        """Line 150: A-share northbound with cache hit returns cached status.
+        Triggered via governance analyst which includes northbound."""
+        mock_load.return_value = pd.DataFrame({"Date": ["2026-07-03"], "Close": [10.0]})
+        mock_is_a_share.return_value = True
+        mock_to_sym.return_value = "000001"
+        mock_df.return_value = pd.DataFrame({
+            "cnt": [8],
+            "latest": ["2026-07-02"],
+        })
+
+        report = check_data_readiness("000001.SZ", "2026-07-03", ["governance"])
+        nb_items = [i for i in report.items if i.label == "北向资金"]
+        assert len(nb_items) == 1
+        assert nb_items[0].status == "cached"
+        assert "8 条记录" in nb_items[0].details
+
+
+# ===========================================================================
+# check_batch_readiness — resolve_ticker exception (lines 357-358)
+# ===========================================================================
+
+
+class TestCheckBatchReadinessResolveTicker:
+    """Test check_batch_readiness resolve_ticker exception fallback."""
+
+    @patch("tradingagents.agents.utils.data_readiness.resolve_ticker")
+    @patch("tradingagents.agents.utils.data_readiness.check_data_readiness")
+    def test_resolve_ticker_exception_falls_back_to_original_ticker(
+        self, mock_check, mock_resolve
+    ):
+        """Lines 357-358: resolve_ticker raises -> fallback to original ticker."""
+        mock_resolve.side_effect = ValueError("resolve failed")
+        mock_check.return_value.items = []
+        from tradingagents.agents.utils.data_readiness import ReadinessItem
+        mock_check.return_value.items = [
+            ReadinessItem("日K行情", "cacheable", "cached", "最新 2026-07-03", "market"),
+        ]
+
+        ready, total = check_batch_readiness(
+            ["000001.SZ"], "2026-07-03", ["market"]
+        )
+        assert ready == 1
+        assert total == 1
+        # check_data_readiness should be called with the original ticker
+        mock_check.assert_called_once_with("000001.SZ", "2026-07-03", ["market"])
+
+
+# ===========================================================================
 # check_data_readiness — integration tests
 # ===========================================================================
 

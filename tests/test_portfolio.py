@@ -34,6 +34,7 @@ from tradingagents.portfolio.validators import _parse_number
 # Models
 # ---------------------------------------------------------------------------
 
+@pytest.mark.unit
 class TestHolding:
     def test_to_dict_excludes_none(self):
         h = Holding(ticker="002241.SZ", shares=100, avg_cost=10.0)
@@ -57,6 +58,7 @@ class TestHolding:
         assert h2.pnl_pct == h.pnl_pct
 
 
+@pytest.mark.unit
 class TestTransaction:
     def test_to_dict(self):
         t = Transaction(
@@ -112,6 +114,7 @@ class TestTransaction:
         assert not hasattr(t, "nonexistent")
 
 
+@pytest.mark.unit
 class TestPortfolio:
     def test_total_invested(self):
         p = Portfolio(
@@ -166,6 +169,7 @@ class TestPortfolio:
 # Validators
 # ---------------------------------------------------------------------------
 
+@pytest.mark.unit
 class TestNormalizeTicker:
     def test_a_share_6_prefix(self):
         assert normalize_ticker("600519") == "600519.SS"
@@ -185,6 +189,7 @@ class TestNormalizeTicker:
         assert normalize_ticker("-") is None
 
 
+@pytest.mark.unit
 class TestParseNumber:
     def test_int_input(self):
         assert _parse_number(42) == 42.0
@@ -207,6 +212,7 @@ class TestParseNumber:
             _parse_number([1, 2, 3])
 
 
+@pytest.mark.unit
 class TestValidateHolding:
     def test_valid_holding(self):
         h = Holding(ticker="A", shares=100, avg_cost=10.0)
@@ -225,6 +231,7 @@ class TestValidateHolding:
         assert validate_holding(h) is None
 
 
+@pytest.mark.unit
 class TestDeduplicateHoldings:
     def test_deduplicates_by_ticker_keeping_last(self):
         from tradingagents.portfolio.validators import deduplicate_holdings
@@ -255,6 +262,7 @@ class TestDeduplicateHoldings:
 # Repository
 # ---------------------------------------------------------------------------
 
+@pytest.mark.unit
 class TestPortfolioRepository:
     def test_save_and_load(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -292,6 +300,7 @@ class TestPortfolioRepository:
 # Prompts
 # ---------------------------------------------------------------------------
 
+@pytest.mark.unit
 class TestPrompts:
     def test_build_pm_prompt_with_holding(self):
         p = Portfolio(
@@ -349,6 +358,7 @@ class TestPrompts:
 # Backward compatibility
 # ---------------------------------------------------------------------------
 
+@pytest.mark.unit
 class TestBackwardCompatibility:
     def test_legacy_holdings_dict(self):
         """Ensure legacy flat dict format still works via Holding.from_dict."""

@@ -696,12 +696,22 @@ class TestDeprecatedSocialMediaAnalyst:
             warnings.simplefilter("ignore")
             node = create_social_media_analyst(llm)
 
-        result = node({
-            "company_of_interest": "NVDA",
-            "trade_date": "2026-01-15",
-            "asset_type": "stock",
-            "messages": [],
-        })
+        with patch(
+            "tradingagents.agents.analysts.sentiment_analyst.get_news.func",
+            return_value="NEWS_DATA",
+        ), patch(
+            "tradingagents.agents.analysts.sentiment_analyst.fetch_eastmoney_hot_rank",
+            return_value="HOT_RANK_DATA",
+        ), patch(
+            "tradingagents.agents.analysts.sentiment_analyst.fetch_eastmoney_guba_sentiment",
+            return_value="GUBA_DATA",
+        ):
+            result = node({
+                "company_of_interest": "NVDA",
+                "trade_date": "2026-01-15",
+                "asset_type": "stock",
+                "messages": [],
+            })
         sr = result["sentiment_report"]
         assert "Bullish" in sr
         assert "(Score: 8.0/10)" in sr

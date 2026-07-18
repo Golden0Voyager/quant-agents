@@ -4,7 +4,9 @@ from typing import Annotated
 import pandas as pd
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
+from yfinance.exceptions import YFRateLimitError
 
+from .errors import NoMarketDataError, VendorRateLimitError
 from .stockstats_utils import (
     StockstatsUtils,
     _assert_ohlcv_not_stale,
@@ -12,7 +14,7 @@ from .stockstats_utils import (
     load_ohlcv,
     yf_retry,
 )
-from .symbol_utils import NoMarketDataError, normalize_symbol
+from .symbol_utils import normalize_symbol
 
 
 def get_YFin_data_online(
@@ -20,6 +22,9 @@ def get_YFin_data_online(
     start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
     end_date: Annotated[str, "End date in yyyy-mm-dd format"],
 ):
+    # Default canonical to the raw symbol so error handling can always report
+    # what was requested, even if normalization fails before ``canonical`` is set.
+    canonical = symbol
     try:
         datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
@@ -69,8 +74,14 @@ def get_YFin_data_online(
         return header + csv_string
     except NoMarketDataError:
         raise
+    except YFRateLimitError as exc:
+        raise VendorRateLimitError(
+            f"Yahoo Finance rate-limited for {symbol}."
+        ) from exc
     except Exception as exc:
-        return f"Error retrieving stock data for {symbol}: {exc}"
+        raise NoMarketDataError(
+            symbol, canonical, f"yfinance error: {exc}"
+        ) from exc
 
 def get_stock_stats_indicators_window(
     symbol: Annotated[str, "ticker symbol of the company"],
@@ -337,8 +348,14 @@ def get_fundamentals(
 
     except NoMarketDataError:
         raise
-    except Exception as e:
-        return f"Error retrieving fundamentals for {ticker}: {str(e)}"
+    except YFRateLimitError as exc:
+        raise VendorRateLimitError(
+            f"Yahoo Finance rate-limited for {ticker}."
+        ) from exc
+    except Exception as exc:
+        raise NoMarketDataError(
+            ticker, canonical, f"yfinance error: {exc}"
+        ) from exc
 
 
 def get_balance_sheet(
@@ -372,8 +389,14 @@ def get_balance_sheet(
 
     except NoMarketDataError:
         raise
-    except Exception as e:
-        return f"Error retrieving balance sheet for {ticker}: {str(e)}"
+    except YFRateLimitError as exc:
+        raise VendorRateLimitError(
+            f"Yahoo Finance rate-limited for {ticker}."
+        ) from exc
+    except Exception as exc:
+        raise NoMarketDataError(
+            ticker, canonical, f"yfinance error: {exc}"
+        ) from exc
 
 
 def get_cashflow(
@@ -407,8 +430,14 @@ def get_cashflow(
 
     except NoMarketDataError:
         raise
-    except Exception as e:
-        return f"Error retrieving cash flow for {ticker}: {str(e)}"
+    except YFRateLimitError as exc:
+        raise VendorRateLimitError(
+            f"Yahoo Finance rate-limited for {ticker}."
+        ) from exc
+    except Exception as exc:
+        raise NoMarketDataError(
+            ticker, canonical, f"yfinance error: {exc}"
+        ) from exc
 
 
 def get_income_statement(
@@ -442,8 +471,14 @@ def get_income_statement(
 
     except NoMarketDataError:
         raise
-    except Exception as e:
-        return f"Error retrieving income statement for {ticker}: {str(e)}"
+    except YFRateLimitError as exc:
+        raise VendorRateLimitError(
+            f"Yahoo Finance rate-limited for {ticker}."
+        ) from exc
+    except Exception as exc:
+        raise NoMarketDataError(
+            ticker, canonical, f"yfinance error: {exc}"
+        ) from exc
 
 
 def get_insider_transactions(
@@ -456,9 +491,12 @@ def get_insider_transactions(
         data = yf_retry(lambda: ticker_obj.insider_transactions)
 
         # Empty is normal here (many valid symbols have no insider filings),
-        # so report it plainly rather than treating the symbol as invalid.
+        # but the routing layer treats it as "no usable data" so a configured
+        # fallback vendor can be tried.
         if data is None or data.empty:
-            return f"No insider transactions reported for symbol '{canonical}'"
+            raise NoMarketDataError(
+                ticker, canonical, "no insider transactions reported"
+            )
 
         # Convert to CSV string for consistency with other functions
         csv_string = data.to_csv()
@@ -469,5 +507,13 @@ def get_insider_transactions(
 
         return header + csv_string
 
-    except Exception as e:
-        return f"Error retrieving insider transactions for {ticker}: {str(e)}"
+    except NoMarketDataError:
+        raise
+    except YFRateLimitError as exc:
+        raise VendorRateLimitError(
+            f"Yahoo Finance rate-limited for {ticker}."
+        ) from exc
+    except Exception as exc:
+        raise NoMarketDataError(
+            ticker, canonical, f"yfinance error: {exc}"
+        ) from exc

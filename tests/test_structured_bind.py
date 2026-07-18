@@ -55,7 +55,8 @@ class StructuredBindEdgeTests(unittest.TestCase):
             lambda x: x.field,
             "test_agent",
         )
-        self.assertEqual(result, "free text fallback")
+        self.assertIn("STRUCTURED_FALLBACK", result)
+        self.assertIn("free text fallback", result)
 
     def test_invoke_structured_or_freetext_structured_success(self):
         class TestSchema(BaseModel):
@@ -85,7 +86,8 @@ class StructuredBindEdgeTests(unittest.TestCase):
             lambda x: "should not matter",
             "test_agent",
         )
-        self.assertEqual(result, "free text")
+        self.assertIn("STRUCTURED_FALLBACK", result)
+        self.assertIn("free text", result)
 
 
 class TestStructuredFallback(unittest.TestCase):
@@ -101,5 +103,45 @@ class TestStructuredFallback(unittest.TestCase):
             render=lambda x: str(x),
             agent_name="test_agent",
         )
-        self.assertEqual(result, "free-text response")
+        self.assertIn("STRUCTURED_FALLBACK", result)
+        self.assertIn("free-text response", result)
         plain.invoke.assert_called_once_with("test")
+
+    def test_fallback_injects_marker_without_mutating_state(self):
+        class TestSchema(BaseModel):
+            field: str
+
+        structured_llm = MagicMock()
+        structured_llm.invoke.side_effect = ValueError("structured call failed")
+        plain_llm = MagicMock()
+        plain_llm.invoke.return_value = MagicMock(content="free text fallback")
+
+        state = {"_structured_fallback": False}
+        result = invoke_structured_or_freetext(
+            structured_llm,
+            plain_llm,
+            "test prompt",
+            lambda x: x.field,
+            "test_agent",
+            state=state,
+        )
+        self.assertIn("STRUCTURED_FALLBACK", result)
+        self.assertFalse(state["_structured_fallback"])
+
+    def test_fallback_marker_without_state_does_not_raise(self):
+        class TestSchema(BaseModel):
+            field: str
+
+        structured_llm = MagicMock()
+        structured_llm.invoke.side_effect = ValueError("structured call failed")
+        plain_llm = MagicMock()
+        plain_llm.invoke.return_value = MagicMock(content="free text fallback")
+
+        result = invoke_structured_or_freetext(
+            structured_llm,
+            plain_llm,
+            "test prompt",
+            lambda x: x.field,
+            "test_agent",
+        )
+        self.assertIn("STRUCTURED_FALLBACK", result)

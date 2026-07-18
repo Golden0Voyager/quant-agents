@@ -8,6 +8,8 @@ import pytest
 from cli.batch_runner import BatchRunner
 from cli.main import save_report_to_disk
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def sample_final_state():

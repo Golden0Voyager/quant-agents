@@ -233,6 +233,18 @@ def _create_full_test_db(path):
         INSERT INTO index_daily VALUES ('000001','2026-06-18',3075.0,3090.0,3070.0,3085.0,2.8e9);
         INSERT INTO index_daily VALUES ('000001','2026-06-19',3085.0,3100.0,3080.0,3095.0,2.9e9);
         INSERT INTO index_daily VALUES ('399001','2026-06-19',9850.0,9900.0,9820.0,9880.0,3.1e9);
+
+        CREATE TABLE research_report (
+            ts_code TEXT NOT NULL,
+            report_date TEXT NOT NULL,
+            org_name TEXT,
+            rating TEXT,
+            target_price REAL,
+            title TEXT,
+            PRIMARY KEY (ts_code, report_date, org_name)
+        );
+        INSERT INTO research_report VALUES ('600519','2026-06-15','中信证券','买入',1800.0,'贵州茅台深度研究：高端白酒龙头估值重构');
+        INSERT INTO research_report VALUES ('600519','2026-06-10','华泰证券','增持',1750.0,'茅台提价周期开启，业绩确定性强');
     """)
     conn.commit()
     conn.close()
@@ -339,6 +351,32 @@ class GetFundamentalsTests(unittest.TestCase):
                 result = get_fundamentals("600519.SS", "2026-06-19")
                 self.assertIn("600519", result)
                 self.assertIn("贵州茅台", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_dividend_yield_not_scaled_up(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_fundamentals
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.executescript("""
+                CREATE TABLE stock_list (code TEXT PRIMARY KEY, name TEXT, industry TEXT);
+                INSERT INTO stock_list VALUES ('600519', '贵州茅台', '白酒');
+                CREATE TABLE fundamentals (
+                    ts_code TEXT, trade_date TEXT, dividend_yield REAL,
+                    PRIMARY KEY (ts_code, trade_date)
+                );
+                INSERT INTO fundamentals VALUES ('600519','2026-06-19',5.458);
+            """)
+            conn.commit()
+            conn.close()
+            with _PatchedVendor(db_path):
+                result = get_fundamentals("600519.SS", "2026-06-19")
+                # dividend_yield in quant_core.db is already a percent number
+                self.assertIn("股息率: 5.46%", result)
+                self.assertNotIn("545.80%", result)
         finally:
             os.unlink(db_path)
 
@@ -1066,6 +1104,258 @@ class GetIndexDailyTests(unittest.TestCase):
                     "get_index_daily", "000001.SS", "2026-06-15", "2026-06-19"
                 )
             self.assertIn("NO_DATA_AVAILABLE", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_missing_columns_raises_no_market_data_error(self):
+        """Missing required columns (e.g. Date, Open) should raise NoMarketDataError."""
+        import pandas as pd
+
+        from tradingagents.dataflows.errors import NoMarketDataError
+        from tradingagents.dataflows.smartmoney_vendor import get_index_daily
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with (
+                _PatchedVendor(db_path),
+                patch(
+                    "tradingagents.dataflows.smartmoney_vendor._df_from_sql",
+                    return_value=pd.DataFrame({
+                        "Date": ["2026-06-19"],
+                        "Open": [3085.0],
+                        "Low": [3080.0],
+                        "Close": [3095.0],
+                        "Volume": [2.9e9],
+                        # Missing 'High' column
+                    }),
+                ) as mock_df,
+                self.assertRaises(NoMarketDataError) as ctx,
+            ):
+                get_index_daily("000001.SS", "2026-06-15", "2026-06-19")
+            self.assertIn("schema mismatch", str(ctx.exception))
+            self.assertIn("missing columns", str(ctx.exception))
+            self.assertIn("High", str(ctx.exception))
+            mock_df.assert_called_once()
+        finally:
+            os.unlink(db_path)
+
+    def test_non_numeric_column_raises_no_market_data_error(self):
+        """A non-numeric column (e.g. 'Open' as string) should raise NoMarketDataError."""
+        import pandas as pd
+
+        from tradingagents.dataflows.errors import NoMarketDataError
+        from tradingagents.dataflows.smartmoney_vendor import get_index_daily
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with (
+                _PatchedVendor(db_path),
+                patch(
+                    "tradingagents.dataflows.smartmoney_vendor._df_from_sql",
+                    return_value=pd.DataFrame({
+                        "Date": ["2026-06-19"],
+                        "Open": [3085.0],
+                        "High": [3100.0],
+                        "Low": [3080.0],
+                        "Close": [3095.0],
+                        "Volume": ["string_value"],  # Not numeric!
+                    }),
+                ) as mock_df,
+                self.assertRaises(NoMarketDataError) as ctx,
+            ):
+                get_index_daily("000001.SS", "2026-06-15", "2026-06-19")
+            self.assertIn("schema mismatch", str(ctx.exception))
+            self.assertIn("is not numeric", str(ctx.exception))
+            self.assertIn("Volume", str(ctx.exception))
+            mock_df.assert_called_once()
+        finally:
+            os.unlink(db_path)
+
+
+@pytest.mark.unit
+class GetInstitutionalHoldingsTests(unittest.TestCase):
+    """Tests for get_institutional_holdings — empty data + JSON parse edge cases."""
+
+    def test_raises_on_no_data(self):
+        """Querying a ticker with no holdings data raises RuntimeError."""
+        from tradingagents.dataflows.smartmoney_vendor import (
+            get_institutional_holdings,
+        )
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path), self.assertRaises(RuntimeError) as ctx:
+                get_institutional_holdings("999999.SS")
+            self.assertIn("institutional-holdings", str(ctx.exception))
+            self.assertIn("999999.SS", str(ctx.exception))
+        finally:
+            os.unlink(db_path)
+
+    def test_json_decode_error_does_not_crash(self):
+        """When type_counts contains invalid JSON, the try/except pass should swallow it."""
+        from tradingagents.dataflows.smartmoney_vendor import (
+            get_institutional_holdings,
+        )
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.executescript("""
+                CREATE TABLE institutional_holdings (
+                    ts_code TEXT NOT NULL,
+                    report_date INTEGER NOT NULL,
+                    institution_count INTEGER,
+                    type_counts TEXT,
+                    PRIMARY KEY (ts_code, report_date)
+                );
+                INSERT INTO institutional_holdings VALUES ('600519',20260331,1372,'NOT_VALID_JSON');
+            """)
+            conn.close()
+            with _PatchedVendor(db_path):
+                result = get_institutional_holdings("600519.SS")
+            self.assertIn("机构持股", result)
+            self.assertIn("1,372", result)
+            self.assertNotIn("NOT_VALID_JSON", result)  # invalid JSON is silently skipped
+        finally:
+            os.unlink(db_path)
+
+    def test_type_error_on_non_dict_type_counts_does_not_crash(self):
+        """When type_counts is a bare integer (not a dict), TypeError is caught silently."""
+        from tradingagents.dataflows.smartmoney_vendor import (
+            get_institutional_holdings,
+        )
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.executescript("""
+                CREATE TABLE institutional_holdings (
+                    ts_code TEXT NOT NULL,
+                    report_date INTEGER NOT NULL,
+                    institution_count INTEGER,
+                    type_counts TEXT,
+                    PRIMARY KEY (ts_code, report_date)
+                );
+                INSERT INTO institutional_holdings VALUES ('600519',20260331,1372,12345);
+            """)
+            conn.close()
+            with _PatchedVendor(db_path):
+                result = get_institutional_holdings("600519.SS")
+            self.assertIn("机构持股", result)
+            self.assertIn("1,372", result)
+        finally:
+            os.unlink(db_path)
+
+
+# ===========================================================================
+# get_research_reports
+# ===========================================================================
+
+
+@pytest.mark.unit
+class GetResearchReportsTests(unittest.TestCase):
+    """Tests for smartmoney_vendor.get_research_reports."""
+
+    def test_returns_data_when_db_has_reports(self):
+        """Querying a ticker with research reports returns formatted data."""
+        from tradingagents.dataflows.smartmoney_vendor import get_research_reports
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = get_research_reports("600519.SS")
+            self.assertIn("Research Reports", result)
+            self.assertIn("quant_core.db", result)
+            self.assertIn("中信证券", result)
+            self.assertIn("华泰证券", result)
+            self.assertIn("买入", result)
+            self.assertIn("1800.0", result)
+            self.assertIn("贵州茅台深度研究", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_raises_when_table_missing(self):
+        """When the research_report table does not exist, raises RuntimeError."""
+        from tradingagents.dataflows.smartmoney_vendor import get_research_reports
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_test_db(db_path)  # No research_report table
+            with _PatchedVendor(db_path), self.assertRaises(RuntimeError) as ctx:
+                get_research_reports("600519.SS")
+            self.assertIn("No research reports", str(ctx.exception))
+            self.assertIn("600519.SS", str(ctx.exception))
+        finally:
+            os.unlink(db_path)
+
+    def test_raises_when_no_data_for_ticker(self):
+        """Querying a ticker with no research report data raises RuntimeError."""
+        from tradingagents.dataflows.smartmoney_vendor import get_research_reports
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path), self.assertRaises(RuntimeError) as ctx:
+                get_research_reports("999999.SS")
+            self.assertIn("research reports", str(ctx.exception))
+            self.assertIn("999999", str(ctx.exception))
+        finally:
+            os.unlink(db_path)
+
+
+@pytest.mark.unit
+class CurrDateFilteringTests(unittest.TestCase):
+    """P1-3: smartmoney functions must not return data after curr_date."""
+
+    def test_get_fund_flow_excludes_future_dates(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_fund_flow
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = get_fund_flow("600519.SS", curr_date="2026-06-18")
+            self.assertIn("2026-06-18", result)
+            self.assertNotIn("2026-06-19", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_get_research_reports_excludes_future_dates(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_research_reports
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = get_research_reports("600519.SS", curr_date="2026-06-12")
+            self.assertIn("2026-06-10", result)
+            self.assertNotIn("2026-06-15", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_get_margin_trading_raises_when_all_future(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_margin_trading
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
+                get_margin_trading("600519.SS", curr_date="2026-06-18")
         finally:
             os.unlink(db_path)
 

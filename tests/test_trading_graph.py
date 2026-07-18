@@ -91,6 +91,7 @@ def _make_graph():
             "benchmark_map": {"": "SPY"},
             "checkpoint_enabled": False,
         }
+        g.callbacks = []
         g.memory_log = MagicMock()
         g.reflector = MagicMock()
         g.log_states_dict = {}
@@ -351,6 +352,13 @@ class CreateToolNodesTests(unittest.TestCase):
         for name in ("get_news", "get_global_news", "get_insider_transactions", "get_company_announcements"):
             with self.subTest(tool=name):
                 self.assertIn(name, tool_names)
+
+    def test_news_node_has_research_reports(self):
+        """get_research_reports must be registered in the news ToolNode so the LLM can call it."""
+        g = self._make_graph()
+        nodes = g._create_tool_nodes()
+        tool_names = list(nodes["news"].tools_by_name.keys())
+        self.assertIn("get_research_reports", tool_names)
 
     def test_governance_node_has_governance_tools(self):
         g = self._make_graph()
@@ -835,6 +843,165 @@ class ConstructorTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# _create_fallback_llm / _fallback_to_legacy
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class CreateFallbackLlmTests(unittest.TestCase):
+    """Tests for _create_fallback_llm and _fallback_to_legacy.
+
+    Covers lines 207-225 (except ValueError handling) and 233-240
+    (_fallback_to_legacy method).
+    """
+
+    def _make_graph(self, config_overrides=None):
+        from tradingagents.graph.trading_graph import TradingAgentsGraph
+        with patch.object(TradingAgentsGraph, "__init__", return_value=None):
+            g = TradingAgentsGraph.__new__(TradingAgentsGraph)
+            g.config = {
+                "llm_provider": "sensenova",
+                "deep_think_llm": "deepseek-v4-flash",
+                "quick_think_llm": "sensenova-6.7-flash-lite",
+                "backend_url": "https://api.example.com",
+                "deep_think_fallback": [
+                    {"provider": "sensenova", "model": "deepseek-v4-flash"},
+                    {"provider": "modelscope", "model": "deepseek-ai/DeepSeek-V4-Pro"},
+                ],
+                "quick_think_fallback": [
+                    {"provider": "sensenova", "model": "sensenova-6.7-flash-lite"},
+                    {"provider": "modelscope", "model": "stepfun-ai/Step-3.7-Flash"},
+                ],
+                **(config_overrides or {}),
+            }
+            return g
+
+    def test_primary_provider_missing_api_key_logs_warning(self):
+        """Primary tier (i==0) ValueError with API key msg → logger.warning + continue."""
+        g = self._make_graph()
+        mock_client = MagicMock()
+        mock_client.get_llm.return_value = "fallback_llm"
+
+        with patch("tradingagents.graph.trading_graph.create_llm_client") as mock_create:
+            # Primary (i=0) fails with API key error, fallback (i=1) succeeds
+            mock_create.side_effect = [
+                ValueError("API key not set for sensenova"),  # primary
+                mock_client,  # fallback
+            ]
+            with patch("tradingagents.graph.trading_graph.logger") as mock_logger:
+                result = g._create_fallback_llm("quick_think_fallback", {})
+
+        self.assertEqual(result, "fallback_llm")
+        # Primary failure logged as warning (i==0)
+        mock_logger.warning.assert_called_once()
+        warning_msg = mock_logger.warning.call_args[0][0]
+        self.assertIn("API key", warning_msg)
+        # Fallback success means no info log
+        mock_logger.info.assert_not_called()
+
+    def test_fallback_provider_missing_api_key_logs_info(self):
+        """Fallback tier (i>0) ValueError with API key msg → logger.info + continue."""
+        g = self._make_graph()
+        mock_client = MagicMock()
+        mock_client.get_llm.return_value = "primary_llm"
+
+        with patch("tradingagents.graph.trading_graph.create_llm_client") as mock_create:
+            # Primary succeeds, fallback (i=1) fails with API key error
+            mock_create.side_effect = [
+                mock_client,
+                ValueError("API key not set"),
+            ]
+            with patch("tradingagents.graph.trading_graph.logger") as mock_logger:
+                result = g._create_fallback_llm("quick_think_fallback", {})
+
+        # Only primary succeeded, len=1 → returns primary directly
+        self.assertEqual(result, "primary_llm")
+        # Fallback API key miss logged as info
+        mock_logger.info.assert_called_once()
+        info_msg = mock_logger.info.call_args[0][0]
+        self.assertIn("Skipping fallback tier", info_msg)
+
+    def test_all_tiers_missing_api_key_falls_to_legacy(self):
+        """When all tiers fail due to API key, falls back to _fallback_to_legacy."""
+        g = self._make_graph()
+        mock_client = MagicMock()
+        mock_client.get_llm.return_value = "legacy_llm"
+
+        with patch("tradingagents.graph.trading_graph.create_llm_client") as mock_create:
+            # 2 fallback tiers + 1 _fallback_to_legacy call = 3 side_effects
+            mock_create.side_effect = [
+                ValueError("API key not set"),
+                ValueError("API key not set"),
+                mock_client,
+            ]
+            with patch("tradingagents.graph.trading_graph.logger"):
+                result = g._create_fallback_llm("quick_think_fallback", {})
+
+        # All tiers failed → falls to _fallback_to_legacy → returns an LLM
+        self.assertEqual(result, "legacy_llm")
+
+    def test_no_fallback_config_calls_fallback_to_legacy_directly(self):
+        """When config_key is not in config, calls _fallback_to_legacy."""
+        g = self._make_graph()
+        # Make a config that doesn't include the fallback key
+        g.config.pop("quick_think_fallback", None)
+
+        with patch("tradingagents.graph.trading_graph.create_llm_client") as mock_create:
+            mock_client = MagicMock()
+            mock_client.get_llm.return_value = "legacy_llm"
+            mock_create.return_value = mock_client
+
+            result = g._create_fallback_llm("quick_think_fallback", {})
+            self.assertEqual(result, "legacy_llm")
+
+    def test_fallback_to_legacy_deep_think_uses_deep_model(self):
+        """_fallback_to_legacy with 'deep' in config_key → deep_think_llm model."""
+        g = self._make_graph()
+
+        with patch("tradingagents.graph.trading_graph.create_llm_client") as mock_create:
+            mock_client = MagicMock()
+            mock_client.get_llm.return_value = "deep_legacy"
+            mock_create.return_value = mock_client
+
+            result = g._fallback_to_legacy("deep_think_fallback", {})
+            self.assertEqual(result, "deep_legacy")
+            mock_create.assert_called_once_with(
+                provider="sensenova",
+                model="deepseek-v4-flash",
+                base_url="https://api.example.com",
+            )
+
+    def test_non_api_key_value_error_propagates(self):
+        """ValueError not about API key → re-raised (line 222)."""
+        g = self._make_graph()
+
+        with patch("tradingagents.graph.trading_graph.create_llm_client") as mock_create:
+            mock_create.side_effect = ValueError("unexpected error")
+            with (
+                patch("tradingagents.graph.trading_graph.logger"),
+                self.assertRaises(ValueError),
+            ):
+                g._create_fallback_llm("quick_think_fallback", {})
+
+    def test_fallback_to_legacy_quick_think_uses_quick_model(self):
+        """_fallback_to_legacy without 'deep' in config_key → quick_think_llm model."""
+        g = self._make_graph()
+
+        with patch("tradingagents.graph.trading_graph.create_llm_client") as mock_create:
+            mock_client = MagicMock()
+            mock_client.get_llm.return_value = "quick_legacy"
+            mock_create.return_value = mock_client
+
+            result = g._fallback_to_legacy("quick_think_fallback", {})
+            self.assertEqual(result, "quick_legacy")
+            mock_create.assert_called_once_with(
+                provider="sensenova",
+                model="sensenova-6.7-flash-lite",
+                base_url="https://api.example.com",
+            )
+
+
+# ---------------------------------------------------------------------------
 # _fetch_crypto_returns (pure logic via patching network calls)
 # ---------------------------------------------------------------------------
 
@@ -1012,6 +1179,55 @@ class FetchReturnsTests(unittest.TestCase):
 
         self.assertEqual(days, 1)
         self.assertAlmostEqual(raw, (101.0 - 100.0) / 100.0)
+
+    def test_ashare_path_uses_load_ohlcv(self):
+        """A-share ticker uses load_ohlcv instead of yfinance (lines 357-364)."""
+        g = self._make_graph()
+        mock_ohlcv = pd.DataFrame({
+            "Date": ["2026-06-15", "2026-06-16", "2026-06-17", "2026-06-18", "2026-06-19", "2026-06-22"],
+            "Close": [1500.0, 1510.0, 1520.0, 1530.0, 1540.0, 1550.0],
+        })
+        mock_bench = pd.DataFrame({
+            "Close": [3000.0, 3010.0, 3020.0, 3030.0, 3040.0, 3050.0],
+        })
+
+        mock_bench_obj = MagicMock()
+        mock_bench_obj.history.return_value = mock_bench
+
+        with (
+            patch("yfinance.Ticker", return_value=mock_bench_obj),
+            patch("tradingagents.dataflows.akshare_common.is_a_share_ticker", return_value=True),
+            patch("tradingagents.dataflows.stockstats_utils.load_ohlcv", return_value=mock_ohlcv),
+        ):
+            raw, alpha, days = g._fetch_returns(
+                "600519.SS", "2026-06-15", holding_days=5, benchmark="000001.SS"
+            )
+
+        self.assertIsNotNone(raw)
+        self.assertAlmostEqual(raw, (1550.0 - 1500.0) / 1500.0)
+
+    def test_ashare_path_load_ohlcv_fails_uses_empty_df(self):
+        """When load_ohlcv returns None, falls to empty DataFrame → insufficient data → None."""
+        g = self._make_graph()
+        mock_bench = pd.DataFrame({
+            "Close": [3000.0, 3010.0],
+        })
+
+        mock_bench_obj = MagicMock()
+        mock_bench_obj.history.return_value = mock_bench
+
+        with (
+            patch("yfinance.Ticker", return_value=mock_bench_obj),
+            patch("tradingagents.dataflows.akshare_common.is_a_share_ticker", return_value=True),
+            patch("tradingagents.dataflows.stockstats_utils.load_ohlcv", return_value=None),
+        ):
+            raw, alpha, days = g._fetch_returns(
+                "600519.SS", "2026-06-15", holding_days=5, benchmark="000001.SS"
+            )
+
+        self.assertIsNone(raw)
+        self.assertIsNone(alpha)
+        self.assertIsNone(days)
 
 
 # ---------------------------------------------------------------------------
@@ -1266,6 +1482,56 @@ class RunGraphTests(unittest.TestCase):
         mock_build.assert_called_once_with("AAPL", "2026-06-15", refresh=True)
         self.assertEqual(captured_state["verified_market_snapshot"], "FRESH_SNAPSHOT")
 
+    def test_snapshot_build_exception_logs_warning_and_continues(self):
+        """When build_verified_market_snapshot raises, the exception should be
+        logged and the graph should continue without a snapshot (lines 634-635)."""
+        g = _make_graph()
+        g.propagator.create_initial_state.return_value["verified_market_snapshot"] = ""
+        g.memory_log.get_past_context.return_value = "past"
+        g.resolve_instrument_context = MagicMock(return_value="ctx")
+
+        def mock_stream(init_state, **kwargs):
+            yield {"final_node": {
+                "market_report": "",
+                "sentiment_report": "",
+                "news_report": "",
+                "fundamentals_report": "",
+                "governance_report": "",
+                "industry_report": "",
+                "investment_debate_state": {
+                    "bull_history": [], "bear_history": [],
+                    "history": [], "current_response": "",
+                    "judge_decision": "",
+                },
+                "trader_investment_plan": {},
+                "risk_debate_state": {
+                    "aggressive_history": [], "conservative_history": [],
+                    "neutral_history": [], "history": [],
+                    "judge_decision": "",
+                },
+                "investment_plan": {},
+                "final_trade_decision": "Buy",
+            }}
+
+        g.graph.stream = mock_stream
+
+        with patch(
+            "tradingagents.dataflows.market_data_validator.build_verified_market_snapshot",
+            side_effect=RuntimeError("snapshot build failed"),
+        ) as mock_build, patch(
+            "tradingagents.graph.trading_graph.logger"
+        ) as mock_logger:
+            state, signal = g._run_graph("AAPL", "2026-06-15")
+
+        # Graph should still complete successfully
+        self.assertEqual(state["final_trade_decision"], "Buy")
+        self.assertEqual(signal, "Buy")
+        mock_build.assert_called_once()
+        # Warning should be logged
+        mock_logger.warning.assert_called_once()
+        warning_msg = mock_logger.warning.call_args[0][0]
+        self.assertIn("Could not build verified market snapshot", warning_msg)
+
     def test_checkpoint_thread_id_injected(self):
         g = _make_graph()
         g.config["checkpoint_enabled"] = True
@@ -1352,6 +1618,8 @@ class PropagateTests(unittest.TestCase):
             mock_pending.assert_called_once_with("AAPL", asset_type="stock")
             mock_run.assert_called_once_with(
                 "AAPL", "2026-06-15", asset_type="stock", confirmed_name="Apple Inc.",
+                on_chunk=None, holdings_context=None, transactions_context=None,
+                company_display_name=None,
             )
 
     def test_with_checkpoint_enabled_and_cached_result(self):

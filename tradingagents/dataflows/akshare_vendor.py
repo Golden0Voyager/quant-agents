@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import math
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Annotated
 
 import akshare as ak
@@ -23,6 +23,7 @@ from .akshare_common import (
     safe_float,
     to_akshare_symbol,
 )
+from .errors import NoMarketDataError
 from .stockstats_utils import _clean_dataframe
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,27 @@ def _akshare_task_context(task_desc: str):
         _current_akshare_task = None
 
 
+def _filter_df_by_date(
+    df: pd.DataFrame | None,
+    date_col: str,
+    curr_date: str | None,
+) -> pd.DataFrame | None:
+    """Keep rows whose ``date_col`` is on or before ``curr_date``.
+
+    No-op when *df* is None/empty or ``curr_date`` is not provided.
+    The date column is coerced with ``pd.to_datetime`` before comparison.
+    """
+    if df is None or df.empty or not curr_date:
+        return df
+    if date_col not in df.columns:
+        return df
+    parsed = pd.to_datetime(df[date_col], errors="coerce")
+    cutoff = pd.to_datetime(curr_date, errors="coerce")
+    if pd.isna(cutoff):
+        return df
+    return df[parsed <= cutoff].copy()
+
+
 def get_stock_data(
     symbol: Annotated[str, "A-share ticker e.g. 600519.SS"],
     start_date: Annotated[str, "Start date YYYY-MM-DD"],
@@ -99,9 +121,9 @@ def get_stock_data(
         )
 
     if df is None or df.empty:
-        return (
-            f"No data found for symbol '{symbol}' between "
-            f"{start_date} and {end_date}"
+        raise NoMarketDataError(
+            symbol,
+            detail=f"no rows between {start_date} and {end_date} via akshare",
         )
 
     rename_map = {
@@ -130,12 +152,13 @@ def get_stock_data(
 
 
 def _safe_call(func, *args, **kwargs):
-    """Invoke an akshare function, returning None on any exception."""
-    try:
-        return func(*args, **kwargs)
-    except Exception as exc:
-        logger.debug("akshare call %s failed: %s", getattr(func, "__name__", "?"), exc)
-        return None
+    """Invoke an akshare function with network-error retry.
+
+    Transient network/parse errors are retried; once retries are exhausted the
+    exception propagates so ``route_to_vendor`` can fall back to the next vendor
+    instead of treating the failure as empty data.
+    """
+    return _akshare_retry(lambda: func(*args, **kwargs))
 
 
 def _yjbb_report_date_for(curr_date: str | None) -> str:
@@ -211,7 +234,9 @@ def get_fundamentals(
                 lines.append(f"- {label}: {v:.2f}{unit}")
 
     if len(lines) <= 3:
-        return f"No fundamentals available for {symbol} via akshare."
+        raise NoMarketDataError(
+            symbol, detail=f"no fundamentals available for {symbol} via akshare"
+        )
     return "\n".join(lines)
 
 
@@ -239,7 +264,9 @@ def get_balance_sheet(
         df = ak.stock_balance_sheet_by_report_em(symbol=code)
 
     if df is None or df.empty:
-        return f"No balance sheet available for {symbol} via akshare."
+        raise NoMarketDataError(
+            symbol, detail=f"no balance sheet available for {symbol} via akshare"
+        )
 
     latest = df.iloc[0].to_dict()
     period = latest.get("REPORT_DATE", "N/A")
@@ -262,7 +289,9 @@ def get_cashflow(
         df = ak.stock_cash_flow_sheet_by_report_em(symbol=code)
 
     if df is None or df.empty:
-        return f"No cash flow statement available for {symbol} via akshare."
+        raise NoMarketDataError(
+            symbol, detail=f"no cash flow statement available for {symbol} via akshare"
+        )
 
     latest = df.iloc[0].to_dict()
     period = latest.get("REPORT_DATE", "N/A")
@@ -325,7 +354,9 @@ def get_income_statement(
         df = ak.stock_profit_sheet_by_report_em(symbol=code)
 
     if df is None or df.empty:
-        return f"No income statement available for {symbol} via akshare."
+        raise NoMarketDataError(
+            symbol, detail=f"no income statement available for {symbol} via akshare"
+        )
 
     latest = df.iloc[0].to_dict()
     period = latest.get("REPORT_DATE", "N/A")
@@ -369,7 +400,9 @@ def get_indicators(
         )
 
     if df is None or df.empty:
-        return f"No K-line data for {symbol} to compute {indicator}."
+        raise NoMarketDataError(
+            symbol, detail=f"no K-line data for {symbol} to compute {indicator} via akshare"
+        )
 
     df = df.rename(columns={
         "日期": "Date", "开盘": "Open", "收盘": "Close",
@@ -410,7 +443,10 @@ def get_news(
         df = _safe_call(ak.stock_news_em, symbol=code)
 
     if df is None or df.empty:
-        return f"No news found for {symbol} between {start_date} and {end_date} via akshare."
+        raise NoMarketDataError(
+            symbol,
+            detail=f"no news found for {symbol} between {start_date} and {end_date} via akshare",
+        )
 
     # Filter by date
     df["发布时间"] = pd.to_datetime(df["发布时间"], errors="coerce")
@@ -418,14 +454,17 @@ def get_news(
     df = df[mask]
 
     if df.empty:
-        return f"No news found for {symbol} between {start_date} and {end_date} via akshare."
+        raise NoMarketDataError(
+            symbol,
+            detail=f"no news found for {symbol} between {start_date} and {end_date} via akshare",
+        )
 
     lines = [
         f"## {symbol.upper()} News from {start_date} to {end_date} (source: akshare / Eastmoney)\n",
         f"Total articles: {len(df)}\n",
     ]
     for _, row in df.iterrows():
-        lines.append(f"### {row['新闻标题']} (source: {row['文章来源']})")
+        lines.append(f"### {row.get('新闻标题', 'N/A')} (source: {row.get('文章来源', 'N/A')})")
         if row.get("新闻内容"):
             content = str(row["新闻内容"]).strip()
             if content:
@@ -434,6 +473,71 @@ def get_news(
             lines.append(f"Published: {row['发布时间']}")
         if row.get("新闻链接"):
             lines.append(f"Link: {row['新闻链接']}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def get_global_news(
+    curr_date: str,
+    look_back_days: int | None = None,
+    limit: int | None = None,
+) -> str:
+    """Fetch broad market / global news from Eastmoney via akshare (fallback).
+
+    Uses a representative index ticker (SH000001, Shanghai Composite) through
+    ``ak.stock_news_em`` to get market-wide Eastmoney news articles.
+
+    Args:
+        curr_date: Current date in yyyy-mm-dd format (used to cap lookback).
+        look_back_days: Number of days to look back (default 7).
+        limit: Maximum number of articles (default 20).
+
+    Returns:
+        Formatted string containing recent news articles.
+    """
+    if look_back_days is None:
+        look_back_days = 7
+    if limit is None:
+        limit = 20
+
+    start_dt = datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=look_back_days)
+    end_dt = datetime.strptime(curr_date, "%Y-%m-%d") + timedelta(days=1)
+
+    # Use Shanghai Composite index as a proxy for broad market news
+    with _akshare_task_context("📰 市场综合新闻"), no_proxy():
+        df = _safe_call(ak.stock_news_em, symbol="000001")
+
+    if df is None or df.empty:
+        raise NoMarketDataError(
+            curr_date, detail="no global/market news available via akshare fallback"
+        )
+
+    df["发布时间"] = pd.to_datetime(df["发布时间"], errors="coerce")
+    mask = (df["发布时间"] >= start_dt) & (df["发布时间"] <= end_dt)
+    df = df[mask].head(limit)
+
+    if df.empty:
+        raise NoMarketDataError(
+            curr_date, detail="no global/market news available via akshare fallback"
+        )
+
+    lines = [
+        "## Global / Market News (source: akshare / Eastmoney fallback)",
+        f"Period: {start_dt.date()} to {curr_date}",
+        f"Total articles: {len(df)}",
+        "",
+    ]
+    for _, row in df.iterrows():
+        lines.append(f"### {row.get('新闻标题', 'N/A')}")
+        if row.get("文章来源"):
+            lines.append(f"Source: {row.get('文章来源', 'N/A')}")
+        if row.get("新闻内容"):
+            content = str(row["新闻内容"]).strip()
+            if content:
+                lines.append(content)
+        if row.get("发布时间"):
+            lines.append(f"Published: {row['发布时间']}")
         lines.append("")
 
     return "\n".join(lines)
@@ -449,7 +553,10 @@ def get_insider_transactions(
         df = _safe_call(ak.stock_shareholder_change_ths, symbol=code)
 
     if df is None or df.empty:
-        return f"No shareholder change data found for {symbol} via akshare."
+        raise NoMarketDataError(
+            symbol,
+            detail=f"no shareholder change data found for {symbol} via akshare",
+        )
 
     lines = [
         f"## {symbol.upper()} Shareholder Changes (source: akshare / 同花顺)\n",
@@ -485,9 +592,9 @@ def get_company_announcements(
         )
 
     if df is None or df.empty:
-        return (
-            f"No company announcements found for {symbol} "
-            f"between {start_date} and {end_date} via akshare."
+        raise NoMarketDataError(
+            symbol,
+            detail=f"no company announcements found for {symbol} between {start_date} and {end_date} via akshare",
         )
 
     lines = [
@@ -513,7 +620,10 @@ def get_company_announcements(
 # ---------------------------------------------------------------------------
 
 
-def get_fund_flow(symbol: str) -> str:
+def get_fund_flow(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch A-share individual stock fund flow (主力/超大单/大单/中单/小单)."""
     code = to_akshare_symbol(symbol, "bare")
     prefix = to_akshare_symbol(symbol, "lower_prefix")[:2]  # "sh" or "sz"
@@ -521,8 +631,12 @@ def get_fund_flow(symbol: str) -> str:
     with _akshare_task_context(f"💰 {symbol} 资金流向"), no_proxy():
         df = _safe_call(ak.stock_individual_fund_flow, stock=code, market=prefix)
 
+    df = _filter_df_by_date(df, "日期", curr_date)
+
     if df is None or df.empty:
-        return f"No fund flow data found for {symbol} via akshare."
+        raise NoMarketDataError(
+            symbol, detail=f"no fund flow data found for {symbol} via akshare"
+        )
 
     # Keep last 5 trading days
     df = df.head(5)
@@ -545,14 +659,22 @@ def get_fund_flow(symbol: str) -> str:
     return "\n".join(lines)
 
 
-def get_northbound_hold(symbol: str) -> str:
+def get_northbound_hold(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch A-share northbound (Stock Connect) holding data."""
     code = to_akshare_symbol(symbol, "bare")
     with _akshare_task_context(f"🌏 {symbol} 北向资金"), no_proxy():
         df = _safe_call(ak.stock_hsgt_individual_em, symbol=code)
 
+    df = _filter_df_by_date(df, "持股日期", curr_date)
+
     if df is None or df.empty:
-        return f"No northbound holding data found for {symbol} via akshare."
+        raise NoMarketDataError(
+            symbol,
+            detail=f"no northbound holding data found for {symbol} via akshare",
+        )
 
     df = df.head(5)
     lines = [
@@ -592,9 +714,9 @@ def get_restricted_release(
         )
 
     if df is None or df.empty:
-        return (
-            f"No restricted share release data found for {symbol} "
-            f"between {start_date} and {end_date} via akshare."
+        raise NoMarketDataError(
+            symbol,
+            detail=f"no restricted share release data found for {symbol} between {start_date} and {end_date} via akshare",
         )
 
     # Client-side filter by stock code
@@ -602,9 +724,9 @@ def get_restricted_release(
         df = df[df["股票代码"].astype(str).str.strip() == code]
 
     if df.empty:
-        return (
-            f"No restricted share release events for {symbol} "
-            f"between {start_date} and {end_date}."
+        raise NoMarketDataError(
+            symbol,
+            detail=f"no restricted share release events for {symbol} between {start_date} and {end_date}",
         )
 
     lines = [
@@ -639,7 +761,10 @@ def get_industry_valuation(symbol: str) -> str:
         value_df = _safe_call(ak.stock_value_em, symbol=code)
 
     if info_df is None or info_df.empty:
-        return f"No individual info data available for {symbol} via akshare."
+        raise NoMarketDataError(
+            symbol,
+            detail=f"no individual info data available for {symbol} via akshare",
+        )
 
     info = dict(zip(info_df["item"], info_df["value"], strict=False))
     industry = info.get("行业", "")
@@ -716,8 +841,6 @@ def get_macro_indicators(
     Raises NoMarketDataError for indicators not supported by akshare, so the
     vendor fallback chain (e.g. FRED) is tried next.
     """
-    from tradingagents.dataflows.errors import NoMarketDataError
-
     indicator = indicator.lower().strip()
 
     with _akshare_task_context(f"📈 宏观指标: {indicator}"), no_proxy():
@@ -744,7 +867,10 @@ def get_macro_indicators(
             )
 
     if df is None or df.empty:
-        return f"No macro data available for indicator '{indicator}' via akshare."
+        raise NoMarketDataError(
+            indicator,
+            detail=f"no macro data available for indicator '{indicator}' via akshare",
+        )
 
     # Keep last 6 periods
     df = df.head(6)
@@ -765,84 +891,90 @@ def get_macro_indicators(
 # ---------------------------------------------------------------------------
 
 
-def _nearest_trade_date() -> str:
-    """Return the most recent trading date as YYYYMMDD."""
+def _nearest_trade_date(base: str | None = None) -> str:
+    """Return the most recent trading date as YYYYMMDD, optionally before *base* (YYYYMMDD)."""
     df = _safe_call(ak.tool_trade_date_hist_sina)
+    if base is not None:
+        # Defensive: ensure base has ≥8 chars for YYYYMMDD parsing
+        base = base[:8]
+        if len(base) < 8:
+            logger.warning("_nearest_trade_date received short base=%r, falling back to now", base)
+            base = None
     if df is None or df.empty:
-        return datetime.now().strftime("%Y%m%d")
+        return (base or datetime.now().strftime("%Y%m%d"))[:8]
     date_col = "trade_date" if "trade_date" in df.columns else df.columns[0]
-    today = datetime.now()
-    # Normalise to string for safe comparison (akshare may return datetime.date)
+    target = datetime.strptime(base, "%Y%m%d") if base else datetime.now()
     try:
-        valid = df[df[date_col] <= today.strftime("%Y-%m-%d")]
+        valid = df[df[date_col] <= target.strftime("%Y-%m-%d")]
     except TypeError:
-        # date_col is datetime.date / Timestamp — use date comparison
-        valid = df[pd.to_datetime(df[date_col]).dt.date <= today.date()]
+        valid = df[pd.to_datetime(df[date_col]).dt.date <= target.date()]
     if valid.empty:
-        return today.strftime("%Y%m%d")
+        return target.strftime("%Y%m%d")
     latest = valid[date_col].max()
     if hasattr(latest, "strftime"):
         return latest.strftime("%Y%m%d")
     return str(latest).replace("-", "")
 
 
-def get_margin_trading(symbol: str) -> str:
+def get_margin_trading(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch A-share margin-trading (融资融券) data via akshare.
 
     Uses SSE/SZSE daily margin-trading detail tables and filters to the
-    requested stock. Falls back with a guided error when the symbol is
-    not a margin-trading eligible A-share or when no data is available.
+    requested stock. If the most recent trading day has no data, tries up
+    to 5 prior trading days to handle stale-trade-date edge cases.
     """
     code = to_akshare_symbol(symbol, "bare")
     exchange = to_akshare_symbol(symbol, "lower_prefix")[:2]
-    date_str = _nearest_trade_date()
 
-    with _akshare_task_context(f"📈 {symbol} 融资融券"), no_proxy():
-        if exchange == "sh":
-            df = _safe_call(ak.stock_margin_detail_sse, date=date_str)
-            if df is None or df.empty:
-                return f"No margin-trading data for SSE on {date_str} via akshare."
-            stock_col = "标的证券代码"
-        elif exchange == "sz":
-            df = _safe_call(ak.stock_margin_detail_szse, date=date_str)
-            if df is None or df.empty:
-                return f"No margin-trading data for SZSE on {date_str} via akshare."
-            stock_col = "证券代码"
-        else:
-            return (
-                f"Margin-trading data for {symbol} ({exchange}) is not available "
-                f"via akshare. Only SSE (sh) and SZSE (sz) A-shares are supported. "
-                f"Consider enabling smartmoney_db for local cached data."
-            )
+    if exchange not in ("sh", "sz"):
+        return (
+            f"Margin-trading data for {symbol} ({exchange}) is not available "
+            f"via akshare. Only SSE (sh) and SZSE (sz) A-shares are supported. "
+            f"Consider enabling smartmoney_db for local cached data."
+        )
 
-        row = df[df[stock_col] == code]
-        if row.empty:
-            return (
-                f"No margin-trading data found for {symbol} on {date_str} via akshare. "
-                f"The symbol may not be a margin-trading eligible stock, or data is "
-                f"temporarily unavailable. Consider enabling smartmoney_db for local "
-                f"cached data."
-            )
+    stock_col = "标的证券代码" if exchange == "sh" else "证券代码"
+    margin_func = ak.stock_margin_detail_sse if exchange == "sh" else ak.stock_margin_detail_szse
 
-    r = row.iloc[0].to_dict()
-    # Normalise column names across SSE / SZSE
-    def _get(*keys):
-        for k in keys:
-            if k in r and r[k] is not None:
-                return r[k]
-        return "N/A"
+    # Try up to 5 prior trading dates, capped by curr_date when provided
+    base_date = _to_yyyymmdd(curr_date) if curr_date else datetime.now().strftime("%Y%m%d")
+    for _ in range(5):
+        date_str = _nearest_trade_date(base_date)
+        with _akshare_task_context(f"📈 {symbol} 融资融券"), no_proxy():
+            df = _safe_call(margin_func, date=date_str)
+        if df is not None and not df.empty:
+            row = df[df[stock_col] == code]
+            if not row.empty:
+                r = row.iloc[0].to_dict()
 
-    lines = [
-        f"## {symbol.upper()} Margin Trading (融资融券) (source: akshare / SSE·SZSE)",
-        f"Date: {date_str}",
-        "",
-        f"- 融资余额: {_get('融资余额', '融资余额')}",
-        f"- 融资买入额: {_get('融资买入额', '融资买入额')}",
-        f"- 融券余量: {_get('融券余量', '融券余量')}",
-        f"- 融券余额: {_get('融券余额', '融券余额')}",
-        f"- 融资融券余额: {_get('融资融券余额', '融资融券余额')}",
-    ]
-    return "\n".join(lines)
+                def _get(*keys, _r=r):
+                    for k in keys:
+                        if k in _r and _r[k] is not None:
+                            return _r[k]
+                    return "N/A"
+
+                lines = [
+                    f"## {symbol.upper()} Margin Trading (融资融券) (source: akshare / SSE·SZSE)",
+                    f"Date: {date_str}",
+                    "",
+                    f"- 融资余额: {_get('融资余额', '融资余额')}",
+                    f"- 融资买入额: {_get('融资买入额', '融资买入额')}",
+                    f"- 融券余量: {_get('融券余量', '融券余量')}",
+                    f"- 融券余额: {_get('融券余额', '融券余额')}",
+                    f"- 融资融券余额: {_get('融资融券余额', '融资融券余额')}",
+                ]
+                return "\n".join(lines)
+        # Move base date back by one day for next attempt
+        base_dt = datetime.strptime(base_date, "%Y%m%d") - timedelta(days=1)
+        base_date = base_dt.strftime("%Y%m%d")
+
+    raise NoMarketDataError(
+        symbol,
+        detail=f"no margin-trading data found for {symbol} in the last 5 trading days via akshare",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -850,18 +982,47 @@ def get_margin_trading(symbol: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def get_dragon_tiger(symbol: str) -> str:
+def get_dragon_tiger(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch A-share dragon-tiger-board (龙虎榜) data via akshare.
 
-    Uses the Eastmoney per-stock LHB detail API.  Data is available for
-    individual stocks only on days when the stock appeared on the LHB
-    (usually limit-up or limit-down days).
+    Uses ``stock_lhb_stock_detail_date_em`` to discover trading dates when the
+    stock appeared on the LHB, then fetches buy/sell detail for the most recent
+    date.  Falls back to the nearest trade date if the date-discovery API fails.
     """
     code = to_akshare_symbol(symbol, "bare")
-    date_str = _nearest_trade_date()
+
+    # Discover dates when this stock appeared on the LHB.
+    # A network failure here is not fatal: we fall back to the nearest trade date.
+    date_str = _nearest_trade_date(_to_yyyymmdd(curr_date) if curr_date else None)
+    try:
+        with _akshare_task_context(f"🔥 {symbol} 龙虎榜日期"), no_proxy():
+            dates_df = _safe_call(ak.stock_lhb_stock_detail_date_em, symbol=code)
+    except Exception:
+        dates_df = None
+    if dates_df is not None and not dates_df.empty and "交易日" in dates_df.columns:
+        try:
+            # akshare returns 交易日 as datetime.date; accept datetime/str too.
+            # stock_lhb_stock_detail_em requires date as YYYYMMDD.
+            if curr_date:
+                parsed = pd.to_datetime(dates_df["交易日"], errors="coerce")
+                valid = dates_df[parsed <= pd.to_datetime(curr_date)]
+                latest = valid["交易日"].max() if not valid.empty else None
+            else:
+                latest = dates_df["交易日"].max()
+            if latest is not None and pd.notna(latest):
+                if hasattr(latest, "strftime"):
+                    date_str = latest.strftime("%Y%m%d")
+                else:
+                    digits = "".join(ch for ch in str(latest) if ch.isdigit())
+                    if len(digits) >= 8:
+                        date_str = digits[:8]
+        except (TypeError, ValueError):
+            pass  # date discovery failed — keep the nearest-trade-date fallback
 
     with _akshare_task_context(f"🔥 {symbol} 龙虎榜"), no_proxy():
-        # Try both buy and sell flags
         buy_df = _safe_call(
             ak.stock_lhb_stock_detail_em, symbol=code, date=date_str, flag="买入"
         )
@@ -873,9 +1034,9 @@ def get_dragon_tiger(symbol: str) -> str:
     sell_rows = [] if sell_df is None or sell_df.empty else sell_df.to_dict("records")
 
     if not buy_rows and not sell_rows:
-        return (
-            f"No dragon-tiger-board data for {symbol} on {date_str} via akshare. "
-            f"The stock may not have appeared on the LHB on this trading day."
+        raise NoMarketDataError(
+            symbol,
+            detail=f"no dragon-tiger-board data for {symbol} on {date_str} via akshare",
         )
 
     lines = [
@@ -906,7 +1067,10 @@ def get_dragon_tiger(symbol: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def get_block_trade(symbol: str) -> str:
+def get_block_trade(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch A-share block-trade (大宗交易) data via akshare.
 
     AkShare does not expose a dedicated individual-stock block-trade API.
@@ -937,9 +1101,9 @@ def get_sector_fund_flow(sector_name: str) -> str:
         df = _safe_call(ak.stock_sector_fund_flow_hist, symbol=sector_name)
 
     if df is None or df.empty:
-        return (
-            f"No sector fund-flow data for '{sector_name}' via akshare. "
-            f"The sector name may not match Eastmoney's taxonomy."
+        raise NoMarketDataError(
+            sector_name,
+            detail=f"no sector fund-flow data for '{sector_name}' via akshare",
         )
 
     lines = [
@@ -963,7 +1127,10 @@ def get_sector_fund_flow(sector_name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def get_shareholder_count(symbol: str) -> str:
+def get_shareholder_count(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch A-share shareholder-count (股东户数) via akshare.
 
     Uses the Eastmoney per-stock shareholder-count detail API.
@@ -973,10 +1140,12 @@ def get_shareholder_count(symbol: str) -> str:
     with _akshare_task_context(f"👥 {symbol} 股东户数"), no_proxy():
         df = _safe_call(ak.stock_zh_a_gdhs_detail_em, symbol=code)
 
+    df = _filter_df_by_date(df, "股东户数统计截止日", curr_date)
+
     if df is None or df.empty:
-        return (
-            f"No shareholder-count data for {symbol} via akshare. "
-            f"The symbol may be unlisted or the endpoint may be temporarily unavailable."
+        raise NoMarketDataError(
+            symbol,
+            detail=f"no shareholder-count data for {symbol} via akshare",
         )
 
     lines = [
@@ -1006,8 +1175,10 @@ def get_pledge_ratio(symbol: str) -> str:
     with _akshare_task_context(f"🔒 {symbol} 股权质押"), no_proxy():
         df = _safe_call(ak.stock_gpzy_individual_pledge_ratio_detail_em, symbol=code)
 
-    if df is None or df.empty:
-        return f"No pledge-ratio data found for {symbol} via akshare."
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        raise NoMarketDataError(
+            symbol, detail=f"no pledge-ratio data found for {symbol} via akshare"
+        )
 
     lines = [
         f"## {symbol.upper()} Pledge Ratio (source: akshare / Eastmoney)",
@@ -1040,7 +1211,9 @@ def get_dividend_history(symbol: str) -> str:
         df = _safe_call(ak.stock_fhps_detail_em, symbol=code)
 
     if df is None or df.empty:
-        return f"No dividend history found for {symbol} via akshare."
+        raise NoMarketDataError(
+            symbol, detail=f"no dividend history found for {symbol} via akshare"
+        )
 
     lines = [
         f"## {symbol.upper()} Dividend History (source: akshare / Eastmoney)",
@@ -1063,15 +1236,22 @@ def get_dividend_history(symbol: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def get_research_reports(symbol: str) -> str:
+def get_research_reports(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch A-share research reports via akshare (real-time)."""
     code = to_akshare_symbol(symbol, "bare")
 
     with _akshare_task_context(f"📄 {symbol} 个股研报"), no_proxy():
         df = _safe_call(ak.stock_research_report_em, symbol=code)
 
+    df = _filter_df_by_date(df, "日期", curr_date)
+
     if df is None or df.empty:
-        return f"No research reports found for {symbol} via akshare."
+        raise NoMarketDataError(
+            symbol, detail=f"no research reports found for {symbol} via akshare"
+        )
 
     lines = [
         f"## {symbol.upper()} Research Reports (source: akshare / Eastmoney)",
@@ -1111,7 +1291,9 @@ def get_earnings_estimates(symbol: str) -> str:
         df = _safe_call(ak.stock_yjyg_em, symbol=code)
 
     if df is None or df.empty:
-        return f"No earnings estimate data found for {symbol} via akshare."
+        raise NoMarketDataError(
+            symbol, detail=f"no earnings estimate data found for {symbol} via akshare"
+        )
 
     lines = [
         f"## {symbol.upper()} Analyst Earnings Estimates (source: akshare / Eastmoney)",
@@ -1135,7 +1317,10 @@ def get_earnings_estimates(symbol: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def get_institutional_holdings(symbol: str) -> str:
+def get_institutional_holdings(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch A-share top shareholders and institutional holdings via akshare."""
     code = to_akshare_symbol(symbol, "bare")
 
@@ -1147,12 +1332,14 @@ def get_institutional_holdings(symbol: str) -> str:
         "",
     ]
 
-    if holder_df is not None and not holder_df.empty:
-        lines.append(f"### Top Shareholders ({len(holder_df)} records)")
-        for _, row in holder_df.iterrows():
-            lines.append(f"- {row.get('股东名称', 'N/A')}: {row.get('持股数量', 'N/A')} shares ({row.get('持股比例', 'N/A')}%)")
-        lines.append("")
-    else:
-        lines.append("No top shareholder data available.")
+    if holder_df is None or holder_df.empty:
+        raise NoMarketDataError(
+            symbol, detail=f"no institutional holdings data found for {symbol} via akshare"
+        )
+
+    lines.append(f"### Top Shareholders ({len(holder_df)} records)")
+    for _, row in holder_df.iterrows():
+        lines.append(f"- {row.get('股东名称', 'N/A')}: {row.get('持股数量', 'N/A')} shares ({row.get('持股比例', 'N/A')}%)")
+    lines.append("")
 
     return "\n".join(lines)

@@ -5,7 +5,10 @@ import unittest
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
+from yfinance.exceptions import YFRateLimitError
+
 import tradingagents.dataflows.yfinance_news as ynews
+from tradingagents.dataflows.errors import VendorRateLimitError
 
 
 def _epoch(date_str: str) -> int:
@@ -18,6 +21,8 @@ from tradingagents.dataflows.yfinance_news import (
     get_global_news_yfinance,
     get_news_yfinance,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _mock_config(**overrides):
@@ -355,6 +360,26 @@ class GetNewsYFinanceTests(unittest.TestCase):
             args, _ = retry_mock.call_args
             self.assertTrue(callable(args[0]) if args else False)
 
+    def test_yf_rate_limit_converted_to_vendor_rate_limit_error(self):
+        """Covers line 133: YFRateLimitError -> VendorRateLimitError."""
+        with patch(
+            "tradingagents.dataflows.yfinance_news.get_config",
+            return_value=_mock_config(),
+        ):
+            mock_ticker = MagicMock()
+            mock_ticker.get_news.side_effect = YFRateLimitError()
+            with patch(
+                "tradingagents.dataflows.yfinance_news.yf.Ticker",
+                return_value=mock_ticker,
+            ), patch(
+                "tradingagents.dataflows.yfinance_news.yf_retry",
+                side_effect=lambda f, **kwargs: f(),
+            ), self.assertRaises(VendorRateLimitError) as ctx:
+                get_news_yfinance(self.ticker, self.start, self.end)
+
+        self.assertIn("Yahoo Finance rate-limited", str(ctx.exception))
+        self.assertIn("AAPL", str(ctx.exception))
+
     def test_handles_flat_article_structure(self):
         mock_news = [
             _flat_article(
@@ -667,6 +692,22 @@ class GetGlobalNewsYFinanceTests(unittest.TestCase):
             result,
             "No global news found between 2025-06-13 and 2025-06-20",
         )
+
+    def test_global_news_yf_rate_limit_converted_to_vendor_rate_limit_error(self):
+        """Covers line 226: YFRateLimitError -> VendorRateLimitError in global news."""
+        with patch(
+            "tradingagents.dataflows.yfinance_news.get_config",
+            return_value=_mock_config(),
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf.Search",
+            side_effect=YFRateLimitError(),
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf_retry",
+            side_effect=lambda f, **kwargs: f(),
+        ), self.assertRaises(VendorRateLimitError) as ctx:
+            get_global_news_yfinance(self.curr_date)
+
+        self.assertIn("Yahoo Finance rate-limited", str(ctx.exception))
 
 
 # =========================================================================

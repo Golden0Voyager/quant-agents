@@ -1,5 +1,9 @@
+import datetime as _dt
 import logging
 import os
+import re as _re
+from dataclasses import dataclass
+from typing import Any
 
 # Import from vendor-specific modules
 from .akshare_common import is_a_share_ticker
@@ -49,7 +53,9 @@ from .errors import (
     VendorRateLimitError,
 )
 from .fred import get_macro_data as get_fred_macro_data
-from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
+
+# Polymarket removed — prediction markets are US-only and inapplicable to A-shares.
+# The get_prediction_markets method degraded via OPTIONAL_CATEGORIES → DATA_UNAVAILABLE sentinel.
 from .smartmoney_vendor import (
     get_balance_sheet as get_smartmoney_balance_sheet,
     get_block_trade as get_smartmoney_block_trade,
@@ -70,6 +76,8 @@ from .smartmoney_vendor import (
     get_margin_trading as get_smartmoney_margin_trading,
     get_news as get_smartmoney_news,
     get_northbound_hold as get_smartmoney_northbound_hold,
+    get_pledge_ratio as get_smartmoney_pledge_ratio,
+    get_research_reports as get_smartmoney_research_reports,
     get_restricted_release as get_smartmoney_restricted_release,
     get_sector_fund_flow as get_smartmoney_sector_fund_flow,
     get_shareholder_count as get_smartmoney_shareholder_count,
@@ -168,7 +176,7 @@ TOOLS_CATEGORIES = {
 VENDOR_LIST = [
     "yfinance",
     "fred",
-    "polymarket",
+
     "alpha_vantage",
     "akshare",
     "smartmoney_db",
@@ -179,7 +187,15 @@ VENDOR_LIST = [
 # sentinel instead of aborting the run (a bad LLM-supplied indicator, a missing
 # key, or a network blip should not crash an analysis over flavour data). Core
 # categories (prices, fundamentals, news) still raise so a broken primary is loud.
-OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets"}
+OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets", "research_opinion"}
+
+
+@dataclass(frozen=True)
+class VendorRouteResult:
+    """Successful or graceful-degradation vendor result with provenance."""
+
+    data: Any
+    vendor: str | None
 
 # Mapping of methods to their vendor-specific implementations
 VENDOR_METHODS = {
@@ -300,6 +316,7 @@ VENDOR_METHODS = {
     },
     # governance_risk (v2.2)
     "get_pledge_ratio": {
+        "smartmoney_db": get_smartmoney_pledge_ratio,
         "akshare": get_akshare_pledge_ratio,
     },
     # shareholder_return (v2.2)
@@ -308,12 +325,11 @@ VENDOR_METHODS = {
     },
     # research_opinion (v2.2)
     "get_research_reports": {
+        "smartmoney_db": get_smartmoney_research_reports,
         "akshare": get_akshare_research_reports,
     },
-    # prediction_markets
-    "get_prediction_markets": {
-        "polymarket": get_polymarket_prediction_markets,
-    },
+    # prediction_markets — removed; prediction markets are US-only and
+    # inapplicable to A-shares. The method degrades via OPTIONAL_CATEGORIES.
 }
 
 def get_category_for_method(method: str) -> str:
@@ -338,43 +354,59 @@ def get_vendor(category: str, method: str = None) -> str:
     # Fall back to category-level configuration
     return config.get("data_vendors", {}).get(category, "default")
 
-def route_to_vendor(method: str, *args, **kwargs):
-    """Route method calls to appropriate vendor implementation with fallback support."""
-    category = get_category_for_method(method)
-    vendor_config = get_vendor(category, method)
+def _is_stale_research_data(result: str, max_days: int = 90) -> bool:
+    """Check whether research-report text contains only dates older than *max_days*.
+
+    Parses ``日期: YYYY-MM-DD`` lines from the formatted output.  If no
+    parseable date is found, the data is treated as fresh (we assume the
+    message has no date column rather than being provably stale).
+    """
+    today = _dt.date.today()
+    dates = []
+    for m in _re.finditer(r"日期:\s*(\d{4}-\d{2}-\d{2})", result):
+        try:
+            d = _dt.date.fromisoformat(m.group(1))
+            dates.append(d)
+        except ValueError:
+            continue
+    if not dates:
+        return False  # no parseable date → can't prove staleness
+    latest = max(dates)
+    age = (today - latest).days
+    if age > max_days:
+        logger.info("Research report data is stale: latest=%s, age=%d days > limit=%d", latest, age, max_days)
+        return True
+    return False
+
+
+def _is_failure_sentinel(result: str) -> bool:
+    """Return True when *result* is a legacy prose failure string.
+
+    This safety net ensures that any vendor implementation that still returns
+    ``"Error ..."``, ``"No ... found"``, ``DATA_UNAVAILABLE`` or
+    ``NO_DATA_AVAILABLE`` is treated as a failure and the router continues to
+    the next vendor in the chain.
+    """
+    return bool(
+        _re.search(
+            r"^(Error|No .+ found|DATA_UNAVAILABLE|NO_DATA_AVAILABLE)",
+            result.strip(),
+        )
+    )
+
+
+def _build_vendor_chain(method: str, vendor_config: str, symbol: str | None) -> list[str]:
+    """Build the ordered vendor chain for *method*.
+
+    - Explicit vendor lists (anything other than ``"default"``) are respected
+      verbatim, filtered to vendors that actually implement *method*.
+    - The ``"default"`` sentinel enables A-share local-first ordering:
+      ``smartmoney_db → akshare → others`` when the symbol is an A-share ticker.
+    - ``DISABLE_YFINANCE_FALLBACK=1`` strips yfinance from A-share chains.
+    """
+    all_available_vendors = list(VENDOR_METHODS[method].keys())
     primary_vendors = [v.strip() for v in vendor_config.split(',')]
 
-    if method not in VENDOR_METHODS:
-        raise ValueError(f"Method '{method}' not supported")
-
-    # A-share routing: if the first positional arg looks like an A-share ticker,
-    # hoist akshare near the front. If smartmoney_db is explicitly configured,
-    # keep it at the very front for zero-latency local reads.
-    symbol = args[0] if args else kwargs.get("symbol") or kwargs.get("ticker")
-    if (
-        isinstance(symbol, str)
-        and is_a_share_ticker(symbol)
-        and "akshare" in VENDOR_METHODS[method]
-    ):
-        if "smartmoney_db" in primary_vendors:
-            # smartmoney_db first (local SQLite), then akshare, then rest
-            primary_vendors = ["smartmoney_db", "akshare"] + [
-                v for v in primary_vendors if v not in ("smartmoney_db", "akshare")
-            ]
-        else:
-            primary_vendors = ["akshare"] + [v for v in primary_vendors if v != "akshare"]
-
-        # DISABLE_YFINANCE_FALLBACK env var: strip yfinance from A-share chain
-        if os.getenv("DISABLE_YFINANCE_FALLBACK") == "1":
-            primary_vendors = [v for v in primary_vendors if v != "yfinance"]
-
-    all_available_vendors = list(VENDOR_METHODS[method].keys())
-
-    # The configured vendor list IS the chain: we do NOT silently fall back to
-    # vendors the user did not choose (#988/#289) — that returned data from an
-    # unexpected source and caused cross-vendor inconsistencies. For multi-vendor
-    # fallback, list them in order, e.g. data_vendors="yfinance,alpha_vantage".
-    # The "default" sentinel (no explicit config) uses all available vendors.
     explicit = [v for v in primary_vendors if v and v != "default"]
     if explicit:
         vendor_chain = [v for v in explicit if v in VENDOR_METHODS[method]]
@@ -384,7 +416,100 @@ def route_to_vendor(method: str, *args, **kwargs):
                 f"Available: {all_available_vendors}."
             )
     else:
-        vendor_chain = all_available_vendors
+        vendor_chain = list(all_available_vendors)
+
+    is_ashare = isinstance(symbol, str) and is_a_share_ticker(symbol)
+    if is_ashare and "akshare" in VENDOR_METHODS[method]:
+        # Only the default chain gets local-first A-share promotion; explicit
+        # user configuration is preserved verbatim.
+        if vendor_config.strip() == "default":
+            if "smartmoney_db" in vendor_chain:
+                vendor_chain = ["smartmoney_db", "akshare"] + [
+                    v for v in vendor_chain
+                    if v not in ("smartmoney_db", "akshare")
+                ]
+            else:
+                vendor_chain = ["akshare"] + [
+                    v for v in vendor_chain if v != "akshare"
+                ]
+
+        # DISABLE_YFINANCE_FALLBACK applies to all A-share chains regardless of
+        # whether the vendor order was explicitly configured.
+        if os.getenv("DISABLE_YFINANCE_FALLBACK") == "1":
+            vendor_chain = [v for v in vendor_chain if v != "yfinance"]
+
+    return vendor_chain
+
+
+def _should_skip_ashare_filter(category: str, method: str) -> bool:
+    """Return True when *method*'s first positional arg is not a ticker.
+
+    These methods take sector names, dates, or indicator names as their first
+    argument, so the non-A-share vendor filter must not strip akshare/smartmoney_db.
+    """
+    return category in ("macro_data", "prediction_markets") or method in {
+        "get_limit_up_down",
+        "get_sector_fund_flow",
+        "get_global_news",
+    }
+
+
+def _format_no_data_sentinel(
+    last_no_data: NoMarketDataError,
+    vendor_chain: list[str],
+    method: str,
+) -> str:
+    """Format a canonical NO_DATA_AVAILABLE sentinel."""
+    sym = last_no_data.symbol
+    canonical = last_no_data.canonical
+    resolved = "" if canonical == sym else f" (resolved to '{canonical}')"
+    reason = f" ({last_no_data.detail})" if last_no_data.detail else ""
+    tried = " → ".join(v for v in vendor_chain if v in VENDOR_METHODS[method])
+    return (
+        f"NO_DATA_AVAILABLE: No usable market data for '{sym}'{resolved} from "
+        f"any configured vendor{reason}. Routing chain: {tried}. "
+        f"The symbol may be invalid, delisted, not covered, or the vendor "
+        f"returned stale data. Do not estimate or fabricate values — report "
+        f"that data is unavailable for this symbol."
+    )
+
+
+def _format_optional_unavailable(
+    category: str,
+    first_error: Exception | None,
+    method: str,
+) -> str:
+    """Format a graceful DATA_UNAVAILABLE sentinel for optional enrichment."""
+    if first_error is not None:
+        return (
+            f"DATA_UNAVAILABLE: optional {category} could not be retrieved "
+            f"({first_error}). Proceed without it; do not fabricate values."
+        )
+    return (
+        f"DATA_UNAVAILABLE: '{method}' has no available data source. "
+        f"Proceed without it; do not fabricate values."
+    )
+
+
+def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteResult:
+    """Route a call and retain the vendor that produced the returned payload."""
+    category = get_category_for_method(method)
+    vendor_config = get_vendor(category, method)
+    symbol = args[0] if args else kwargs.get("symbol") or kwargs.get("ticker")
+
+    if method not in VENDOR_METHODS:
+        if category in OPTIONAL_CATEGORIES:
+            logger.info(
+                "Optional method '%s' (category=%s) has no configured vendor. "
+                "Returning DATA_UNAVAILABLE.",
+                method, category,
+            )
+            return VendorRouteResult(
+                _format_optional_unavailable(category, None, method), None
+            )
+        raise ValueError(f"Method '{method}' not supported")
+
+    vendor_chain = _build_vendor_chain(method, vendor_config, symbol)
 
     last_no_data: NoMarketDataError | None = None
     first_error: Exception | None = None
@@ -392,27 +517,25 @@ def route_to_vendor(method: str, *args, **kwargs):
     # Track whether we are serving an A-share ticker for targeted logging
     is_ashare = isinstance(symbol, str) and is_a_share_ticker(symbol)
 
-    # Skip A-share-only vendors for non-A-share tickers, except for categories
-    # whose methods don't take a ticker as their first positional arg
-    # (macro_data, prediction_markets — these use indicator/event names instead),
-    # or specific methods whose first argument is not a ticker (e.g. a trade date).
-    skip_ashare_filter = category in ("macro_data", "prediction_markets") or method in {
-        "get_limit_up_down",
-    }
+    # Skip A-share-only vendors for non-A-share tickers, except for methods
+    # whose first argument is not a ticker (sector names, dates, indicators).
+    skip_ashare_filter = _should_skip_ashare_filter(category, method)
     if not is_ashare and not skip_ashare_filter:
         filtered = [v for v in vendor_chain if v not in ("smartmoney_db", "akshare")]
         if not filtered:
             # All vendors removed — this method has no HK/US-capable fallback.
-            # Return a graceful sentinel instead of crashing the agent.
             logger.info(
                 "Non-A-share ticker '%s': all configured vendors are A-share-only "
                 "for method='%s'. Returning DATA_UNAVAILABLE.",
                 symbol, method,
             )
-            return (
-                f"DATA_UNAVAILABLE: No global-market vendor configured for '{method}' "
-                f"with symbol '{symbol}'. This data source is A-share only. "
-                f"Proceed without it; do not fabricate values."
+            return VendorRouteResult(
+                (
+                    f"DATA_UNAVAILABLE: No global-market vendor configured for '{method}' "
+                    f"with symbol '{symbol}'. This data source is A-share only. "
+                    f"Proceed without it; do not fabricate values."
+                ),
+                None,
             )
         if filtered != vendor_chain:
             logger.info(
@@ -428,6 +551,19 @@ def route_to_vendor(method: str, *args, **kwargs):
 
         try:
             result = impl_func(*args, **kwargs)
+
+            # Safety net: legacy prose failure strings should not be returned as
+            # successful data. Treat them as no-data and keep falling back.
+            if isinstance(result, str) and _is_failure_sentinel(result):
+                logger.warning(
+                    "Vendor %r returned a failure sentinel for %s; trying next vendor.",
+                    vendor, method,
+                )
+                last_no_data = NoMarketDataError(
+                    symbol or method, detail=result[:200]
+                )
+                continue
+
             # Warn when A-share data ultimately came from yfinance (data quality risk)
             if is_ashare and vendor == "yfinance":
                 logger.warning(
@@ -437,9 +573,24 @@ def route_to_vendor(method: str, *args, **kwargs):
                     symbol,
                     method,
                 )
-            return result
-        except VendorRateLimitError:
+            # Freshness check: if smartmoney_db returned stale research reports,
+            # fall through to akshare which fetches live from Eastmoney.
+            if (
+                method == "get_research_reports"
+                and vendor == "smartmoney_db"
+                and _is_stale_research_data(result)
+            ):
+                logger.info(
+                    "Stale research reports from smartmoney_db for '%s'; "
+                    "falling through to next vendor (akshare).",
+                    symbol,
+                )
+                continue
+            return VendorRouteResult(result, vendor)
+        except VendorRateLimitError as exc:
             logger.warning("Vendor %r rate-limited for %s; trying next vendor.", vendor, method)
+            if first_error is None:
+                first_error = exc
             continue
         except VendorNotConfiguredError as e:
             logger.warning("Vendor %r not configured for %s; trying next vendor.", vendor, method)
@@ -480,19 +631,8 @@ def route_to_vendor(method: str, *args, **kwargs):
                 "Returning NO_DATA for %s, but a vendor errored earlier: %s",
                 method, first_error,
             )
-        sym = last_no_data.symbol
-        canonical = last_no_data.canonical
-        resolved = "" if canonical == sym else f" (resolved to '{canonical}')"
-        reason = f" ({last_no_data.detail})" if last_no_data.detail else ""
-        tried = " → ".join(
-            v for v in vendor_chain if v in VENDOR_METHODS[method]
-        )
-        return (
-            f"NO_DATA_AVAILABLE: No usable market data for '{sym}'{resolved} from "
-            f"any configured vendor{reason}. Routing chain: {tried}. "
-            f"The symbol may be invalid, delisted, not covered, or the vendor "
-            f"returned stale data. Do not estimate or fabricate values — report "
-            f"that data is unavailable for this symbol."
+        return VendorRouteResult(
+            _format_no_data_sentinel(last_no_data, vendor_chain, method), None
         )
 
     # No vendor returned data and none reported clean "no data" — surface the
@@ -502,11 +642,20 @@ def route_to_vendor(method: str, *args, **kwargs):
     if first_error is not None:
         if category in OPTIONAL_CATEGORIES:
             logger.warning("Optional %s unavailable for %s: %s", category, method, first_error)
-            return (
-                f"DATA_UNAVAILABLE: optional {category} could not be retrieved "
-                f"({first_error}). Proceed without it; do not fabricate values."
+            return VendorRouteResult(
+                _format_optional_unavailable(category, first_error, method), None
             )
         raise first_error
 
     logger.error("No available vendor for method='%s' symbol='%s'", method, symbol)
     raise RuntimeError(f"No available vendor for '{method}'")
+
+
+def route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteResult:
+    """Route a method call and return its payload plus selected vendor name."""
+    return _route_to_vendor_with_source(method, *args, **kwargs)
+
+
+def route_to_vendor(method: str, *args, **kwargs):
+    """Route a method call while preserving the legacy payload-only interface."""
+    return _route_to_vendor_with_source(method, *args, **kwargs).data
