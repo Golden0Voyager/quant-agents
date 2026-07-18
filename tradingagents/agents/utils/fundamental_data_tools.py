@@ -98,6 +98,10 @@ def get_earnings_estimates(
 @tool
 def get_shareholder_count(
     ticker: Annotated[str, "Ticker symbol"],
+    curr_date: Annotated[
+        str | None,
+        "Analysis date (YYYY-MM-DD); only data on or before this date will be returned.",
+    ] = None,
 ) -> str:
     """
     Retrieve shareholder count (股东户数) data for a given ticker.
@@ -106,10 +110,13 @@ def get_shareholder_count(
     Uses the configured fundamental_data vendor (smartmoney_db local cache or akshare for A-shares).
     Args:
         ticker (str): Ticker symbol
+        curr_date (str | None): Analysis date (YYYY-MM-DD); only data on or before this date will be returned.
     Returns:
         str: A formatted report of shareholder count data
     """
-    return route_to_vendor("get_shareholder_count", ticker)
+    if curr_date is None:
+        return route_to_vendor("get_shareholder_count", ticker)
+    return route_to_vendor("get_shareholder_count", ticker, curr_date)
 
 
 @tool

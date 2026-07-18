@@ -249,16 +249,27 @@ def get_fundamentals(
     company_name = name_df["name"].iloc[0] if name_df is not None and not name_df.empty else code
     industry = name_df["industry"].iloc[0] if name_df is not None and not name_df.empty else "N/A"
 
-    # Get latest fundamentals
-    df = _df_from_sql(
-        """
-        SELECT * FROM fundamentals
-        WHERE ts_code = ?
-        ORDER BY trade_date DESC
-        LIMIT 1
-        """,
-        (code,),
-    )
+    # Get latest fundamentals on or before curr_date
+    if curr_date:
+        df = _df_from_sql(
+            """
+            SELECT * FROM fundamentals
+            WHERE ts_code = ? AND trade_date <= ?
+            ORDER BY trade_date DESC
+            LIMIT 1
+            """,
+            (code, curr_date),
+        )
+    else:
+        df = _df_from_sql(
+            """
+            SELECT * FROM fundamentals
+            WHERE ts_code = ?
+            ORDER BY trade_date DESC
+            LIMIT 1
+            """,
+            (code,),
+        )
 
     if df is None or df.empty:
         raise RuntimeError(f"No fundamentals in quant_core.db for {symbol}")
@@ -285,7 +296,8 @@ def get_fundamentals(
             if "cap" in col:
                 lines.append(f"- {label}: {v/1e8:{fmt}} 亿 (≈{v/1e9:.2f} billion CNY)")
             elif "%" in fmt:
-                lines.append(f"- {label}: {v*100:.2f}%")
+                # quant_core.db stores dividend_yield as a percent number already
+                lines.append(f"- {label}: {v:.2f}%")
             else:
                 lines.append(f"- {label}: {v:{fmt}}")
 
@@ -475,12 +487,21 @@ def get_income_statement(
 # Fund flow
 # ===========================================================================
 
-def get_fund_flow(symbol: str) -> str:
+def get_fund_flow(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch A-share individual stock fund flow from quant_core.db."""
     code = _to_smartmoney_symbol(symbol)
 
+    params = [code]
+    date_filter = ""
+    if curr_date:
+        date_filter = " AND trade_date <= ?"
+        params.append(curr_date)
+
     df = _df_from_sql(
-        """
+        f"""
         SELECT trade_date AS Date, main_net_inflow AS main_net,
                main_net_inflow_pct AS main_pct,
                super_large_net_inflow AS super_large_net,
@@ -489,11 +510,11 @@ def get_fund_flow(symbol: str) -> str:
                large_net_inflow_pct AS large_pct,
                is_simulated
         FROM fund_flow
-        WHERE ts_code = ?
+        WHERE ts_code = ?{date_filter}
         ORDER BY trade_date DESC
         LIMIT 5
         """,
-        (code,),
+        tuple(params),
     )
 
     if df is None or df.empty:
@@ -702,19 +723,28 @@ def get_restricted_release(symbol: str) -> str:
     raise RuntimeError("Restricted release not available in quant_core.db")
 
 
-def get_institutional_holdings(symbol: str) -> str:
+def get_institutional_holdings(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch institutional-holdings (机构持股) data from quant_core.db."""
     code = _to_smartmoney_symbol(symbol)
 
+    params = [code]
+    date_filter = ""
+    if curr_date:
+        date_filter = " AND report_date <= ?"
+        params.append(curr_date)
+
     df = _df_from_sql(
-        """
+        f"""
         SELECT report_date AS Date, institution_count, type_counts
         FROM institutional_holdings
-        WHERE ts_code = ?
+        WHERE ts_code = ?{date_filter}
         ORDER BY report_date DESC
         LIMIT 5
         """,
-        (code,),
+        tuple(params),
     )
 
     if df is None or df.empty:
@@ -747,7 +777,10 @@ def get_institutional_holdings(symbol: str) -> str:
     return "\n".join(lines)
 
 
-def get_northbound_hold(symbol: str) -> str:
+def get_northbound_hold(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch northbound (Stock Connect) flow for an A-share from quant_core.db.
 
     Reads the ``north_flow`` table, which tracks daily buy/sell/net amounts of
@@ -763,15 +796,21 @@ def get_northbound_hold(symbol: str) -> str:
     """
     code = _to_smartmoney_symbol(symbol)
 
+    params = [code]
+    date_filter = ""
+    if curr_date:
+        date_filter = " AND trade_date <= ?"
+        params.append(curr_date)
+
     df = _df_from_sql(
-        """
+        f"""
         SELECT trade_date AS Date, buy_amount, sell_amount, net_amount
         FROM north_flow
-        WHERE ts_code = ?
+        WHERE ts_code = ?{date_filter}
         ORDER BY trade_date DESC
         LIMIT 10
         """,
-        (code,),
+        tuple(params),
     )
 
     if df is None or df.empty:
@@ -1018,16 +1057,22 @@ def get_margin_trading(
 
     code = _to_smartmoney_symbol(symbol)
 
+    params = [code]
+    date_filter = ""
+    if curr_date:
+        date_filter = " AND trade_date <= ?"
+        params.append(curr_date)
+
     df = _df_from_sql(
-        """
+        f"""
         SELECT trade_date AS Date, margin_balance, margin_buy, margin_repay,
                short_balance, short_sell, short_repay, total_balance
         FROM margin_trading
-        WHERE ts_code = ?
+        WHERE ts_code = ?{date_filter}
         ORDER BY trade_date DESC
         LIMIT 5
         """,
-        (code,),
+        tuple(params),
     )
 
     if df is None or df.empty:
@@ -1053,20 +1098,29 @@ def get_margin_trading(
 # Dragon Tiger (龙虎榜) — v2.2
 # ===========================================================================
 
-def get_dragon_tiger(symbol: str) -> str:
+def get_dragon_tiger(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch dragon-tiger-board (龙虎榜) data from quant_core.db."""
     code = _to_smartmoney_symbol(symbol)
 
+    params = [code]
+    date_filter = ""
+    if curr_date:
+        date_filter = " AND trade_date <= ?"
+        params.append(curr_date)
+
     df = _df_from_sql(
-        """
+        f"""
         SELECT trade_date AS Date, close_price, pct_change, net_buy_amount,
                buy_amount, sell_amount, turnover_rate, market_cap, reason
         FROM dragon_tiger
-        WHERE ts_code = ?
+        WHERE ts_code = ?{date_filter}
         ORDER BY trade_date DESC
         LIMIT 5
         """,
-        (code,),
+        tuple(params),
     )
 
     if df is None or df.empty:
@@ -1093,20 +1147,29 @@ def get_dragon_tiger(symbol: str) -> str:
 # Block Trade (大宗交易) — v2.2
 # ===========================================================================
 
-def get_block_trade(symbol: str) -> str:
+def get_block_trade(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch block-trade (大宗交易) data from quant_core.db."""
     code = _to_smartmoney_symbol(symbol)
 
+    params = [code]
+    date_filter = ""
+    if curr_date:
+        date_filter = " AND trade_date <= ?"
+        params.append(curr_date)
+
     df = _df_from_sql(
-        """
+        f"""
         SELECT trade_date AS Date, deal_price, close_price, discount_rate,
                volume, amount, buyer_branch, seller_branch
         FROM block_trade
-        WHERE ts_code = ?
+        WHERE ts_code = ?{date_filter}
         ORDER BY trade_date DESC
         LIMIT 5
         """,
-        (code,),
+        tuple(params),
     )
 
     if df is None or df.empty:
@@ -1177,20 +1240,29 @@ def get_sector_fund_flow(sector_name: str) -> str:
 # Shareholder Count (股东户数) — v2.2
 # ===========================================================================
 
-def get_shareholder_count(symbol: str) -> str:
+def get_shareholder_count(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
     """Fetch shareholder-count (股东户数) from quant_core.db."""
     code = _to_smartmoney_symbol(symbol)
 
+    params = [code]
+    date_filter = ""
+    if curr_date:
+        date_filter = " AND report_date <= ?"
+        params.append(curr_date)
+
     df = _df_from_sql(
-        """
+        f"""
         SELECT report_date AS Date, holder_count, holder_count_change_pct,
                avg_shares_per_holder
         FROM shareholder_count
-        WHERE ts_code = ?
+        WHERE ts_code = ?{date_filter}
         ORDER BY report_date DESC
         LIMIT 4
         """,
-        (code,),
+        tuple(params),
     )
 
     if df is None or df.empty:

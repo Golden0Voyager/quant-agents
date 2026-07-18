@@ -102,8 +102,8 @@ def fetch_eastmoney_hot_rank(ticker: str, limit: int = 20) -> str:
                 max_retries=3,
             )
         if detail_df is not None and not detail_df.empty:
-            # Show the most recent entries (latest data first)
-            recent = detail_df.head(limit)
+            # API returns rows oldest-first; tail() selects the newest `limit` rows.
+            recent = detail_df.tail(limit)
             for _, row in recent.iterrows():
                 cols = detail_df.columns.tolist()
                 date = _safe_col(row, cols, "时间", 0)

@@ -8,6 +8,10 @@ from tradingagents.dataflows.interface import route_to_vendor
 @tool
 def get_fund_flow(
     ticker: Annotated[str, "Ticker symbol"],
+    curr_date: Annotated[
+        str | None,
+        "Analysis date (YYYY-MM-DD); only data on or before this date will be returned.",
+    ] = None,
 ) -> str:
     """
     Retrieve individual stock fund flow data (main force, super-large, large, medium, small orders).
@@ -15,15 +19,22 @@ def get_fund_flow(
     Uses the configured technical_indicators vendor (akshare for A-shares).
     Args:
         ticker (str): Ticker symbol
+        curr_date (str | None): Analysis date (YYYY-MM-DD); only data on or before this date will be returned.
     Returns:
         str: A formatted report of fund flow data
     """
-    return route_to_vendor("get_fund_flow", ticker)
+    if curr_date is None:
+        return route_to_vendor("get_fund_flow", ticker)
+    return route_to_vendor("get_fund_flow", ticker, curr_date)
 
 
 @tool
 def get_northbound_hold(
     ticker: Annotated[str, "Ticker symbol"],
+    curr_date: Annotated[
+        str | None,
+        "Analysis date (YYYY-MM-DD); only data on or before this date will be returned.",
+    ] = None,
 ) -> str:
     """
     Retrieve northbound (Stock Connect) foreign investor holding data.
@@ -31,15 +42,22 @@ def get_northbound_hold(
     Uses the configured news_data vendor (akshare for A-shares).
     Args:
         ticker (str): Ticker symbol
+        curr_date (str | None): Analysis date (YYYY-MM-DD); only data on or before this date will be returned.
     Returns:
         str: A formatted report of northbound holdings
     """
-    return route_to_vendor("get_northbound_hold", ticker)
+    if curr_date is None:
+        return route_to_vendor("get_northbound_hold", ticker)
+    return route_to_vendor("get_northbound_hold", ticker, curr_date)
 
 
 @tool
 def get_margin_trading(
     ticker: Annotated[str, "Ticker symbol"],
+    curr_date: Annotated[
+        str | None,
+        "Analysis date (YYYY-MM-DD); only data on or before this date will be returned.",
+    ] = None,
 ) -> str:
     """
     Retrieve margin-trading (融资融券) data for a given ticker.
@@ -47,10 +65,13 @@ def get_margin_trading(
     Uses the configured technical_indicators vendor (smartmoney_db local cache or akshare for A-shares).
     Args:
         ticker (str): Ticker symbol
+        curr_date (str | None): Analysis date (YYYY-MM-DD); only data on or before this date will be returned.
     Returns:
         str: A formatted report of margin trading data
     """
-    return route_to_vendor("get_margin_trading", ticker)
+    if curr_date is None:
+        return route_to_vendor("get_margin_trading", ticker)
+    return route_to_vendor("get_margin_trading", ticker, curr_date)
 
 
 @tool
