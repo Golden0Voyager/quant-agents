@@ -121,16 +121,23 @@ def test_run_single_refreshes_per_chunk(tmp_path):
     runner._layout = MagicMock()
     runner._start_time = 0.0
 
-    # Fake graph: 3 chunks then final state has the keys save_report_to_disk needs.
+    # Fake graph: propagate() feeds 3 chunks to the on_chunk callback, then
+    # returns a final state with the keys save_report_to_disk needs.
     fake_chunks = [
         {"messages": []},
         {"investment_debate_state": {"bull_history": "x"}},
         {"final_trade_decision": "Rating: Hold\nEntry: 100\nStop: 90\nSize: 1%"},
     ]
+    final_state = {"final_trade_decision": "Rating: Hold\nEntry: 100\nStop: 90\nSize: 1%"}
+
+    def fake_propagate(*args, **kwargs):
+        on_chunk = kwargs["on_chunk"]
+        for chunk in fake_chunks:
+            on_chunk(chunk)
+        return final_state, "Hold"
+
     fake_graph = MagicMock()
-    fake_graph.graph.stream.return_value = iter(fake_chunks)
-    fake_graph.propagator.create_initial_state.return_value = {"messages": []}
-    fake_graph.propagator.get_graph_args.return_value = {}
+    fake_graph.propagate.side_effect = fake_propagate
 
     with patch("cli.batch_runner.TradingAgentsGraph", return_value=fake_graph), \
          patch("cli.batch_runner.StatsCallbackHandler"), \
@@ -454,10 +461,7 @@ def test_run_single_selects_analysts_from_profile(tmp_path):
         output_dir=tmp_path / "reports",
     )
     fake_graph = MagicMock()
-    fake_graph.propagator.create_initial_state.return_value = {"messages": []}
-    fake_graph.propagator.get_graph_args.return_value = {}
-    fake_graph.graph.stream.return_value = iter([])
-    fake_graph.resolve_instrument_context.return_value = {}
+    fake_graph.propagate.return_value = ({"final_trade_decision": ""}, "Hold")
 
     with patch("cli.batch_runner.TradingAgentsGraph", return_value=fake_graph), \
          patch("cli.batch_runner.StatsCallbackHandler"), \

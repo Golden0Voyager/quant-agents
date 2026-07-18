@@ -1,5 +1,7 @@
 import os
 
+from tradingagents.agents.utils.structured import FALLBACK_MARKER
+
 # Batch mode is unattended — tqdm progress bars from akshare/yfinance/third-party
 # libraries spam the terminal and break the Rich TUI layout. Disable globally.
 os.environ["TQDM_DISABLE"] = "1"
@@ -23,7 +25,7 @@ from cli.dashboard import (
     update_dashboard_display,
 )
 from cli.stats_handler import StatsCallbackHandler
-from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.default_config import default_config
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.llm_clients.pricing import get_usd_to_cny_rate
 
@@ -309,7 +311,7 @@ class BatchRunner:
         return None
 
     def _build_config(self) -> dict:
-        config = DEFAULT_CONFIG.copy()
+        config = default_config()
         config["max_debate_rounds"] = self.profile_config.get("research_depth", 1)
         config["max_risk_discuss_rounds"] = self.profile_config.get("research_depth", 1)
         config["quick_think_llm"] = (
@@ -332,7 +334,14 @@ class BatchRunner:
         return config
 
     def _run_single(self, ticker: str) -> dict:
-        """Run analysis for a single ticker. Returns final state dict."""
+        """Run analysis for a single ticker. Returns final state dict.
+
+        Shares the core pipeline with single-ticker runs via
+        ``TradingAgentsGraph.propagate()`` so batch mode gets the verified
+        market snapshot, memory-log write-back, decision storage, state
+        logging, and checkpoint resume for free. The dashboard keeps its
+        per-chunk live updates through the ``on_chunk`` stream callback.
+        """
         from cli.main import save_report_to_disk
         from tradingagents.ticker_resolver import resolve_ticker
 
@@ -348,10 +357,13 @@ class BatchRunner:
         self.dashboard.init_for_analysis(selected_analyst_keys, clear_messages=False)
 
         stats_handler = StatsCallbackHandler()
+        # debug=False: _run_graph() pretty-prints trailing messages to stdout
+        # when debug is on, which would break the Rich Live layout now that
+        # batch mode shares that execution path.
         graph = TradingAgentsGraph(
             selected_analyst_keys,
             config=config,
-            debug=True,
+            debug=False,
             callbacks=[stats_handler],
         )
 
@@ -369,39 +381,28 @@ class BatchRunner:
         except Exception:
             pass
 
-        # Resolve instrument identity so agents anchor to the real company
-        # rather than hallucinating from the price chart (#814).
-        instrument_context = graph.resolve_instrument_context(
-            resolved_ticker,
-            confirmed_name=company_name or None,
-        )
-        init_state = graph.propagator.create_initial_state(
-            resolved_ticker,
-            trade_date,
-            instrument_context=instrument_context,
-            holdings_context=self.holdings,
-            transactions_context=transactions_context,
-        )
-        if company_name:
-            init_state["company_name"] = company_name
-        args = graph.propagator.get_graph_args(callbacks=[stats_handler])
+        max_debate = config.get("max_debate_rounds", 1)
+        max_risk = config.get("max_risk_discuss_rounds", 1)
+        processed_ids: set = set()
+
+        def on_chunk(snapshot: dict) -> None:
+            """Feed each merged-state snapshot to the dashboard (per stream chunk)."""
+            nonlocal processed_ids
+            processed_ids = process_stream_chunk(
+                self.dashboard,
+                snapshot,
+                max_debate_rounds=max_debate,
+                max_risk_rounds=max_risk,
+                processed_ids=processed_ids,
+            )
+            self._refresh_display(stats_handler=stats_handler)
 
         # ── Checkpoint / resume support ────────────────────────────
-        # When checkpoint is enabled, recompile the graph with a per-ticker
-        # SqliteSaver so a crashed / stuck run can resume from the last
-        # successful node instead of restarting from scratch.
-        checkpointer_ctx = None
+        # propagate() owns the checkpoint lifecycle (compile with saver,
+        # resume via stream(None), clear on success). Here we only surface
+        # the resume intent on the dashboard, as before.
         if config.get("checkpoint_enabled"):
-            from tradingagents.graph.checkpointer import (
-                checkpoint_step,
-                clear_checkpoint,
-                get_checkpointer,
-                thread_id,
-            )
-
-            checkpointer_ctx = get_checkpointer(config["data_cache_dir"], resolved_ticker)
-            saver = checkpointer_ctx.__enter__()
-            graph.graph = graph.workflow.compile(checkpointer=saver)
+            from tradingagents.graph.checkpointer import checkpoint_step
 
             step = checkpoint_step(config["data_cache_dir"], resolved_ticker, trade_date)
             if step is not None:
@@ -412,50 +413,28 @@ class BatchRunner:
             else:
                 self.dashboard.add_message("Info", f"Starting fresh analysis for {ticker}")
 
-            # Inject thread_id so the same ticker+date resumes correctly.
-            tid = thread_id(resolved_ticker, trade_date)
-            args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
+        final_state, _signal = graph.propagate(
+            resolved_ticker,
+            trade_date,
+            confirmed_name=company_name or None,
+            on_chunk=on_chunk,
+            holdings_context=self.holdings,
+            transactions_context=transactions_context,
+            company_display_name=company_name or None,
+        )
 
-        try:
-            trace = []
-            processed_ids: set = set()
-            max_debate = config.get("max_debate_rounds", 1)
-            max_risk = config.get("max_risk_discuss_rounds", 1)
+        # Save report
+        ticker_dir_name = self._build_ticker_dir_name(ticker, company_name)
+        ticker_dir = self.output_dir / ticker_dir_name
+        ticker_dir.mkdir(parents=True, exist_ok=True)
+        save_report_to_disk(final_state, ticker, ticker_dir)
 
-            for chunk in graph.graph.stream(init_state, **args):
-                processed_ids = process_stream_chunk(
-                    self.dashboard,
-                    chunk,
-                    max_debate_rounds=max_debate,
-                    max_risk_rounds=max_risk,
-                    processed_ids=processed_ids,
-                )
-                self._refresh_display(stats_handler=stats_handler)
-                trace.append(chunk)
+        # Extract summary (lock-protected for concurrent batch mode)
+        with self._lock:
+            self._extract_summary(ticker, final_state)
+            self._accumulate_stats(ticker, stats_handler)
 
-            final_state = trace[-1] if trace else {}
-
-            # Save report
-            ticker_dir_name = self._build_ticker_dir_name(ticker, company_name)
-            ticker_dir = self.output_dir / ticker_dir_name
-            ticker_dir.mkdir(parents=True, exist_ok=True)
-            save_report_to_disk(final_state, ticker, ticker_dir)
-
-            # Extract summary (lock-protected for concurrent batch mode)
-            with self._lock:
-                self._extract_summary(ticker, final_state)
-                self._accumulate_stats(ticker, stats_handler)
-
-            # Clear checkpoint on successful completion to avoid stale state.
-            if config.get("checkpoint_enabled"):
-                clear_checkpoint(config["data_cache_dir"], resolved_ticker, trade_date)
-
-            return final_state
-        finally:
-            # Always close the checkpointer context and restore the plain graph.
-            if checkpointer_ctx is not None:
-                checkpointer_ctx.__exit__(None, None, None)
-                graph.graph = graph.workflow.compile()
+        return final_state
 
     def _extract_summary(self, ticker: str, final_state: dict) -> None:
         """Extract the portfolio decision for the batch summary.
@@ -490,6 +469,25 @@ class BatchRunner:
                         break
 
         fields = self._parse_summary_fields(decision, trader)
+
+        # Detect structured-output fallback so the batch summary can flag degraded
+        # decisions and force confidence to low.
+        is_fallback = bool(
+            final_state.get("structured_fallback_agents")
+            or final_state.get("_structured_fallback")
+            or FALLBACK_MARKER in decision
+        )
+        fields["fallback"] = is_fallback
+        if is_fallback:
+            fields["confidence"] = "low"
+        else:
+            m = re.search(
+                r"\*\*Confidence\*\*\s*[:：]\s*(low|medium|high)",
+                decision,
+                re.IGNORECASE,
+            )
+            fields["confidence"] = m.group(1).lower() if m else "—"
+
         self.summaries[ticker] = {"company": company or ticker, **fields}
 
     @staticmethod
@@ -1015,11 +1013,11 @@ class BatchRunner:
         has_stats = bool(self.batch_stats.get("per_ticker"))
         lines = ["# Batch Analysis Report\n"]
         if has_stats:
-            lines.append("| Ticker | Company | Rating | Entry | Stop | Size | Tokens | Cost | Status | Details |")
-            lines.append("|--------|---------|--------|-------|------|------|--------|------|--------|---------|")
+            lines.append("| Ticker | Company | Rating | Entry | Stop | Size | Confidence | Tokens | Cost | Status | Details |")
+            lines.append("|--------|---------|--------|-------|------|------|------------|--------|------|--------|---------|")
         else:
-            lines.append("| Ticker | Company | Rating | Entry | Stop | Size | Status | Details |")
-            lines.append("|--------|---------|--------|-------|------|------|--------|---------|")
+            lines.append("| Ticker | Company | Rating | Entry | Stop | Size | Confidence | Status | Details |")
+            lines.append("|--------|---------|--------|-------|------|------|------------|--------|---------|")
 
         all_tickers = sorted(set(self.tickers) | set(self.summaries.keys()) | set(self.failures.keys()))
         json_rows = []
@@ -1028,9 +1026,9 @@ class BatchRunner:
             tokens_cell, cost_cell = self._format_token_cost_cells(per_ticker_stats)
             if ticker in self.failures:
                 if has_stats:
-                    lines.append(f"| {ticker} | — | — | — | — | — | — | — | ❌ | — |")
+                    lines.append(f"| {ticker} | — | — | — | — | — | — | — | — | ❌ | — |")
                 else:
-                    lines.append(f"| {ticker} | — | — | — | — | — | ❌ | — |")
+                    lines.append(f"| {ticker} | — | — | — | — | — | — | ❌ | — |")
                 json_rows.append(
                     {
                         "ticker": ticker,
@@ -1053,18 +1051,21 @@ class BatchRunner:
             else:
                 s = self.summaries.get(ticker, {})
                 dir_name = self._build_ticker_dir_name(ticker, s.get("company", ""))
+                confidence = s.get("confidence", "—")
+                details = f"[Report](./{dir_name}/complete_report.md)"
+                if s.get("fallback"):
+                    details += " [fallback]"
                 if has_stats:
                     lines.append(
                         f"| {ticker} | {s.get('company', ticker)} | {s.get('rating', '—')} | "
                         f"{s.get('entry', '—')} | {s.get('stop', '—')} | {s.get('size', '—')} | "
-                        f"{tokens_cell} | {cost_cell} | ✅ | "
-                        f"[Report](./{dir_name}/complete_report.md) |"
+                        f"{confidence} | {tokens_cell} | {cost_cell} | ✅ | {details} |"
                     )
                 else:
                     lines.append(
                         f"| {ticker} | {s.get('company', ticker)} | {s.get('rating', '—')} | "
-                        f"{s.get('entry', '—')} | {s.get('stop', '—')} | {s.get('size', '—')} | ✅ | "
-                        f"[Report](./{dir_name}/complete_report.md) |"
+                        f"{s.get('entry', '—')} | {s.get('stop', '—')} | {s.get('size', '—')} | "
+                        f"{confidence} | ✅ | {details} |"
                     )
                 json_rows.append(
                     {
@@ -1074,6 +1075,8 @@ class BatchRunner:
                         "entry": s.get("entry"),
                         "stop": s.get("stop"),
                         "size": s.get("size"),
+                        "confidence": s.get("confidence"),
+                        "fallback": s.get("fallback", False),
                         "llm_calls": per_ticker_stats.get("llm_calls"),
                         "tokens_in": per_ticker_stats.get("tokens_in"),
                         "tokens_out": per_ticker_stats.get("tokens_out"),

@@ -1,3 +1,4 @@
+import copy
 import os
 
 _TRADINGAGENTS_HOME = os.path.join(os.path.expanduser("~"), ".tradingagents")
@@ -192,4 +193,15 @@ _BASE_CONFIG = {
         ".SZ":  "399001.SZ",   # Shenzhen (SZSE Component)
         "":     "SPY",         # default for US-listed tickers (no suffix)
     },
-})
+}
+
+
+def default_config() -> dict:
+    """Return a fresh deep copy of the base config with env overrides applied."""
+    config = copy.deepcopy(_BASE_CONFIG)
+    return _apply_env_overrides(config)
+
+
+# Backward-compatible import-time reference.  New code should call
+# ``default_config()`` to obtain an independent copy.
+DEFAULT_CONFIG = default_config()

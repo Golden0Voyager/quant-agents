@@ -1,15 +1,15 @@
-import importlib
 import os
 import unittest
 from unittest.mock import patch
 
 import pytest
 
-import tradingagents.default_config as default_config_module
 from tradingagents.default_config import (
+    _ENV_OVERRIDES,
     DEFAULT_CONFIG,
     _apply_env_overrides,
     _coerce,
+    default_config,
 )
 
 
@@ -62,59 +62,103 @@ class ApplyEnvOverridesTests(unittest.TestCase):
 
 @pytest.mark.unit
 class DefaultConfigTests(unittest.TestCase):
+    def test_default_config_returns_dict(self):
+        cfg = default_config()
+        self.assertIsInstance(cfg, dict)
+
+    def test_default_config_returns_deep_copy(self):
+        cfg1 = default_config()
+        cfg2 = default_config()
+        self.assertIsNot(cfg1, cfg2)
+        self.assertIsNot(cfg1["data_vendors"], cfg2["data_vendors"])
+
+        cfg1["data_vendors"]["core_stock_apis"] = "changed"
+        self.assertEqual(cfg2["data_vendors"]["core_stock_apis"], "smartmoney_db,akshare,yfinance")
+
+    def test_default_config_is_independent_of_import_reference(self):
+        """Mutating a returned config must not affect the next call."""
+        cfg = default_config()
+        cfg["quick_think_fallback"].append({"provider": "x", "model": "y"})
+        cfg["benchmark_map"][""] = "QQQ"
+
+        fresh = default_config()
+        self.assertNotIn({"provider": "x", "model": "y"}, fresh["quick_think_fallback"])
+        self.assertEqual(fresh["benchmark_map"][""], "SPY")
+
     def test_has_expected_keys(self):
         expected = {
             "llm_provider", "deep_think_llm", "quick_think_llm",
             "max_debate_rounds", "max_risk_discuss_rounds",
             "checkpoint_enabled", "output_language", "benchmark_map",
+            "disable_yfinance_fallback",
         }
+        cfg = default_config()
         for key in expected:
-            self.assertIn(key, DEFAULT_CONFIG)
+            self.assertIn(key, cfg)
 
     def test_defaults_are_sane(self):
-        self.assertEqual(DEFAULT_CONFIG["llm_provider"], "sensenova")
-        self.assertEqual(DEFAULT_CONFIG["max_debate_rounds"], 1)
-        self.assertEqual(DEFAULT_CONFIG["checkpoint_enabled"], False)
-        self.assertEqual(DEFAULT_CONFIG["output_language"], "Chinese")
+        cfg = default_config()
+        self.assertEqual(cfg["llm_provider"], "sensenova")
+        self.assertEqual(cfg["max_debate_rounds"], 1)
+        self.assertEqual(cfg["checkpoint_enabled"], False)
+        self.assertEqual(cfg["output_language"], "Chinese")
+        self.assertEqual(cfg["disable_yfinance_fallback"], False)
 
     def test_benchmark_map_has_default(self):
-        self.assertIn("", DEFAULT_CONFIG["benchmark_map"])
-        self.assertEqual(DEFAULT_CONFIG["benchmark_map"][""], "SPY")
+        cfg = default_config()
+        self.assertIn("", cfg["benchmark_map"])
+        self.assertEqual(cfg["benchmark_map"][""], "SPY")
+
+    def test_data_vendors_has_research_opinion(self):
+        """data_vendors must include a research_opinion category for
+        analyst-opinion / research-report tool routing."""
+        cfg = default_config()
+        self.assertIn("data_vendors", cfg)
+        self.assertIn("research_opinion", cfg["data_vendors"])
+        vendors = cfg["data_vendors"]["research_opinion"]
+        self.assertIsInstance(vendors, str)
+        self.assertIn("akshare", vendors)
+
+    def test_data_vendors_no_prediction_markets(self):
+        """prediction_markets category was removed from default config."""
+        cfg = default_config()
+        self.assertNotIn("prediction_markets", cfg["data_vendors"])
+
+    def test_default_config_backward_compat_reference(self):
+        """DEFAULT_CONFIG remains a dict populated at import time."""
+        self.assertIsInstance(DEFAULT_CONFIG, dict)
+        self.assertIn("llm_provider", DEFAULT_CONFIG)
 
 
 # ===========================================================================
-# TRADINGAGENTS_* env-var overlay onto DEFAULT_CONFIG.
-# Merged from tests/test_env_overrides.py. These exercise the higher-level
-# module-reload surface; CoerceTests / ApplyEnvOverridesTests above poke
-# _apply_env_overrides directly with a fake config dict.
+# TRADINGAGENTS_* env-var overlay onto default_config().
+# These exercise the public factory without module reload hacks.
 # ===========================================================================
 
 
-def _dc_reload_with_env(monkeypatch, **overrides):
-    """Set/clear TRADINGAGENTS_* env vars then reload DEFAULT_CONFIG."""
-    from tradingagents.default_config import _ENV_OVERRIDES
-
+def _dc_with_env(monkeypatch, **overrides):
+    """Clear TRADINGAGENTS_* env vars, set overrides, return default_config()."""
     for key in list(_ENV_OVERRIDES):
         monkeypatch.delenv(key, raising=False)
     for key, val in overrides.items():
         monkeypatch.setenv(key, val)
-    return importlib.reload(default_config_module)
+    return default_config()
 
 
 @pytest.mark.unit
 def test_no_env_uses_built_in_defaults(monkeypatch):
-    dc = _dc_reload_with_env(monkeypatch)
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "sensenova"
-    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "deepseek-v4-flash"
-    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "sensenova-6.7-flash-lite"
-    assert dc.DEFAULT_CONFIG["backend_url"] == "https://token.sensenova.cn/v1"
-    assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
-    assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is False
+    cfg = _dc_with_env(monkeypatch)
+    assert cfg["llm_provider"] == "sensenova"
+    assert cfg["deep_think_llm"] == "deepseek-v4-flash"
+    assert cfg["quick_think_llm"] == "sensenova-6.7-flash-lite"
+    assert cfg["backend_url"] == "https://token.sensenova.cn/v1"
+    assert cfg["max_debate_rounds"] == 1
+    assert cfg["checkpoint_enabled"] is False
 
 
 @pytest.mark.unit
 def test_string_env_overrides(monkeypatch):
-    dc = _dc_reload_with_env(
+    cfg = _dc_with_env(
         monkeypatch,
         TRADINGAGENTS_LLM_PROVIDER="google",
         TRADINGAGENTS_DEEP_THINK_LLM="gemini-3-pro-preview",
@@ -122,24 +166,24 @@ def test_string_env_overrides(monkeypatch):
         TRADINGAGENTS_LLM_BACKEND_URL="https://example.invalid/v1",
         TRADINGAGENTS_OUTPUT_LANGUAGE="Chinese",
     )
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "google"
-    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "gemini-3-pro-preview"
-    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "gemini-3-flash-preview"
-    assert dc.DEFAULT_CONFIG["backend_url"] == "https://example.invalid/v1"
-    assert dc.DEFAULT_CONFIG["output_language"] == "Chinese"
+    assert cfg["llm_provider"] == "google"
+    assert cfg["deep_think_llm"] == "gemini-3-pro-preview"
+    assert cfg["quick_think_llm"] == "gemini-3-flash-preview"
+    assert cfg["backend_url"] == "https://example.invalid/v1"
+    assert cfg["output_language"] == "Chinese"
 
 
 @pytest.mark.unit
 def test_int_env_coercion(monkeypatch):
-    dc = _dc_reload_with_env(
+    cfg = _dc_with_env(
         monkeypatch,
         TRADINGAGENTS_MAX_DEBATE_ROUNDS="3",
         TRADINGAGENTS_MAX_RISK_ROUNDS="2",
     )
-    assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 3
-    assert isinstance(dc.DEFAULT_CONFIG["max_debate_rounds"], int)
-    assert dc.DEFAULT_CONFIG["max_risk_discuss_rounds"] == 2
-    assert isinstance(dc.DEFAULT_CONFIG["max_risk_discuss_rounds"], int)
+    assert cfg["max_debate_rounds"] == 3
+    assert isinstance(cfg["max_debate_rounds"], int)
+    assert cfg["max_risk_discuss_rounds"] == 2
+    assert isinstance(cfg["max_risk_discuss_rounds"], int)
 
 
 @pytest.mark.unit
@@ -151,41 +195,65 @@ def test_int_env_coercion(monkeypatch):
     ],
 )
 def test_bool_env_coercion(monkeypatch, raw, expected):
-    dc = _dc_reload_with_env(monkeypatch, TRADINGAGENTS_CHECKPOINT_ENABLED=raw)
-    assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is expected
+    cfg = _dc_with_env(monkeypatch, TRADINGAGENTS_CHECKPOINT_ENABLED=raw)
+    assert cfg["checkpoint_enabled"] is expected
 
 
 @pytest.mark.unit
 def test_empty_env_value_is_passthrough(monkeypatch):
     """Empty TRADINGAGENTS_* values must not clobber the built-in default."""
-    dc = _dc_reload_with_env(
+    cfg = _dc_with_env(
         monkeypatch,
         TRADINGAGENTS_LLM_PROVIDER="",
         TRADINGAGENTS_MAX_DEBATE_ROUNDS="",
     )
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "sensenova"
-    assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
+    assert cfg["llm_provider"] == "sensenova"
+    assert cfg["max_debate_rounds"] == 1
 
 
 @pytest.mark.unit
 def test_invalid_int_env_raises(monkeypatch):
-    """Garbage int values should surface a ValueError at import, not silently misconfigure."""
+    """Garbage int values should surface a ValueError, not silently misconfigure."""
     monkeypatch.setenv("TRADINGAGENTS_MAX_DEBATE_ROUNDS", "not-a-number")
     with pytest.raises(ValueError):
-        importlib.reload(default_config_module)
-    # Restore module state for subsequent tests in this process.
-    monkeypatch.delenv("TRADINGAGENTS_MAX_DEBATE_ROUNDS", raising=False)
-    importlib.reload(default_config_module)
+        default_config()
 
 
 @pytest.mark.unit
 def test_unknown_env_var_is_ignored(monkeypatch):
-    """Env vars outside _ENV_OVERRIDES must not bleed into DEFAULT_CONFIG."""
-    dc = _dc_reload_with_env(
+    """Env vars outside _ENV_OVERRIDES must not bleed into config."""
+    cfg = _dc_with_env(
         monkeypatch,
         TRADINGAGENTS_NONEXISTENT_KEY="oops",
     )
-    assert "nonexistent_key" not in dc.DEFAULT_CONFIG
+    assert "nonexistent_key" not in cfg
+
+
+@pytest.mark.unit
+def test_results_dir_env_override(monkeypatch, tmp_path):
+    cfg = _dc_with_env(monkeypatch, TRADINGAGENTS_RESULTS_DIR=str(tmp_path / "logs"))
+    assert cfg["results_dir"] == str(tmp_path / "logs")
+
+
+@pytest.mark.unit
+def test_cache_dir_env_override(monkeypatch, tmp_path):
+    cfg = _dc_with_env(monkeypatch, TRADINGAGENTS_CACHE_DIR=str(tmp_path / "cache"))
+    assert cfg["data_cache_dir"] == str(tmp_path / "cache")
+
+
+@pytest.mark.unit
+def test_memory_log_path_env_override(monkeypatch, tmp_path):
+    cfg = _dc_with_env(monkeypatch, TRADINGAGENTS_MEMORY_LOG_PATH=str(tmp_path / "mem.md"))
+    assert cfg["memory_log_path"] == str(tmp_path / "mem.md")
+
+
+@pytest.mark.unit
+def test_disable_yfinance_fallback_env_override(monkeypatch):
+    cfg = _dc_with_env(monkeypatch, DISABLE_YFINANCE_FALLBACK="1")
+    assert cfg["disable_yfinance_fallback"] is True
+
+    cfg_off = _dc_with_env(monkeypatch, DISABLE_YFINANCE_FALLBACK="0")
+    assert cfg_off["disable_yfinance_fallback"] is False
 
 
 if __name__ == "__main__":
