@@ -211,3 +211,145 @@ class MktDataValidatorIndicatorExceptionTests(unittest.TestCase):
 
             result = validator.build_verified_market_snapshot("AAPL", "2026-05-20", indicators=("rsi",))
         self.assertIn("| rsi | 60.00 |", result)
+
+
+@pytest.mark.unit
+class TestVerifiedFundamentalsSnapshot:
+    """build_verified_fundamentals_snapshot extracts key fundamentals from vendor text."""
+
+    SMARTMONEY_FUNDAMENTALS = """\
+# Fundamentals for 600519.SS (Kweichow Moutai) as of 2026-06-20
+# Source: quant_core.db (local SQLite)
+
+- 股票简称: Kweichow Moutai
+- 行业: 酿酒行业
+
+- PE(TTM): 25.50
+- PB: 8.20
+- PS(TTM): 12.30
+- 股息率: 1.50%
+- 总市值: 21000.00 亿 (≈2100.00 billion CNY)
+
+## 盈利能力
+- ROE: 18.50%
+- ROA: 12.30%
+- 毛利率: 91.50%
+- 净利率: 35.20%
+
+## 成长性
+- 营收同比增长: 15.20%
+- 净利润同比增长: 18.30%
+- EPS同比增长: 16.50%
+- PEG: 1.40
+
+## 偿债能力
+- 资产负债率: 22.50%
+"""
+
+    AKSHARE_FUNDAMENTALS = """\
+# Fundamentals for 600519.SS as of 2026-06-20
+# Source: akshare (Eastmoney)
+
+- 股票简称: 贵州茅台
+- 行业: 酿酒行业
+- 上市时间: 2001-08-27
+
+## 业绩报表 (报告期 2026-03-31)
+- 营收同比增长(YoY): 15.20%
+- 净利润同比增长(YoY): 18.30%
+- 销售毛利率: 91.50%
+- 净资产收益率: 18.50%
+- EPS: 12.50
+- 每股经营现金流量: 10.20
+"""
+
+    def test_parses_pe_pb_from_smartmoney_output(self, monkeypatch):
+        from tradingagents.dataflows.interface import VendorRouteResult
+
+        monkeypatch.setattr(
+            validator,
+            "route_to_vendor_with_source",
+            lambda method, *args, **kwargs: VendorRouteResult(
+                self.SMARTMONEY_FUNDAMENTALS, "smartmoney_db"
+            ),
+        )
+        snap = validator.build_verified_fundamentals_snapshot("600519.SS", "2026-06-20")
+        assert snap["pe_ttm"] == 25.50
+        assert snap["pb"] == 8.20
+        assert snap["market_cap_billion_cny"] == 2100.00
+        assert snap["source"] == "smartmoney_db"
+        assert snap["as_of"] == "2026-06-20"
+
+    def test_parses_eps_and_roe_from_akshare_output(self, monkeypatch):
+        from tradingagents.dataflows.interface import VendorRouteResult
+
+        monkeypatch.setattr(
+            validator,
+            "route_to_vendor_with_source",
+            lambda method, *args, **kwargs: VendorRouteResult(
+                self.AKSHARE_FUNDAMENTALS, "akshare"
+            ),
+        )
+        snap = validator.build_verified_fundamentals_snapshot("600519.SS", "2026-06-20")
+        assert snap["eps"] == 12.50
+        assert snap["roe"] == 18.50
+
+    def test_returns_empty_dict_when_no_data(self, monkeypatch):
+        from tradingagents.dataflows.interface import VendorRouteResult
+
+        monkeypatch.setattr(
+            validator,
+            "route_to_vendor_with_source",
+            lambda method, *args, **kwargs: VendorRouteResult(
+                "NO_DATA_AVAILABLE: No usable market data for '600519.SS' "
+                "from any configured vendor. Do not estimate or fabricate values.",
+                None,
+            ),
+        )
+        snap = validator.build_verified_fundamentals_snapshot("600519.SS", "2026-06-20")
+        assert snap.get("symbol") == "600519.SS"
+        assert "error" in snap
+
+    def test_render_fundamentals_snapshot_includes_source(self, monkeypatch):
+        from tradingagents.dataflows.interface import VendorRouteResult
+
+        monkeypatch.setattr(
+            validator,
+            "route_to_vendor_with_source",
+            lambda method, *args, **kwargs: VendorRouteResult(
+                self.SMARTMONEY_FUNDAMENTALS, "smartmoney_db"
+            ),
+        )
+        snap = validator.build_verified_fundamentals_snapshot("600519.SS", "2026-06-20")
+        md = validator.render_fundamentals_snapshot(snap)
+        assert "PE(TTM)" in md
+        assert "PB" in md
+        assert "smartmoney_db" in md
+        assert "2026-06-20" in md
+
+    def test_preserves_signed_fundamental_values(self):
+        text = """
+- ROE: -434.20%
+- 净利润同比增长: -18.30%
+- EPS: -1.25
+"""
+        metrics = validator._extract_fundamental_metrics(text)
+        assert metrics["roe"] == -434.20
+        assert metrics["profit_growth"] == -18.30
+        assert metrics["eps"] == -1.25
+
+    def test_metric_free_snapshot_is_unavailable(self, monkeypatch):
+        from tradingagents.dataflows.interface import VendorRouteResult
+
+        monkeypatch.setattr(
+            validator,
+            "route_to_vendor_with_source",
+            lambda method, *args, **kwargs: VendorRouteResult(
+                "# Fundamentals\n- Company: Example Corp", "yfinance"
+            ),
+        )
+        snap = validator.build_verified_fundamentals_snapshot("AAPL", "2026-06-20")
+        md = validator.render_fundamentals_snapshot(snap)
+        assert "error" in snap
+        assert "Verified fundamentals snapshot" not in md
+        assert "unavailable" in md.lower()

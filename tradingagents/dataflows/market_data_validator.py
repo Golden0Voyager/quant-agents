@@ -10,11 +10,14 @@ claim. Deterministic, no LLM involved.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 
 import pandas as pd
 from stockstats import wrap
 
+from tradingagents.dataflows.akshare_common import safe_float
+from tradingagents.dataflows.interface import route_to_vendor_with_source
 from tradingagents.dataflows.stockstats_utils import load_ohlcv
 
 # A fixed, common indicator set so the snapshot is the same shape every run.
@@ -121,4 +124,160 @@ def build_verified_market_snapshot(
         "percentage moves unless directly supported by tool output with concrete "
         "dates and prices.",
     ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Verified fundamentals snapshot
+# ---------------------------------------------------------------------------
+
+
+_FUNDAMENTAL_PATTERNS: dict[str, tuple[str, ...]] = {
+    "pe_ttm": (r"PE\(TTM\)\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)",),
+    "pb": (r"PB\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)",),
+    "ps_ttm": (r"PS\(TTM\)\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)",),
+    "dividend_yield": (r"股息率\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)\s*%?",),
+    "market_cap_billion_cny": (
+        r"≈\s*([+-]?[0-9,]+(?:\.[0-9]+)?)\s*billion\s*CNY",
+        r"总市值\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)\s*亿",
+    ),
+    "roe": (
+        r"ROE\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)\s*%?",
+        r"净资产收益率\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)\s*%?",
+    ),
+    "roa": (r"ROA\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)\s*%?",),
+    "gross_margin": (
+        r"毛利率\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)\s*%?",
+        r"销售毛利率\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)\s*%?",
+    ),
+    "net_margin": (r"净利率\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)\s*%?",),
+    "revenue_growth": (
+        r"营收同比增长(?:\(YoY\))?\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)\s*%?",
+    ),
+    "profit_growth": (
+        r"净利润同比增长(?:\(YoY\))?\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)\s*%?",
+    ),
+    "eps_growth": (r"EPS同比增长\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)\s*%?",),
+    "peg": (r"PEG\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)",),
+    "debt_ratio": (r"资产负债率\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)\s*%?",),
+    "eps": (
+        r"EPS\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)(?!\s*%)",
+        r"每股收益\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)",
+    ),
+    "bps": (r"每股净资产\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)",),
+    "revenue": (r"营业总收入\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)",),
+    "net_profit": (r"净利润\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)(?!\s*同比)",),
+    "operating_cashflow": (
+        r"经营活动现金流净额\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)",
+        r"每股经营现金流量\s*[:：]\s*([+-]?[0-9,]+(?:\.[0-9]+)?)",
+    ),
+}
+
+
+def _extract_fundamental_metrics(text: str) -> dict[str, float]:
+    """Extract canonical fundamental metrics from vendor markdown text."""
+    metrics: dict[str, float] = {}
+    for key, patterns in _FUNDAMENTAL_PATTERNS.items():
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                raw = match.group(1).replace(",", "")
+                value = safe_float(raw)
+                if value is not None:
+                    # market_cap_billion_cny from the 亿 line needs dividing by 10.
+                    if key == "market_cap_billion_cny" and "亿" in match.group(0) and "billion" not in match.group(0):
+                        value = value / 10.0
+                    metrics[key] = value
+                break
+    return metrics
+
+
+def build_verified_fundamentals_snapshot(symbol: str, curr_date: str) -> dict:
+    """Build a structured fundamentals snapshot from configured vendors.
+
+    The implementation reuses the existing vendor routing layer (smartmoney_db
+    first when configured, then akshare for A-shares, yfinance/alpha_vantage
+    for global tickers) instead of re-implementing raw vendor calls.  The
+    returned dict is intentionally sparse: only metrics actually returned by
+    the vendor are included.
+    """
+    try:
+        routed = route_to_vendor_with_source("get_fundamentals", symbol, curr_date)
+    except Exception as exc:  # noqa: BLE001 — a missing fundamentals vendor must not crash the run
+        return {"symbol": symbol, "as_of": curr_date, "error": str(exc)}
+
+    text = routed.data
+    metadata = {
+        "symbol": symbol,
+        "as_of": curr_date,
+        "source": routed.vendor,
+    }
+
+    if not text or (
+        "NO_DATA_AVAILABLE" in text
+        or "DATA_UNAVAILABLE" in text
+        or "No fundamentals available" in text
+    ):
+        return {**metadata, "error": "fundamentals data unavailable"}
+
+    metrics = _extract_fundamental_metrics(text)
+    if not metrics:
+        return {**metadata, "error": "no recognized fundamental metrics"}
+    return {**metadata, **metrics}
+
+
+def render_fundamentals_snapshot(snapshot: dict) -> str:
+    """Render a fundamentals snapshot dict to the markdown block injected into prompts."""
+    symbol = snapshot.get("symbol", "Unknown")
+    metric_keys = set(_FUNDAMENTAL_PATTERNS)
+    if snapshot.get("error") or not metric_keys.intersection(snapshot):
+        reason = snapshot.get("error", "no recognized fundamental metrics")
+        return (
+            f"Fundamentals snapshot unavailable for {symbol.upper()} as of "
+            f"{snapshot.get('as_of', 'unknown')}: {reason}. Exact fundamental "
+            "claims are unverified; do not estimate missing values."
+        )
+
+    lines = [
+        f"## Verified fundamentals snapshot for {symbol.upper()}",
+        f"- Analysis date: {snapshot.get('as_of', 'unknown')}",
+        f"- Source vendor: {snapshot.get('source') or 'unknown'}",
+        "",
+        "| Metric | Value |",
+        "|---|---:|",
+    ]
+    display_order = [
+        ("pe_ttm", "PE(TTM)"),
+        ("pb", "PB"),
+        ("ps_ttm", "PS(TTM)"),
+        ("dividend_yield", "Dividend Yield (%)"),
+        ("market_cap_billion_cny", "Market Cap (billion CNY)"),
+        ("roe", "ROE (%)"),
+        ("roa", "ROA (%)"),
+        ("gross_margin", "Gross Margin (%)"),
+        ("net_margin", "Net Margin (%)"),
+        ("revenue_growth", "Revenue Growth (%)"),
+        ("profit_growth", "Profit Growth (%)"),
+        ("eps_growth", "EPS Growth (%)"),
+        ("peg", "PEG"),
+        ("debt_ratio", "Debt Ratio (%)"),
+        ("eps", "EPS"),
+        ("bps", "BPS"),
+        ("revenue", "Revenue"),
+        ("net_profit", "Net Profit"),
+        ("operating_cashflow", "Operating Cash Flow"),
+    ]
+    for key, label in display_order:
+        if key in snapshot:
+            lines.append(f"| {label} | {_fmt(snapshot[key])} |")
+
+    if len(lines) <= 4:
+        lines.append("| (no fundamentals available) | N/A |")
+
+    lines.extend([
+        "",
+        "Source: fundamentals_snapshot. "
+        "Use only the numbers above for any exact fundamental claim. "
+        "If a metric is missing, say it is unavailable; do not estimate or recall a value.",
+    ])
     return "\n".join(lines)
