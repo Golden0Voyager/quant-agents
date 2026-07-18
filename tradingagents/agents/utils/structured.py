@@ -56,12 +56,17 @@ def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Any | None:
         return None
 
 
+FALLBACK_MARKER = "<!--STRUCTURED_FALLBACK: schema validation failed, treat with low confidence-->"
+
+
 def invoke_structured_or_freetext(
     structured_llm: Any | None,
     plain_llm: Any,
     prompt: Any,
     render: Callable[[T], str],
     agent_name: str,
+    validate: Callable[[T], tuple[T, str | None]] | None = None,
+    state: dict | None = None,
 ) -> str:
     """Run the structured call and render to markdown; fall back to free-text on any failure.
 
@@ -69,6 +74,15 @@ def invoke_structured_or_freetext(
     invocations, a list of message dicts for chat models that take that
     shape). The same value is forwarded to the free-text path so the
     fallback sees the same input the structured call did.
+
+    ``validate`` is an optional deterministic post-check on the parsed
+    result. It returns the (possibly corrected) result plus an optional
+    markdown note that is appended to the rendered output. It only runs on
+    the structured path; the free-text fallback has no typed fields to check.
+
+    ``state`` is retained as a deprecated compatibility parameter. Fallback
+    propagation is handled by graph nodes returning explicit state updates.
+    The returned free-text content is prefixed with an HTML-style marker.
     """
     if structured_llm is not None:
         try:
@@ -78,7 +92,11 @@ def invoke_structured_or_freetext(
                 # the tool, leaving the parser with nothing to return. Treat it
                 # as a structured miss and fall back, with a clear reason.
                 raise ValueError("structured output returned no parsed result")
-            return render(result)
+            note = None
+            if validate is not None:
+                result, note = validate(result)
+            rendered = render(result)
+            return f"{rendered}\n\n{note}" if note else rendered
         except Exception as exc:
             logger.warning(
                 "%s: structured-output invocation failed (%s); retrying once as free text",
@@ -86,4 +104,4 @@ def invoke_structured_or_freetext(
             )
 
     response = plain_llm.invoke(prompt)
-    return response.content
+    return f"\n{FALLBACK_MARKER}\n{response.content}"

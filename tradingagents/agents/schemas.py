@@ -100,17 +100,37 @@ class ResearchPlan(BaseModel):
             "including position sizing guidance consistent with the rating."
         ),
     )
+    confidence: Literal["low", "medium", "high"] | None = Field(
+        default=None,
+        description=(
+            "Confidence in the recommendation based on data quality and debate "
+            "clarity. Use 'low' when key data is missing or the debate is evenly "
+            "split; 'medium' when evidence is partial; 'high' when the thesis is "
+            "well supported by verified data."
+        ),
+    )
+    key_assumptions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Key assumptions that underpin the recommendation. "
+            "If a critical assumption fails, the recommendation may no longer hold."
+        ),
+    )
 
 
 def render_research_plan(plan: ResearchPlan) -> str:
     """Render a ResearchPlan to markdown for storage and the trader's prompt context."""
-    return "\n".join([
+    parts = [
         f"**Recommendation**: {plan.recommendation.value}",
         "",
         f"**Rationale**: {plan.rationale}",
         "",
         f"**Strategic Actions**: {plan.strategic_actions}",
-    ])
+    ]
+    parts.extend(["", f"**Confidence**: {plan.confidence or 'N/A'}"])
+    if plan.key_assumptions:
+        parts.extend(["", f"**Key Assumptions**: {', '.join(plan.key_assumptions)}"])
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +168,22 @@ class TraderProposal(BaseModel):
         default=None,
         description="Optional sizing guidance, e.g. '5% of portfolio'.",
     )
+    confidence: Literal["low", "medium", "high"] | None = Field(
+        default=None,
+        description=(
+            "Confidence in the transaction proposal based on how well entry/stop "
+            "levels are anchored to the verified market snapshot. Use 'low' when "
+            "the snapshot is unavailable or the research plan is conflicted."
+        ),
+    )
+    price_source: str | None = Field(
+        default=None,
+        description=(
+            "The exact price or data source used for entry_price and stop_loss, "
+            "e.g. 'Close from verified market snapshot' or "
+            "'null because verified snapshot unavailable'."
+        ),
+    )
 
     @field_validator("entry_price", "stop_loss", mode="before")
     @classmethod
@@ -173,6 +209,9 @@ def render_trader_proposal(proposal: TraderProposal) -> str:
         parts.extend(["", f"**Stop Loss**: {proposal.stop_loss}"])
     if proposal.position_sizing:
         parts.extend(["", f"**Position Sizing**: {proposal.position_sizing}"])
+    parts.extend(["", f"**Confidence**: {proposal.confidence or 'N/A'}"])
+    if proposal.price_source:
+        parts.extend(["", f"**Price Source**: {proposal.price_source}"])
     parts.extend([
         "",
         f"FINAL TRANSACTION PROPOSAL: **{proposal.action.value.upper()}**",
@@ -233,6 +272,24 @@ class PortfolioDecision(BaseModel):
         default=None,
         description="Optional position sizing guidance, inherited from the Trader's proposal.",
     )
+    confidence: Literal["low", "medium", "high"] | None = Field(
+        default=None,
+        description=(
+            "Confidence in the final decision based on data quality and source "
+            "coverage. Use 'low' when the verified market snapshot or fundamentals "
+            "snapshot is unavailable, or the evidence is mixed; 'medium' when data "
+            "is present but sparse; 'high' when both price and fundamental "
+            "snapshots are available and consistent."
+        ),
+    )
+    data_sources: list[str] = Field(
+        default_factory=list,
+        description=(
+            "List of data sources that underpin the decision. Include "
+            "'market_snapshot', 'fundamentals_snapshot', 'trader_proposal', "
+            "'risk_debate', and any relevant analyst reports."
+        ),
+    )
 
     @field_validator("price_target", mode="before")
     @classmethod
@@ -265,6 +322,9 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
         parts.extend(["", f"**Stop**: {decision.stop_loss}"])
     if decision.position_size:
         parts.extend(["", f"**Size**: {decision.position_size}"])
+    parts.extend(["", f"**Confidence**: {decision.confidence or 'N/A'}"])
+    if decision.data_sources:
+        parts.extend(["", f"**Data Sources**: {', '.join(decision.data_sources)}"])
     return "\n".join(parts)
 
 
