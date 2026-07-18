@@ -16,6 +16,16 @@ class TradingMemoryLog:
     _DECISION_RE = re.compile(r"DECISION:\n(.*?)(?=\nREFLECTION:|\Z)", re.DOTALL)
     _REFLECTION_RE = re.compile(r"REFLECTION:\n(.*?)$", re.DOTALL)
 
+    # Cross-instance locks keyed by log file path. Batch mode runs one
+    # TradingAgentsGraph (hence one TradingMemoryLog) per ticker in parallel
+    # threads, all pointing at the same memory file; an instance-level lock
+    # cannot serialize their read-modify-write cycles, so concurrent
+    # update_with_outcome calls lose entries. Keying the lock by path makes
+    # store_decision / update_with_outcome / batch_update_with_outcomes atomic
+    # across instances that share a backing file.
+    _path_locks: dict[str, threading.Lock] = {}
+    _path_locks_guard = threading.Lock()
+
     def __init__(self, config: dict = None):
         cfg = config or {}
         self._log_path = None
@@ -25,8 +35,25 @@ class TradingMemoryLog:
             self._log_path.parent.mkdir(parents=True, exist_ok=True)
         # Optional cap on resolved entries. None disables rotation.
         self._max_entries = cfg.get("memory_log_max_entries")
-        # Protect concurrent writes across threads (ticker-level batch parallelism)
-        self._lock = threading.Lock()
+        self._lock = self._lock_for_path(self._log_path)
+
+    @classmethod
+    def _lock_for_path(cls, path: Path | None) -> threading.Lock:
+        """Return the lock shared by all instances writing to ``path``."""
+        if path is None:
+            # No backing file: nothing to race on, but callers still need a
+            # valid lock object for ``with self._lock``.
+            return threading.Lock()
+        try:
+            key = str(path.resolve())
+        except OSError:
+            key = str(path)
+        with cls._path_locks_guard:
+            lock = cls._path_locks.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                cls._path_locks[key] = lock
+        return lock
 
     # --- Write path (Phase A) ---
 

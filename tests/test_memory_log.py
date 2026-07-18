@@ -13,6 +13,8 @@ from tradingagents.graph.propagation import Propagator
 from tradingagents.graph.reflection import Reflector
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 
+pytestmark = pytest.mark.unit
+
 _SEP = TradingMemoryLog._SEPARATOR
 
 DECISION_BUY = "Rating: Buy\nEnter at $189-192, 6% portfolio cap."
@@ -855,8 +857,12 @@ class TestPortfolioManagerInjection:
         llm.with_structured_output.side_effect = NotImplementedError("provider unsupported")
         llm.invoke.return_value = MagicMock(content=plain_response)
         pm_node = create_portfolio_manager(llm)
-        result = pm_node(_make_pm_state())
-        assert result["final_trade_decision"] == plain_response
+        state = _make_pm_state()
+        result = pm_node(state)
+        assert "STRUCTURED_FALLBACK" in result["final_trade_decision"]
+        assert plain_response in result["final_trade_decision"]
+        assert result["structured_fallback_agents"] == ["Portfolio Manager"]
+        assert "_structured_fallback" not in state
 
     # get_past_context ordering and limits
 
@@ -997,7 +1003,9 @@ class TestLegacyRemoval:
         mock_graph.log_states_dict = {}
         mock_graph.debug = False
         mock_graph.config = {"results_dir": str(tmp_path)}
+        mock_graph.selected_analysts = ["market"]
         mock_graph.graph.invoke.return_value = fake_state
+        mock_graph.graph.stream.return_value = [{}]
         mock_graph.propagator.create_initial_state.return_value = fake_state
         mock_graph.propagator.get_graph_args.return_value = {}
         mock_graph.signal_processor.process_signal.return_value = "Buy"
@@ -1104,3 +1112,80 @@ class TestConcurrentMemoryLog:
         assert len(entries) == 5
         # All entries should eventually be resolved
         assert all(not e["pending"] for e in entries)
+
+
+class TestCrossInstanceMemoryLog:
+    """Batch mode creates one TradingMemoryLog per ticker (one per graph
+    instance), all writing to the same file. The instance-level lock cannot
+    serialize those; these tests pin the cross-instance (path-keyed) lock."""
+
+    def test_cross_instance_store_decision_no_lost_updates(self, tmp_path):
+        """N distinct instances appending concurrently must all land exactly once."""
+        path = tmp_path / "trading_memory.md"
+        tickers = [f"T{i}" for i in range(10)]
+
+        def worker(ticker):
+            # A fresh instance per call, mirroring per-ticker graph instances.
+            TradingMemoryLog({"memory_log_path": str(path)}).store_decision(
+                ticker, "2026-01-10", DECISION_BUY
+            )
+
+        threads = [threading.Thread(target=worker, args=(t,)) for t in tickers]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        entries = make_log(tmp_path).load_entries()
+        assert len(entries) == 10
+        assert {e["ticker"] for e in entries} == set(tickers)
+        raw = path.read_text(encoding="utf-8")
+        assert raw.count("<!-- ENTRY_END -->") == 10
+
+    def test_cross_instance_store_and_update_no_lost_writes(self, tmp_path):
+        """Concurrent store (instance A) + resolve (instance B) per ticker must
+        leave every entry resolved exactly once — no lost read-modify-write."""
+        path = tmp_path / "trading_memory.md"
+        tickers = [f"T{i}" for i in range(5)]
+
+        def store_worker(ticker):
+            TradingMemoryLog({"memory_log_path": str(path)}).store_decision(
+                ticker, "2026-01-10", DECISION_BUY
+            )
+
+        def update_worker(ticker):
+            log = TradingMemoryLog({"memory_log_path": str(path)})
+            for _ in range(50):
+                log.update_with_outcome(ticker, "2026-01-10", 0.05, 0.02, 5, f"Resolved {ticker}.")
+                resolved = [
+                    e for e in log.load_entries()
+                    if e["ticker"] == ticker and not e["pending"]
+                ]
+                if resolved:
+                    return
+                import time
+                time.sleep(0.01)
+            raise AssertionError(f"{ticker} never resolved")
+
+        store_threads = [threading.Thread(target=store_worker, args=(t,)) for t in tickers]
+        update_threads = [threading.Thread(target=update_worker, args=(t,)) for t in tickers]
+        for t in store_threads:
+            t.start()
+        for t in update_threads:
+            t.start()
+        for t in store_threads + update_threads:
+            t.join()
+
+        entries = make_log(tmp_path).load_entries()
+        assert len(entries) == 5
+        assert all(not e["pending"] for e in entries)
+        assert {e["reflection"] for e in entries} == {f"Resolved {t}." for t in tickers}
+
+    def test_lock_shared_across_instances(self, tmp_path):
+        """Two instances pointed at the same file must hold the same lock object."""
+        a = make_log(tmp_path)
+        b = make_log(tmp_path)
+        assert a._lock is b._lock
+        # A different file gets a different lock.
+        c = make_log(tmp_path, filename="other.md")
+        assert c._lock is not a._lock
