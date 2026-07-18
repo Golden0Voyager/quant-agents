@@ -153,4 +153,5 @@ After installing, `git fpush origin main` works as expected; `git fpush upstream
   - **The slip** — six feature commits landed directly on `main` between PR #12 and PR #13, violating the Tier-1 convention above.
   - **PR #13** (`feat/data-missing-prevention`) — recovery PR: rebuilt the branch off `0e81563`, cherry-picked the 6 commits with a plan-doc commit on top, opened a PR, merged via `gh pr merge --merge --delete-branch` (merge commit `a42bc4a`). This document codifies the conventions that recovery made explicit.
 - **Issue tracker**: see `docs/agents/issue-tracker.md` for how to file incidents if a rule here is accidentally violated.
+- **Atomic commits**: see `atomic-commits.md` for how to split a large mixed working tree into self-contained, independently revertible commits (theme grouping, `git add -p` hunk splitting, dependency ordering, and the test-lag foot-gun).
 - **Upstream etiquette**: <https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/allowing-changes-to-a-pull-request-branch-created-from-a-fork>
