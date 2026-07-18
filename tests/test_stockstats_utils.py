@@ -128,13 +128,31 @@ class CleanDataframeTests(unittest.TestCase):
         df = self.raw.copy()
         df.loc[1, "Close"] = None
         result = _clean_dataframe(df)
-        self.assertEqual(len(result), 1)
+        # Middle NaN is forward-filled from the previous close.
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result["Close"].iloc[1], 102.0)
 
-    def test_fills_price_gaps(self):
+    def test_fills_price_gaps_forward_only(self):
+        """Missing prices should be forward-filled, never back-filled from the future."""
         df = self.raw.copy()
         df.loc[0, "Close"] = None
         result = _clean_dataframe(df)
+        # First row has no prior close → dropped; future 103 must not leak back.
+        self.assertEqual(len(result), 1)
         self.assertEqual(result["Close"].iloc[0], 103.0)
+
+    def test_ffills_missing_prices(self):
+        df = self.raw.copy()
+        df.loc[1, "Close"] = None
+        result = _clean_dataframe(df)
+        self.assertEqual(result["Close"].iloc[1], 102.0)
+
+    def test_fills_missing_volume_with_zero(self):
+        df = self.raw.copy()
+        df.loc[0, "Volume"] = None
+        result = _clean_dataframe(df)
+        self.assertEqual(result["Volume"].iloc[0], 0)
+        self.assertEqual(result["Volume"].iloc[1], 12000)
 
 
 @pytest.mark.unit
@@ -505,6 +523,50 @@ class LoadOhlcvFromAkshareTests(unittest.TestCase):
             self.assertIsNone(result)
 
 
+# =========================================================================
+# Edge-case tests for _cache_covers_requested_date (lines 280-302)
+# =========================================================================
+
+
+@pytest.mark.unit
+class CacheCoversRequestedDateTests(unittest.TestCase):
+    """Tests for _cache_covers_requested_date edge cases."""
+
+    def test_none_or_empty_returns_false(self):
+        """Line 288: None, empty DataFrame, or missing 'Date' column -> False."""
+        assert su._cache_covers_requested_date(None, "2026-01-10") is False
+        assert su._cache_covers_requested_date(pd.DataFrame(), "2026-01-10") is False
+        assert su._cache_covers_requested_date(
+            pd.DataFrame({"Close": [100.0]}), "2026-01-10",
+        ) is False
+
+    def test_dates_empty_after_parsing_returns_false(self):
+        """Line 291: Date column with unparseable values -> False."""
+        cached = pd.DataFrame({
+            "Date": ["not-a-date", "also-bad"],
+            "Close": [100.0, 101.0],
+        })
+        assert su._cache_covers_requested_date(cached, "2026-01-10") is False
+
+    def test_unparseable_curr_date_returns_true(self):
+        """Line 295: curr_date is not a valid date -> True (cover cache)."""
+        cached = pd.DataFrame({
+            "Date": pd.to_datetime(["2026-01-05", "2026-01-06"]),
+            "Close": [100.0, 101.0],
+        })
+        assert su._cache_covers_requested_date(cached, "not-a-date") is True
+
+    def test_future_requested_date_returns_true(self):
+        """Line 301: requested date is in the future -> True (can't refresh)."""
+        import datetime
+        future = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
+        cached = pd.DataFrame({
+            "Date": pd.to_datetime(["2026-01-05", "2026-01-06"]),
+            "Close": [100.0, 101.0],
+        })
+        assert su._cache_covers_requested_date(cached, future) is True
+
+
 # ===========================================================================
 # Empty downloads must not be cached (cache poisoning guard).
 # Merged from tests/test_no_data_handling.py::TestLoadOhlcvNoPoison — without
@@ -536,6 +598,55 @@ class LoadOhlcvNoPoisonCacheTests(_TempDirMixin, unittest.TestCase):
             with self.assertRaises(NoMarketDataError):
                 su.load_ohlcv("FAKE", "2026-01-01")
             self.assertTrue(dl2.called)
+
+
+@pytest.mark.unit
+class LoadOhlcvStaleDbTests(_TempDirMixin, unittest.TestCase):
+    """P1-4: stale smartmoney_db data must fall back to online source."""
+
+    def test_stale_smartmoney_db_falls_back_to_akshare_and_caches_online_data(self):
+        stale = pd.DataFrame({
+            "Date": ["2025-12-20", "2025-12-21"],
+            "Open": [100.0, 101.0],
+            "High": [102.0, 103.0],
+            "Low": [99.0, 100.0],
+            "Close": [101.0, 102.0],
+            "Volume": [10000, 11000],
+        })
+        online = pd.DataFrame({
+            "Date": ["2026-01-08", "2026-01-09", "2026-01-10"],
+            "Open": [105.0, 106.0, 107.0],
+            "High": [108.0, 109.0, 110.0],
+            "Low": [104.0, 105.0, 106.0],
+            "Close": [106.0, 107.0, 108.0],
+            "Volume": [20000, 21000, 22000],
+        })
+
+        with mock.patch(
+            "tradingagents.dataflows.stockstats_utils.get_config",
+            return_value={"data_cache_dir": str(self._tmp)},
+        ), mock.patch(
+            "tradingagents.dataflows.stockstats_utils.normalize_symbol",
+            return_value="600519.SS",
+        ), mock.patch(
+            "tradingagents.dataflows.stockstats_utils._load_ohlcv_from_smartmoney_db",
+            return_value=stale,
+        ) as smartmock, mock.patch(
+            "tradingagents.dataflows.stockstats_utils._load_ohlcv_from_akshare",
+            return_value=online,
+        ) as akmock:
+            result = load_ohlcv("600519.SS", "2026-01-10", lookback_years=5)
+
+        smartmock.assert_called_once()
+        akmock.assert_called_once()
+        self.assertEqual(len(result), 3)
+        self.assertIn(pd.Timestamp("2026-01-10"), result["Date"].values)
+
+        cache_files = list(self._tmp.glob("*.csv"))
+        self.assertEqual(len(cache_files), 1)
+        cached = pd.read_csv(cache_files[0])
+        self.assertIn("2026-01-10", cached["Date"].values)
+        self.assertNotIn("2025-12-21", cached["Date"].values)
 
 
 if __name__ == "__main__":

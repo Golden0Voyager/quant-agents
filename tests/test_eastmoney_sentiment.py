@@ -143,6 +143,37 @@ class TestFetchEastmoneyHotRank:
                     f"Expected max_retries=3, got {call.kwargs.get('max_retries')}"
                 )
 
+    def test_hot_rank_detail_returns_latest_dates(self):
+        """Detail DataFrame is sorted oldest-first by akshare; the function
+        must return the MOST RECENT rows (tail), not the oldest (head).
+        Regression test for: .head(limit) returning 2025-07 data in 2026-07 reports."""
+        # Construct a detail DataFrame sorted oldest-first (as akshare returns it).
+        # Oldest: 2025-07-16, newest: 2026-07-16.
+        detail_df = pd.DataFrame([
+            {"时间": "2025-07-16", "排名": 100, "证券代码": "SZ002179",
+             "新晋粉丝": 0.1, "铁杆粉丝": 0.9},
+            {"时间": "2025-07-17", "排名": 95, "证券代码": "SZ002179",
+             "新晋粉丝": 0.2, "铁杆粉丝": 0.8},
+            {"时间": "2026-07-15", "排名": 20, "证券代码": "SZ002179",
+             "新晋粉丝": 0.7, "铁杆粉丝": 0.3},
+            {"时间": "2026-07-16", "排名": 15, "证券代码": "SZ002179",
+             "新晋粉丝": 0.8, "铁杆粉丝": 0.2},
+        ])
+        with patch("tradingagents.dataflows.eastmoney_sentiment.ak") as mock_ak:
+            mock_ak.stock_hot_rank_em.return_value = pd.DataFrame()  # rank table empty
+            mock_ak.stock_hot_rank_detail_em.return_value = detail_df
+
+            # limit=1 → should return only the newest row (2026-07-16)
+            result = fetch_eastmoney_hot_rank("002179.SZ", limit=1)
+
+        # The newest date MUST appear; the oldest MUST NOT.
+        assert "2026-07-16" in result, (
+            f"Expected newest date 2026-07-16 in result, got:\n{result}"
+        )
+        assert "2025-07-16" not in result, (
+            f"Oldest date 2025-07-16 should not appear when limit=1, got:\n{result}"
+        )
+
 
 # ===================================================================
 # Guba sentiment tests
@@ -267,4 +298,26 @@ class TestSafeCol:
     def test_handles_none(self):
         row = pd.Series({"val": None})
         result = _safe_col(row, ["val"], "val")
+        assert result == "N/A"
+
+    def test_out_of_bounds_index_caught_by_except(self):
+        """IndexError from row.iloc[idx] when idx >= len(row) should be caught and return N/A."""
+        row = pd.Series(["a"])  # Only 1 element
+        cols = ["col1", "col2"]  # "col2" is at index 1, but row has only 1 element → IndexError
+        result = _safe_col(row, cols, "col2")
+        assert result == "N/A"
+
+    def test_invalid_row_type_caught_by_except(self):
+        """When row doesn't support .iloc (e.g. a bare list), AttributeError is caught."""
+        row = ["a", "b"]  # bare list, no .iloc
+        cols = ["col1", "col2"]
+        result = _safe_col(row, cols, "col2", fallback_idx=1)
+        assert result == "N/A"
+
+    def test_elif_exception_caught_via_fallback(self):
+        """Exception in the elif branch (fallback_idx) should also be caught."""
+        row = ["a", "b"]  # bare list, no .iloc
+        cols = ["col1"]  # Only one column; "nonexistent" not in cols
+        # name not in cols → enters elif with fallback_idx → row.iloc fails
+        result = _safe_col(row, cols, "nonexistent", fallback_idx=1)
         assert result == "N/A"

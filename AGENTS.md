@@ -13,10 +13,10 @@ Multi-agent LLM trading framework on LangGraph. Simulates a trading firm: analys
 
 ```bash
 uv run tradingagents                        # Interactive CLI
-python -m cli.main batch my-list            # Batch run (Rich TUI)
-python -m cli.main batch my-list --output-dir ./reports
-uv run pytest -m unit                       # Unit tests (432 total)
-uv run pytest -m integration                # Needs API keys
+uv run python -m cli.main batch my-list     # Batch run (Rich TUI)
+uv run python -m cli.main batch my-list --output-dir ./reports
+uv run python -m pytest -m unit             # Unit tests (~2500 total)
+uv run python -m pytest -m integration      # Needs API keys
 ```
 
 ## Architecture
@@ -27,7 +27,7 @@ uv run pytest -m integration                # Needs API keys
 
 ### Graph Pipeline (StateGraph in `graph/setup.py`)
 
-1. **Analysts** (parallel, each has tool loop + Msg Clear node): Market (indicators + OHLCV), Sentiment (StockTwits + Reddit), News (global + insider), Fundamentals (financials)
+1. **Analysts** (serial, each has tool loop + Msg Clear node): Market (indicators + OHLCV), Sentiment (StockTwits + Reddit), News (global + insider), Fundamentals (financials), Governance (shareholders / pledge / institutional / northbound), Industry (sector momentum / macro)
 2. **Research Team** — Bull vs Bear debate (`max_debate_rounds`)
 3. **Research Manager** — Structured `ResearchPlan` (rating + rationale + actions)
 4. **Trader** — Structured `TraderProposal` (action + entry/stop/sizing)
@@ -69,24 +69,24 @@ Market data validation via `market_data_validator.py` (grounding numerical claim
 
 ### Persistence
 
-- **Checkpoint** (default on): `SqliteSaver` per ticker at `~/.tradingagents/cache/checkpoints/<TICKER>.db`. Crashed runs auto-resume. Clear with `--clear-checkpoints`.
+- **Checkpoint** (default off): `SqliteSaver` per ticker at `~/.tradingagents/cache/checkpoints/<TICKER>.db`. Crashed runs auto-resume when enabled. Clear with `--clear-checkpoints`.
 - **Memory log**: `~/.tradingagents/memory/trading_memory.md` (decisions + realized returns, injected into PM prompt as `past_context`)
 
 ### Batch Output
 
-`reports/batch_YYYYMMDD_HHMMSS/`:
+`reports/YYYYMMDD_batch_<list>/`:
 - `<ticker>/complete_report.md` + `<ticker>/1_analysts/` + `<ticker>/2_research/`
 - `batch_summary.md` + `batch_summary.json`
 - `failures.log`
 
-Audit: `python scripts/report_auditor.py reports/batch_YYYYMMDD_HHMMSS`
+Audit: `python scripts/report_auditor.py reports/YYYYMMDD_batch_<list>`
 
 ## Critical Implementation Notes
 
 - `ChatPromptTemplate` strips `additional_kwargs` (including `reasoning_content`). DeepSeek sidecar cache keys on `message.id` to survive template recreation.
 - `deepseek-reasoner` does not support `tool_choice`; `with_structured_output` raises `NotImplementedError` → falls back to free text.
 - MiniMax M2.x uses `reasoning_split` for `reasoning_content` extraction (not sidecar pattern).
-- `TRADINGAGENTS_*` env vars (e.g. `TRADINGAGENTS_DEFAULT_LLM`) override `DEFAULT_CONFIG`.
+- `TRADINGAGENTS_*` env vars (e.g. `TRADINGAGENTS_LLM_PROVIDER`) override the default config. Use `default_config()` in code to obtain a fresh deep copy with overrides applied; `DEFAULT_CONFIG` is kept as a backward-compatible import-time reference.
 - `OLLAMA_BASE_URL` env var for remote Ollama endpoints.
 - All file I/O uses `encoding="utf-8"`.
 - Env: `.env` (copied from `.env.example`) + optional `.env.enterprise`.

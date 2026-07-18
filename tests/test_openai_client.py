@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage
 
 from tradingagents.llm_clients.openai_client import (
     DeepSeekChatOpenAI,
+    MinimaxChatOpenAI,
     NormalizedChatOpenAI,
     OpenAIClient,
     _input_to_messages,
@@ -25,6 +26,12 @@ class ResolveProviderBaseUrlTests(unittest.TestCase):
 
     def test_ollama_falls_back_to_default(self):
         url = _resolve_provider_base_url("ollama")
+        self.assertEqual(url, "http://localhost:11434/v1")
+
+    def test_ollama_empty_env_var_falls_back(self):
+        """OLLAMA_BASE_URL set to empty string -> fallback to default."""
+        with patch.dict(os.environ, {"OLLAMA_BASE_URL": ""}, clear=True):
+            url = _resolve_provider_base_url("ollama")
         self.assertEqual(url, "http://localhost:11434/v1")
 
     def test_returns_none_for_unknown_provider(self):
@@ -191,15 +198,42 @@ class DeepSeekPayloadEdgeCases(unittest.TestCase):
             result = self.client._get_request_payload("test")
         self.assertEqual(result["messages"][0]["reasoning_content"], "...")
 
+    def test_non_aimessage_skipped(self):
+        """Non-AIMessage in the input is skipped (continue)."""
+        mock_payload = {"messages": [{"role": "user", "content": "hello"}]}
+        mock_msg = MagicMock()  # not an AIMessage
+        with patch.object(NormalizedChatOpenAI, "_get_request_payload", return_value=mock_payload), \
+             patch("tradingagents.llm_clients.openai_client._input_to_messages", return_value=[mock_msg]):
+            result = self.client._get_request_payload("test")
+        # The message dict should have no reasoning_content added.
+        self.assertNotIn("reasoning_content", result["messages"][0])
+
+    def test_unknown_message_no_match_any_branch(self):
+        """AIMessage with no id, no additional_kwargs reasoning, and no
+        tool_calls — none of the three branches match, payload unchanged."""
+        self.client._reasoning_cache.clear()
+        mock_payload = {"messages": [{"role": "assistant", "content": "thinking..."}]}
+        mock_msg = AIMessage(content="thinking...")
+        mock_msg.id = None  # no id -> cache miss
+        mock_msg.additional_kwargs = {}  # no reasoning_content
+        with patch.object(NormalizedChatOpenAI, "_get_request_payload", return_value=mock_payload), \
+             patch("tradingagents.llm_clients.openai_client._input_to_messages", return_value=[mock_msg]):
+            result = self.client._get_request_payload("test")
+        # No reasoning_content added since none of the branches fired.
+        self.assertNotIn("reasoning_content", result["messages"][0])
+
 
 @pytest.mark.unit
 class DeepSeekCreateChatResultTests(unittest.TestCase):
-    """Lines 140-144: cache eviction when exceeding max size."""
+    """Lines 140-144: cache eviction and edge cases when exceeding max size."""
+
+    def setUp(self):
+        self.client = DeepSeekChatOpenAI(model="deepseek-v4-flash")
 
     def test_cache_eviction(self):
-        client = DeepSeekChatOpenAI(model="deepseek-v4-flash")
-        client._REASONING_CACHE_MAX = 2
-        client._reasoning_cache = {"old-1": "old", "old-2": "old"}
+        """Cache eviction when exceeding max size."""
+        self.client._REASONING_CACHE_MAX = 2
+        self.client._reasoning_cache = {"old-1": "old", "old-2": "old"}
 
         mock_chat_result = MagicMock(spec=["generations"])
         mock_gen = MagicMock()
@@ -210,11 +244,85 @@ class DeepSeekCreateChatResultTests(unittest.TestCase):
         response = {"choices": [{"message": {"reasoning_content": "new thinking"}}]}
 
         with patch.object(NormalizedChatOpenAI, "_create_chat_result", return_value=mock_chat_result):
-            client._create_chat_result(response)
+            self.client._create_chat_result(response)
 
-        self.assertIn("new-id", client._reasoning_cache)
-        self.assertEqual(client._reasoning_cache["new-id"], "new thinking")
-        self.assertEqual(len(client._reasoning_cache), 2)
+        self.assertIn("new-id", self.client._reasoning_cache)
+        self.assertEqual(self.client._reasoning_cache["new-id"], "new thinking")
+        self.assertEqual(len(self.client._reasoning_cache), 2)
+
+    def test_no_reasoning_content_in_response(self):
+        """Response without reasoning_content does not crash and sets nothing."""
+        self.client._reasoning_cache.clear()
+        mock_chat_result = MagicMock(spec=["generations"])
+        mock_gen = MagicMock()
+        mock_gen.message.additional_kwargs = {}
+        mock_gen.message.id = "msg-1"
+        mock_chat_result.generations = [mock_gen]
+
+        response = {"choices": [{"message": {}}]}  # no reasoning_content
+
+        with patch.object(NormalizedChatOpenAI, "_create_chat_result", return_value=mock_chat_result):
+            self.client._create_chat_result(response)
+
+        # additional_kwargs should still be empty (no reasoning injected)
+        self.assertEqual(mock_gen.message.additional_kwargs, {})
+        # cache should be empty (no reasoning to store)
+        self.assertEqual(len(self.client._reasoning_cache), 0)
+
+    def test_message_without_id_still_sets_additional_kwargs(self):
+        """Message without an id attribute sets additional_kwargs but not cache."""
+        self.client._reasoning_cache.clear()
+        mock_chat_result = MagicMock(spec=["generations"])
+        mock_gen = MagicMock()
+        mock_gen.message.additional_kwargs = {}
+        mock_gen.message.id = None  # no id attribute
+        mock_chat_result.generations = [mock_gen]
+
+        response = {"choices": [{"message": {"reasoning_content": "thinking..."}}]}
+
+        with patch.object(NormalizedChatOpenAI, "_create_chat_result", return_value=mock_chat_result):
+            self.client._create_chat_result(response)
+
+        # additional_kwargs should be set even without a message id.
+        self.assertIn("reasoning_content", mock_gen.message.additional_kwargs)
+        self.assertEqual(mock_gen.message.additional_kwargs["reasoning_content"], "thinking...")
+        # cache should NOT contain an entry for None id.
+        self.assertNotIn(None, self.client._reasoning_cache)
+
+    def test_empty_choices_no_crash(self):
+        """Response with empty choices list does not crash."""
+        self.client._reasoning_cache.clear()
+        mock_chat_result = MagicMock(spec=["generations"])
+        mock_chat_result.generations = []
+
+        response = {"choices": []}
+
+        with patch.object(NormalizedChatOpenAI, "_create_chat_result", return_value=mock_chat_result):
+            # Should not raise any exception.
+            self.client._create_chat_result(response)
+
+    def test_response_as_non_dict_object_with_choices(self):
+        """Response that is not a dict but has model_dump with choices."""
+        self.client._reasoning_cache.clear()
+        mock_chat_result = MagicMock(spec=["generations"])
+        mock_gen = MagicMock()
+        mock_gen.message.additional_kwargs = {}
+        mock_gen.message.id = "msg-1"
+        mock_chat_result.generations = [mock_gen]
+
+        # Simulate a response object that has model_dump (not a raw dict).
+        class FakeResponse:
+            def model_dump(self, **kwargs):
+                return {"choices": [{"message": {"reasoning_content": "via model_dump"}}]}
+
+        with patch.object(NormalizedChatOpenAI, "_create_chat_result", return_value=mock_chat_result):
+            self.client._create_chat_result(FakeResponse())
+
+        self.assertIn("reasoning_content", mock_gen.message.additional_kwargs)
+        self.assertEqual(
+            mock_gen.message.additional_kwargs["reasoning_content"], "via model_dump",
+        )
+        self.assertIn("msg-1", self.client._reasoning_cache)
 
 
 @pytest.mark.unit
@@ -253,6 +361,107 @@ class OpenAIClientGetLLMEdgeCases(unittest.TestCase):
         client = OpenAIClient("", provider="openai")
         with self.assertRaises(ValueError):
             client.get_llm()
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True)
+    @patch("tradingagents.llm_clients.openai_client.NormalizedChatOpenAI")
+    def test_openai_with_non_native_base_url(self, mock_chat):
+        """openai provider with custom proxy base_url -> no use_responses_api."""
+        client = OpenAIClient(
+            "gpt-4", provider="openai",
+            base_url="https://myproxy.example.com/v1",
+        )
+        client.get_llm()
+        _, kwargs = mock_chat.call_args
+        self.assertEqual(kwargs["base_url"], "https://myproxy.example.com/v1")
+        # use_responses_api must NOT be set for non-native URLs.
+        self.assertNotIn("use_responses_api", kwargs)
+
+    @patch.dict(os.environ, {}, clear=True)
+    @patch("tradingagents.llm_clients.openai_client.NormalizedChatOpenAI")
+    def test_unknown_provider_without_base_url(self, mock_chat):
+        """Unknown provider without explicit base_url -> no base_url set."""
+        client = OpenAIClient("custom-model", provider="nonexistent")
+        client.get_llm()
+        _, kwargs = mock_chat.call_args
+        self.assertEqual(kwargs["model"], "custom-model")
+        # base_url should not be in kwargs for unknown providers.
+        self.assertNotIn("base_url", kwargs)
+
+    @patch.dict(os.environ, {"MIMO_API_KEY": "mimo-test"}, clear=True)
+    @patch("tradingagents.llm_clients.openai_client.DeepSeekChatOpenAI")
+    def test_mimo_provider_with_reasoning_model(self, mock_chat):
+        """mimo provider with reasoning model uses DeepSeekChatOpenAI."""
+        client = OpenAIClient("mimo-v2.5", provider="mimo")
+        client.get_llm()
+        mock_chat.assert_called_once()
+
+    @patch.dict(os.environ, {"MIMO_API_KEY": "mimo-test"}, clear=True)
+    @patch("tradingagents.llm_clients.openai_client.DeepSeekChatOpenAI")
+    def test_mimo_provider_always_uses_deepseek_chat(self, mock_chat):
+        """mimo provider always uses DeepSeekChatOpenAI (regardless of model)."""
+        client = OpenAIClient("mimo-mini", provider="mimo")
+        client.get_llm()
+        mock_chat.assert_called_once()
+
+    @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True)
+    @patch("tradingagents.llm_clients.openai_client.NormalizedChatOpenAI")
+    def test_no_retry_config_in_kwargs(self, mock_chat):
+        """get_llm without retry_config in kwargs does not add it to llm_kwargs."""
+        client = OpenAIClient("gpt-4", provider="openai")
+        client.get_llm()
+        _, kwargs = mock_chat.call_args
+        # retry_config is consumed by OpenAIClient and bound to the llm
+        # as _retry_config; it is NOT forwarded to ChatOpenAI.
+        self.assertNotIn("retry_config", kwargs)
+
+
+@pytest.mark.unit
+class MinimaxPayloadEdgeCases(unittest.TestCase):
+    """MinimaxChatOpenAI._get_request_payload edge cases."""
+
+    def test_non_reasoning_model_does_not_add_reasoning_split(self):
+        """Non-reasoning MiniMax model: extra_body should not have reasoning_split."""
+        client = MinimaxChatOpenAI(model="MiniMax-Text-01")
+        mock_payload = {"messages": [{"role": "user", "content": "hi"}]}
+        with patch.object(NormalizedChatOpenAI, "_get_request_payload", return_value=mock_payload), \
+             patch("tradingagents.llm_clients.openai_client.get_capabilities") as mock_caps:
+            caps = MagicMock()
+            caps.requires_reasoning_split = False
+            mock_caps.return_value = caps
+            result = client._get_request_payload("test")
+        # No extra_body should be added for non-reasoning models.
+        self.assertNotIn("extra_body", result)
+
+    def test_reasoning_model_adds_reasoning_split(self):
+        """Reasoning MiniMax model: extra_body should have reasoning_split=True."""
+        client = MinimaxChatOpenAI(model="MiniMax-M2.7")
+        mock_payload = {"messages": [{"role": "user", "content": "hi"}]}
+        with patch.object(NormalizedChatOpenAI, "_get_request_payload", return_value=mock_payload), \
+             patch("tradingagents.llm_clients.openai_client.get_capabilities") as mock_caps:
+            caps = MagicMock()
+            caps.requires_reasoning_split = True
+            mock_caps.return_value = caps
+            result = client._get_request_payload("test")
+        self.assertIn("extra_body", result)
+        self.assertTrue(result["extra_body"]["reasoning_split"])
+
+    def test_existing_reasoning_split_not_overridden(self):
+        """If extra_body.reasoning_split is already set, it's not overridden."""
+        client = MinimaxChatOpenAI(model="MiniMax-M2.7")
+        mock_payload = {
+            "messages": [{"role": "user", "content": "hi"}],
+            "extra_body": {"reasoning_split": False, "other_param": 42},
+        }
+        with patch.object(NormalizedChatOpenAI, "_get_request_payload", return_value=mock_payload), \
+             patch("tradingagents.llm_clients.openai_client.get_capabilities") as mock_caps:
+            caps = MagicMock()
+            caps.requires_reasoning_split = True
+            mock_caps.return_value = caps
+            result = client._get_request_payload("test")
+        # reasoning_split should remain False (setdefault does not override).
+        self.assertFalse(result["extra_body"]["reasoning_split"])
+        # Other params in extra_body must be preserved.
+        self.assertEqual(result["extra_body"]["other_param"], 42)
 
 
 @pytest.mark.unit
@@ -416,6 +625,15 @@ class IsNativeOpenaiBaseUrlTests(unittest.TestCase):
     def test_empty_returns_true(self):
         """Empty base_url returns True."""
         self.assertTrue(_is_native_openai_base_url(""))
+
+    def test_subdomain_of_openai_dot_com(self):
+        """URLs under *.openai.com are considered native."""
+        self.assertTrue(_is_native_openai_base_url("https://custom.openai.com"))
+        self.assertTrue(_is_native_openai_base_url("api.openai.com"))
+
+    def test_non_openai_domain_with_openai_in_name(self):
+        """Domain containing 'openai' in path but not as host is not native."""
+        self.assertFalse(_is_native_openai_base_url("https://myproxy.com/openai"))
 
 
 @pytest.mark.unit

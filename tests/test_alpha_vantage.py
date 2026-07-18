@@ -8,6 +8,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tradingagents.dataflows.errors import NoMarketDataError
+
+pytestmark = pytest.mark.unit
+
 
 @ pytest.mark.unit
 class AlphaVantageImportTests(unittest.TestCase):
@@ -466,33 +470,36 @@ class AlphaVantageIndicatorGetIndicatorTests(unittest.TestCase):
         self.assertIn("not supported", str(ctx.exception))
 
     @patch("tradingagents.dataflows.alpha_vantage_indicator._make_api_request")
-    def test_empty_data_returns_error(self, mock_api):
+    def test_empty_data_raises_no_market_data(self, mock_api):
         from tradingagents.dataflows.alpha_vantage_indicator import get_indicator
         mock_api.return_value = ""
-        result = get_indicator("AAPL", "rsi", "2026-05-02", 30)
-        self.assertIn("No data returned", result)
+        with self.assertRaises(NoMarketDataError) as ctx:
+            get_indicator("AAPL", "rsi", "2026-05-02", 30)
+        self.assertIn("No data returned", str(ctx.exception))
 
     @patch("tradingagents.dataflows.alpha_vantage_indicator._make_api_request")
-    def test_missing_time_column(self, mock_api):
+    def test_missing_time_column_raises_no_market_data(self, mock_api):
         from tradingagents.dataflows.alpha_vantage_indicator import get_indicator
         mock_api.return_value = "date,RSI\n2026-05-01,50.0"
-        result = get_indicator("AAPL", "rsi", "2026-05-02", 30)
-        self.assertIn("column not found", result)
+        with self.assertRaises(NoMarketDataError) as ctx:
+            get_indicator("AAPL", "rsi", "2026-05-02", 30)
+        self.assertIn("'time' column not found", str(ctx.exception))
 
     @patch("tradingagents.dataflows.alpha_vantage_indicator._make_api_request")
-    def test_no_data_in_date_range(self, mock_api):
+    def test_no_data_in_date_range_raises_no_market_data(self, mock_api):
         from tradingagents.dataflows.alpha_vantage_indicator import get_indicator
         mock_api.return_value = "time,RSI\n2025-01-01,50.0"
-        result = get_indicator("AAPL", "rsi", "2026-05-02", 30)
-        self.assertIn("No data available", result)
+        with self.assertRaises(NoMarketDataError) as ctx:
+            get_indicator("AAPL", "rsi", "2026-05-02", 30)
+        self.assertIn("No data available", str(ctx.exception))
 
     @patch("tradingagents.dataflows.alpha_vantage_indicator._make_api_request")
-    def test_general_exception_returns_error_string(self, mock_api):
+    def test_general_exception_raises_no_market_data(self, mock_api):
         from tradingagents.dataflows.alpha_vantage_indicator import get_indicator
         mock_api.side_effect = RuntimeError("API failure")
-        result = get_indicator("AAPL", "rsi", "2026-05-02", 30)
-        self.assertIn("Error retrieving", result)
-        self.assertIn("API failure", result)
+        with self.assertRaises(NoMarketDataError) as ctx:
+            get_indicator("AAPL", "rsi", "2026-05-02", 30)
+        self.assertIn("API failure", str(ctx.exception))
 
     @patch("tradingagents.dataflows.alpha_vantage_indicator._make_api_request")
     def test_alpha_vantage_not_configured_propagates(self, mock_api):
@@ -619,14 +626,14 @@ class TestAlphaVantageIndicator(unittest.TestCase):
         with patch(
             "tradingagents.dataflows.alpha_vantage_indicator._make_api_request",
             return_value=csv_no_time,
-        ):
-            result = get_indicator(
+        ), self.assertRaises(NoMarketDataError) as ctx:
+            get_indicator(
                 symbol="AAPL",
                 indicator="close_50_sma",
                 curr_date="2026-05-20",
                 look_back_days=30,
             )
-        self.assertIn("'time' column not found", result)
+        self.assertIn("'time' column not found", str(ctx.exception))
 
     def test_indicator_csv_bad_value_column(self):
         """Line 169: target column not found."""
@@ -636,14 +643,14 @@ class TestAlphaVantageIndicator(unittest.TestCase):
         with patch(
             "tradingagents.dataflows.alpha_vantage_indicator._make_api_request",
             return_value=csv_wrong_col,
-        ):
-            result = get_indicator(
+        ), self.assertRaises(NoMarketDataError) as ctx:
+            get_indicator(
                 symbol="AAPL",
                 indicator="close_50_sma",
                 curr_date="2026-05-20",
                 look_back_days=30,
             )
-        self.assertIn("Column 'SMA' not found", result)
+        self.assertIn("Column 'SMA' not found", str(ctx.exception))
 
     def test_indicator_no_data_in_range(self):
         """Line 197: no data for the specified date range."""
@@ -653,14 +660,14 @@ class TestAlphaVantageIndicator(unittest.TestCase):
         with patch(
             "tradingagents.dataflows.alpha_vantage_indicator._make_api_request",
             return_value=csv_old,
-        ):
-            result = get_indicator(
+        ), self.assertRaises(NoMarketDataError) as ctx:
+            get_indicator(
                 symbol="AAPL",
                 indicator="close_50_sma",
                 curr_date="2026-05-20",
                 look_back_days=30,
             )
-        self.assertIn("No data available", result)
+        self.assertIn("No data available", str(ctx.exception))
 
     def test_indicator_empty_data(self):
         """Line 143: only header, no data rows."""
@@ -669,31 +676,30 @@ class TestAlphaVantageIndicator(unittest.TestCase):
         with patch(
             "tradingagents.dataflows.alpha_vantage_indicator._make_api_request",
             return_value="time,SMA\n",
-        ):
-            result = get_indicator(
+        ), self.assertRaises(NoMarketDataError) as ctx:
+            get_indicator(
                 symbol="AAPL",
                 indicator="close_50_sma",
                 curr_date="2026-05-20",
                 look_back_days=30,
             )
-        self.assertIn("No data returned", result)
+        self.assertIn("No data returned", str(ctx.exception))
 
-    def test_indicator_exception_caught(self):
-        """Line 214–215: general exception caught and returned as error string."""
+    def test_indicator_exception_raises_no_market_data(self):
+        """Line 214–215: general exception is now raised as NoMarketDataError."""
         from tradingagents.dataflows.alpha_vantage_indicator import get_indicator
 
         with patch(
             "tradingagents.dataflows.alpha_vantage_indicator._make_api_request",
             side_effect=ValueError("connection reset"),
-        ):
-            result = get_indicator(
+        ), self.assertRaises(NoMarketDataError) as ctx:
+            get_indicator(
                 symbol="AAPL",
                 indicator="close_50_sma",
                 curr_date="2026-05-20",
                 look_back_days=30,
             )
-        self.assertIn("Error retrieving close_50_sma data", result)
-        self.assertIn("connection reset", result)
+        self.assertIn("connection reset", str(ctx.exception))
 
     def test_indicator_unimplemented_path(self):
         """Line 138: fallback 'not implemented yet' branch."""

@@ -9,6 +9,8 @@ from tradingagents.llm_clients.base_client import (
     normalize_content,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class _ConcreteClient(BaseLLMClient):
     def get_llm(self):

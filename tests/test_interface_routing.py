@@ -49,6 +49,22 @@ class TestRouteToVendor:
         fake_ak.assert_not_called()
         fake_yf.assert_called_once_with("AAPL", "2026-05-14")
 
+    def test_route_to_vendor_with_source_reports_selected_vendor(self):
+        from tradingagents.dataflows import interface
+
+        fake_yf = MagicMock(return_value="YFINANCE_RESULT")
+        with patch.dict(
+            interface.VENDOR_METHODS["get_fundamentals"],
+            {"yfinance": fake_yf},
+            clear=True,
+        ), patch.object(interface, "get_vendor", return_value="yfinance"):
+            result = interface.route_to_vendor_with_source(
+                "get_fundamentals", "AAPL", "2026-05-14"
+            )
+
+        assert result.data == "YFINANCE_RESULT"
+        assert result.vendor == "yfinance"
+
     def test_a_share_falls_back_to_yfinance_on_rate_limit(self):
         from tradingagents.dataflows import interface
         from tradingagents.dataflows.alpha_vantage_common import (
@@ -138,6 +154,25 @@ class TestRouteToVendor:
         ), pytest.raises(ConnectionError, match="akshare down"):
             interface.route_to_vendor(
                 "get_indicators", "600519.SS", "rsi", "2026-05-14", 30
+            )
+
+    def test_exhausted_rate_limit_preserves_typed_error(self):
+        """An exhausted rate-limited chain must not become a generic RuntimeError."""
+        from tradingagents.dataflows import interface
+        from tradingagents.dataflows.errors import VendorRateLimitError
+
+        limited = MagicMock(
+            side_effect=VendorRateLimitError("Yahoo Finance rate-limited for NVDA")
+        )
+        with patch.dict(
+            interface.VENDOR_METHODS["get_news"],
+            {"yfinance": limited},
+            clear=True,
+        ), patch.object(interface, "get_vendor", return_value="yfinance"), pytest.raises(
+            VendorRateLimitError, match="rate-limited"
+        ):
+            interface.route_to_vendor(
+                "get_news", "NVDA", "2026-01-08", "2026-01-15"
             )
 
     def test_get_indicators_intercepts_get_fund_flow(self):
@@ -520,3 +555,81 @@ class TestAnalystBoundToolsHaveCategories:
             cat = interface.get_category_for_method(tool_fn.name)
             assert cat is not None
 
+
+# ===========================================================================
+# get_research_reports routing with smartmoney_db fallback
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestGetResearchReportsRouting:
+    """get_research_reports smartmoney_db fallback routing tests."""
+
+    def test_smartmoney_raises_akshare_succeeds(self):
+        """When smartmoney_db has no data (raises), akshare data is returned."""
+        from tradingagents.dataflows import interface
+
+        fake_sm = MagicMock(
+            side_effect=RuntimeError("No research_report table in quant_core.db")
+        )
+        fake_ak = MagicMock(return_value="AKSHARE_RESEARCH_RESULT")
+        with patch(
+            "tradingagents.dataflows.interface.get_vendor",
+            return_value="smartmoney_db,akshare",
+        ), patch.dict(
+            interface.VENDOR_METHODS["get_research_reports"],
+            {"smartmoney_db": fake_sm, "akshare": fake_ak},
+            clear=False,
+        ):
+            result = interface.route_to_vendor(
+                "get_research_reports", "600519.SS"
+            )
+        assert result == "AKSHARE_RESEARCH_RESULT"
+        fake_sm.assert_called_once_with("600519.SS")
+        fake_ak.assert_called_once_with("600519.SS")
+
+    def test_smartmoney_returns_data(self):
+        """When smartmoney_db has data, it is returned directly."""
+        from tradingagents.dataflows import interface
+
+        fake_sm = MagicMock(return_value="SMARTMONEY_RESEARCH_RESULT")
+        fake_ak = MagicMock(return_value="AKSHARE_RESEARCH_RESULT")
+        with patch(
+            "tradingagents.dataflows.interface.get_vendor",
+            return_value="smartmoney_db,akshare",
+        ), patch.dict(
+            interface.VENDOR_METHODS["get_research_reports"],
+            {"smartmoney_db": fake_sm, "akshare": fake_ak},
+            clear=False,
+        ):
+            result = interface.route_to_vendor(
+                "get_research_reports", "600519.SS"
+            )
+        assert result == "SMARTMONEY_RESEARCH_RESULT"
+        fake_sm.assert_called_once_with("600519.SS")
+        fake_ak.assert_not_called()
+
+    def test_both_vendors_fail_returns_no_data(self):
+        """When both smartmoney_db and akshare raise, returns DATA_UNAVAILABLE."""
+        from tradingagents.dataflows import interface
+
+        fake_sm = MagicMock(
+            side_effect=RuntimeError("No research_report table in quant_core.db")
+        )
+        fake_ak = MagicMock(
+            side_effect=RuntimeError("akshare API unreachable")
+        )
+        with patch(
+            "tradingagents.dataflows.interface.get_vendor",
+            return_value="smartmoney_db,akshare",
+        ), patch.dict(
+            interface.VENDOR_METHODS["get_research_reports"],
+            {"smartmoney_db": fake_sm, "akshare": fake_ak},
+            clear=False,
+        ):
+            result = interface.route_to_vendor(
+                "get_research_reports", "600519.SS"
+            )
+        assert "DATA_UNAVAILABLE" in result
+        fake_sm.assert_called_once_with("600519.SS")
+        fake_ak.assert_called_once_with("600519.SS")

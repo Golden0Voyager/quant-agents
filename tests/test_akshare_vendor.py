@@ -13,6 +13,8 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
+from tradingagents.dataflows.errors import NoMarketDataError
+
 GROUND_TRUTH_PATH = Path(__file__).parent / "fixtures" / "a_share_ground_truth.json"
 
 
@@ -90,19 +92,50 @@ class TestSafeCall(TestCase):
         assert _safe_call(func, 1, x=2) == 42
         func.assert_called_once_with(1, x=2)
 
-    def test_exception_returns_none(self):
+    def test_exception_propagates_after_retries(self):
+        """Non-network exceptions propagate so the router can fall back."""
         from tradingagents.dataflows.akshare_vendor import _safe_call
-        func = MagicMock(side_effect=ValueError("boom"))
-        result = _safe_call(func)
-        assert result is None
 
-    def test_exception_logs_debug(self):
+        func = MagicMock(side_effect=ValueError("boom"))
+        with pytest.raises(ValueError, match="boom"):
+            _safe_call(func)
+
+    def test_http_error_retries_then_succeeds(self):
+        """Network errors should be retried; if the call succeeds on retry, the result is returned."""
+        import requests.exceptions as _re
+
         from tradingagents.dataflows.akshare_vendor import _safe_call
-        func = MagicMock(side_effect=RuntimeError("fail"))
-        with patch("tradingagents.dataflows.akshare_vendor.logger") as mock_logger:
-            result = _safe_call(func)
-            assert result is None
-            mock_logger.debug.assert_called_once()
+
+        func = MagicMock(
+            side_effect=[_re.HTTPError("502 Bad Gateway"), _re.HTTPError("503"), 42]
+        )
+        result = _safe_call(func)
+        assert result == 42
+        assert func.call_count == 3  # 2 failures + 1 success
+
+    def test_http_error_exhausted_retries_propagates(self):
+        """When retries are exhausted, the underlying exception propagates."""
+        import requests.exceptions as _re
+
+        from tradingagents.dataflows.akshare_vendor import _safe_call
+
+        func = MagicMock(side_effect=_re.HTTPError("always 502"))
+        with pytest.raises(_re.HTTPError, match="always 502"):
+            _safe_call(func)
+        assert func.call_count == 4  # max_retries=3 → 3 retries + 1 initial = 4 total
+
+    def test_json_decode_error_retries_then_succeeds(self):
+        """JSONDecodeError (empty/non-JSON response) should also be retried."""
+        import requests.exceptions as _re
+
+        from tradingagents.dataflows.akshare_vendor import _safe_call
+
+        func = MagicMock(
+            side_effect=[_re.JSONDecodeError("Expecting value", "", 0), 99]
+        )
+        result = _safe_call(func)
+        assert result == 99
+        assert func.call_count == 2  # 1 failure + 1 success
 
 
 @pytest.mark.unit
@@ -248,19 +281,19 @@ class TestGetStockData(TestCase):
         assert "Stock data for 600519.SS" in result
         assert "1680.5" in result
 
-    def test_empty_df_returns_no_data_message(self):
+    def test_empty_df_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_zh_a_hist.return_value = pd.DataFrame()
-            result = akshare_vendor.get_stock_data("600519.SS", "2026-05-10", "2026-05-14")
-        assert "No data found" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_stock_data("600519.SS", "2026-05-10", "2026-05-14")
 
-    def test_none_df_returns_no_data_message(self):
+    def test_none_df_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_zh_a_hist.return_value = None
-            result = akshare_vendor.get_stock_data("600519.SS", "2026-05-10", "2026-05-14")
-        assert "No data found" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_stock_data("600519.SS", "2026-05-10", "2026-05-14")
 
 
 # ---------------------------------------------------------------------------
@@ -313,13 +346,13 @@ class TestGetFundamentals(TestCase):
         assert "贵州茅台" in result
         assert "营收同比增长" not in result
 
-    def test_both_empty_returns_warning(self):
+    def test_both_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_individual_info_em.return_value = pd.DataFrame()
             mock_ak.stock_yjbb_em.return_value = pd.DataFrame()
-            result = akshare_vendor.get_fundamentals("600519.SS", "2026-05-14")
-        assert "No fundamentals" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_fundamentals("600519.SS", "2026-05-14")
 
     def test_yjbb_no_matching_code_skipped(self):
         from tradingagents.dataflows import akshare_vendor
@@ -360,12 +393,12 @@ class TestGetBalanceSheet(TestCase):
         assert "1780.00亿" in result
         assert mock_ak.stock_balance_sheet_by_report_em.call_args.kwargs["symbol"] == "SH600519"
 
-    def test_empty_returns_warning(self):
+    def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_balance_sheet_by_report_em.return_value = pd.DataFrame()
-            result = akshare_vendor.get_balance_sheet("600519.SS")
-        assert "No balance sheet" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_balance_sheet("600519.SS")
 
 
 @pytest.mark.unit
@@ -388,12 +421,12 @@ class TestGetCashflow(TestCase):
         assert "-50.00亿" in result
         assert mock_ak.stock_cash_flow_sheet_by_report_em.call_args.kwargs["symbol"] == "SH600519"
 
-    def test_empty_returns_warning(self):
+    def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_cash_flow_sheet_by_report_em.return_value = pd.DataFrame()
-            result = akshare_vendor.get_cashflow("600519.SS")
-        assert "No cash flow" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_cashflow("600519.SS")
 
 
 @pytest.mark.unit
@@ -422,12 +455,12 @@ class TestGetIncomeStatement(TestCase):
         assert "akshare" in result.lower()
         assert mock_ak.stock_profit_sheet_by_report_em.call_args.kwargs["symbol"] == "SH600519"
 
-    def test_empty_returns_warning(self):
+    def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_profit_sheet_by_report_em.return_value = pd.DataFrame()
-            result = akshare_vendor.get_income_statement("600519.SS")
-        assert "No income statement" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_income_statement("600519.SS")
 
 
 # ---------------------------------------------------------------------------
@@ -455,19 +488,19 @@ class TestGetIndicators(TestCase):
         assert "600519.SS" in result
         assert mock_ak.stock_zh_a_hist.call_args.kwargs["symbol"] == "600519"
 
-    def test_empty_kline_returns_message(self):
+    def test_empty_kline_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_zh_a_hist.return_value = pd.DataFrame()
-            result = akshare_vendor.get_indicators("600519.SS", "rsi_14", "2026-04-30", look_back_days=20)
-        assert "No K-line data" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_indicators("600519.SS", "rsi_14", "2026-04-30", look_back_days=20)
 
-    def test_none_kline_returns_message(self):
+    def test_none_kline_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_zh_a_hist.return_value = None
-            result = akshare_vendor.get_indicators("600519.SS", "rsi_14", "2026-04-30", look_back_days=20)
-        assert "No K-line data" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_indicators("600519.SS", "rsi_14", "2026-04-30", look_back_days=20)
 
     def test_network_error_propagates(self):
         from tradingagents.dataflows import akshare_vendor
@@ -508,19 +541,19 @@ class TestGetNews(TestCase):
         assert "Published" in result
         assert "Link:" in result
 
-    def test_empty_df_returns_message(self):
+    def test_empty_df_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_news_em.return_value = pd.DataFrame()
-            result = akshare_vendor.get_news("600519.SS", "2026-05-10", "2026-05-14")
-        assert "No news found" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_news("600519.SS", "2026-05-10", "2026-05-14")
 
-    def test_date_filter_excludes_articles(self):
+    def test_date_filter_excludes_articles_raises(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_news_em.return_value = self.news_df
-            result = akshare_vendor.get_news("600519.SS", "2026-05-01", "2026-05-05")
-        assert "No news found" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_news("600519.SS", "2026-05-01", "2026-05-05")
 
     def test_missing_content_skips_content_line(self):
         from tradingagents.dataflows import akshare_vendor
@@ -563,12 +596,12 @@ class TestGetInsiderTransactions(TestCase):
         assert "控股股东" in result
         assert "100,000" in result
 
-    def test_empty_returns_message(self):
+    def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_shareholder_change_ths.return_value = pd.DataFrame()
-            result = akshare_vendor.get_insider_transactions("600519.SS")
-        assert "No shareholder change data" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_insider_transactions("600519.SS")
 
 
 # ---------------------------------------------------------------------------
@@ -596,12 +629,12 @@ class TestGetCompanyAnnouncements(TestCase):
         call_kwargs = mock_ak.stock_individual_notice_report.call_args.kwargs
         assert call_kwargs["security"] == "600519"
 
-    def test_empty_returns_message(self):
+    def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_individual_notice_report.return_value = pd.DataFrame()
-            result = akshare_vendor.get_company_announcements("600519.SS", "2026-04-01", "2026-04-30")
-        assert "No company announcements" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_company_announcements("600519.SS", "2026-04-01", "2026-04-30")
 
 
 # ---------------------------------------------------------------------------
@@ -636,12 +669,59 @@ class TestGetFundFlow(TestCase):
         assert "Main Force" in result
         assert "Super Large" in result
 
-    def test_empty_returns_message(self):
+    def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_individual_fund_flow.return_value = pd.DataFrame()
-            result = akshare_vendor.get_fund_flow("600519.SS")
-        assert "No fund flow data" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_fund_flow("600519.SS")
+
+
+# ---------------------------------------------------------------------------
+# curr_date filtering
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+class TestCurrDateFiltering(TestCase):
+    """P1-3: akshare data queries must respect curr_date as an upper bound."""
+
+    def test_get_fund_flow_filters_future_dates(self):
+        from tradingagents.dataflows import akshare_vendor
+        flow_df = pd.DataFrame([
+            {"日期": "2026-05-14", "收盘价": 1680.0, "涨跌幅": 2.0,
+             "主力净流入-净额": 100.0, "主力净流入-净占比": 1.0,
+             "超大单净流入-净额": 50.0, "超大单净流入-净占比": 0.5,
+             "大单净流入-净额": 30.0, "大单净流入-净占比": 0.3,
+             "中单净流入-净额": 10.0, "中单净流入-净占比": 0.1,
+             "小单净流入-净额": 10.0, "小单净流入-净占比": 0.1},
+            {"日期": "2026-05-15", "收盘价": 1690.0, "涨跌幅": 3.0,
+             "主力净流入-净额": 200.0, "主力净流入-净占比": 2.0,
+             "超大单净流入-净额": 100.0, "超大单净流入-净占比": 1.0,
+             "大单净流入-净额": 60.0, "大单净流入-净占比": 0.6,
+             "中单净流入-净额": 20.0, "中单净流入-净占比": 0.2,
+             "小单净流入-净额": 20.0, "小单净流入-净占比": 0.2},
+        ])
+        with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
+            mock_ak.stock_individual_fund_flow.return_value = flow_df
+            result = akshare_vendor.get_fund_flow("600519.SS", curr_date="2026-05-14")
+        assert "2026-05-14" in result
+        assert "2026-05-15" not in result
+
+    def test_get_margin_trading_caps_base_date_by_curr_date(self):
+        from tradingagents.dataflows import akshare_vendor
+        with (
+            patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak,
+            patch("tradingagents.dataflows.akshare_vendor.to_akshare_symbol",
+                  side_effect=lambda s, style: {"bare": "600519", "lower_prefix": "sh600519"}.get(style, "sh600519")),
+            patch("tradingagents.dataflows.akshare_vendor._nearest_trade_date",
+                  return_value="20260513") as mock_nearest,
+        ):
+            mock_ak.stock_margin_detail_sse.return_value = pd.DataFrame([{
+                "标的证券代码": "600519", "融资余额": "100亿",
+            }])
+            result = akshare_vendor.get_margin_trading("600519.SS", curr_date="2026-05-13")
+        mock_nearest.assert_called_once_with("20260513")
+        assert "20260513" in result
 
 
 # ---------------------------------------------------------------------------
@@ -668,12 +748,12 @@ class TestGetNorthboundHold(TestCase):
         assert "Stock Connect" in result
         assert "持股数量" in result or "Holding Shares" in result
 
-    def test_empty_returns_message(self):
+    def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_hsgt_individual_em.return_value = pd.DataFrame()
-            result = akshare_vendor.get_northbound_hold("600519.SS")
-        assert "No northbound holding data" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_northbound_hold("600519.SS")
 
 
 # ---------------------------------------------------------------------------
@@ -702,20 +782,20 @@ class TestGetRestrictedRelease(TestCase):
         assert "2026-06-15" in result
         assert "首发原股东限售股份" in result
 
-    def test_no_match_returns_message(self):
+    def test_no_match_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         df_other = pd.DataFrame([{"股票代码": "999999", "解禁时间": "2026-06-15"}])
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_restricted_release_detail_em.return_value = df_other
-            result = akshare_vendor.get_restricted_release("600519.SS", "2026-06-01", "2026-06-30")
-        assert "No restricted share release events" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_restricted_release("600519.SS", "2026-06-01", "2026-06-30")
 
-    def test_empty_returns_message(self):
+    def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_restricted_release_detail_em.return_value = pd.DataFrame()
-            result = akshare_vendor.get_restricted_release("600519.SS", "2026-06-01", "2026-06-30")
-        assert "No restricted share release data" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_restricted_release("600519.SS", "2026-06-01", "2026-06-30")
 
 
 # ---------------------------------------------------------------------------
@@ -758,12 +838,12 @@ class TestGetIndustryValuation(TestCase):
         assert "25.5" in result
         assert "Market Sample Size" in result
 
-    def test_empty_info_returns_message(self):
+    def test_empty_info_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_individual_info_em.return_value = pd.DataFrame()
-            result = akshare_vendor.get_industry_valuation("600519.SS")
-        assert "No individual info data" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_industry_valuation("600519.SS")
 
 
 # ---------------------------------------------------------------------------
@@ -820,12 +900,12 @@ class TestGetMacroIndicators(TestCase):
             get_macro_indicators("gdp")
         self.assertIn("gdp", str(ctx.exception))
 
-    def test_empty_data_returns_message(self):
+    def test_empty_data_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.macro_china_pmi.return_value = pd.DataFrame()
-            result = akshare_vendor.get_macro_indicators("pmi")
-        assert "No macro data" in result
+            with pytest.raises(NoMarketDataError, match="pmi"):
+                akshare_vendor.get_macro_indicators("pmi")
 
 
 # ---------------------------------------------------------------------------
@@ -887,7 +967,7 @@ class TestGetMarginTrading(TestCase):
             result = akshare_vendor.get_margin_trading("688001.BJ")
         assert "not available" in result
 
-    def test_sse_no_data_returns_message(self):
+    def test_sse_no_data_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with (
             patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak,
@@ -898,10 +978,10 @@ class TestGetMarginTrading(TestCase):
                 {"trade_date": ["2026-05-14"]}
             )
             mock_ak.stock_margin_detail_sse.return_value = pd.DataFrame()
-            result = akshare_vendor.get_margin_trading("600519.SS")
-        assert "No margin-trading data for SSE" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_margin_trading("600519.SS")
 
-    def test_sse_no_matching_code(self):
+    def test_sse_no_matching_code_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with (
             patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak,
@@ -914,10 +994,10 @@ class TestGetMarginTrading(TestCase):
             mock_ak.stock_margin_detail_sse.return_value = pd.DataFrame([{
                 "标的证券代码": "999999", "融资余额": "0",
             }])
-            result = akshare_vendor.get_margin_trading("600519.SS")
-        assert "No margin-trading data found for 600519.SS" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_margin_trading("600519.SS")
 
-    def test_szse_no_data_returns_message(self):
+    def test_szse_no_data_raises_no_market_data(self):
         """Cover SZSE empty-data path (line 793)."""
         from tradingagents.dataflows import akshare_vendor
         with (
@@ -929,8 +1009,8 @@ class TestGetMarginTrading(TestCase):
                 {"trade_date": ["2026-05-14"]}
             )
             mock_ak.stock_margin_detail_szse.return_value = pd.DataFrame()
-            result = akshare_vendor.get_margin_trading("300454.SZ")
-        assert "No margin-trading data for SZSE" in result
+            with pytest.raises(NoMarketDataError, match="300454.SZ"):
+                akshare_vendor.get_margin_trading("300454.SZ")
 
     def test_all_fields_missing_shows_na(self):
         """Cover _get() return 'N/A' fallback (line 817) — row without financial fields."""
@@ -958,6 +1038,12 @@ class TestGetMarginTrading(TestCase):
 class TestGetDragonTiger(TestCase):
     def test_buy_and_sell_data(self):
         from tradingagents.dataflows import akshare_vendor
+        # Real akshare columns: 序号/股票代码/交易日 (datetime.date values)
+        dates_df = pd.DataFrame({
+            "序号": [1, 2],
+            "股票代码": ["600519", "600519"],
+            "交易日": [datetime(2026, 5, 12).date(), datetime(2026, 5, 15).date()],
+        })
         buy_df = pd.DataFrame([{
             "营业部名称": "国泰君安证券",
             "买入金额": "1.5亿",
@@ -972,6 +1058,7 @@ class TestGetDragonTiger(TestCase):
             mock_ak.tool_trade_date_hist_sina.return_value = pd.DataFrame(
                 {"trade_date": ["2026-05-14"]}
             )
+            mock_ak.stock_lhb_stock_detail_date_em.return_value = dates_df
             mock_ak.stock_lhb_stock_detail_em.side_effect = [buy_df, sell_df]
             result = akshare_vendor.get_dragon_tiger("600519.SS")
         assert "Dragon Tiger Board" in result
@@ -979,16 +1066,66 @@ class TestGetDragonTiger(TestCase):
         assert "Sell-side" in result
         assert "国泰君安" in result
         assert "中信证券" in result
+        # The discovered date must reach stock_lhb_stock_detail_em as a valid
+        # YYYYMMDD string (the API parses date[:4]/date[4:6]/date[6:]).
+        assert mock_ak.stock_lhb_stock_detail_em.call_count == 2
+        for call in mock_ak.stock_lhb_stock_detail_em.call_args_list:
+            date_arg = call.kwargs["date"]
+            assert re.fullmatch(r"\d{8}", date_arg)
+            datetime.strptime(date_arg, "%Y%m%d")  # must be a real calendar date
+            assert date_arg == "20260515"
 
-    def test_empty_returns_message(self):
+    def test_date_discovery_with_string_dates(self):
+        from tradingagents.dataflows import akshare_vendor
+        dates_df = pd.DataFrame({
+            "序号": [1, 2],
+            "股票代码": ["600519", "600519"],
+            "交易日": ["2026-05-12", "2026-05-15"],
+        })
+        buy_df = pd.DataFrame([{
+            "营业部名称": "国泰君安证券",
+            "买入金额": "1.5亿",
+            "净额": "0.8亿",
+        }])
+        with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
+            mock_ak.tool_trade_date_hist_sina.return_value = pd.DataFrame(
+                {"trade_date": ["2026-05-14"]}
+            )
+            mock_ak.stock_lhb_stock_detail_date_em.return_value = dates_df
+            mock_ak.stock_lhb_stock_detail_em.return_value = buy_df
+            result = akshare_vendor.get_dragon_tiger("600519.SS")
+        date_arg = mock_ak.stock_lhb_stock_detail_em.call_args_list[0].kwargs["date"]
+        assert date_arg == "20260515"
+        assert "Buy-side" in result
+
+    def test_date_discovery_failure_falls_back(self):
+        from tradingagents.dataflows import akshare_vendor
+        buy_df = pd.DataFrame([{
+            "营业部名称": "国泰君安证券",
+            "买入金额": "1.5亿",
+            "净额": "0.8亿",
+        }])
+        with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
+            mock_ak.tool_trade_date_hist_sina.return_value = pd.DataFrame(
+                {"trade_date": ["2026-05-14"]}
+            )
+            mock_ak.stock_lhb_stock_detail_date_em.side_effect = Exception("boom")
+            mock_ak.stock_lhb_stock_detail_em.return_value = buy_df
+            result = akshare_vendor.get_dragon_tiger("600519.SS")
+        # Discovery failed → falls back to the nearest trade date (2026-05-14)
+        date_arg = mock_ak.stock_lhb_stock_detail_em.call_args_list[0].kwargs["date"]
+        assert date_arg == "20260514"
+        assert "Buy-side" in result
+
+    def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.tool_trade_date_hist_sina.return_value = pd.DataFrame(
                 {"trade_date": ["2026-05-14"]}
             )
             mock_ak.stock_lhb_stock_detail_em.return_value = pd.DataFrame()
-            result = akshare_vendor.get_dragon_tiger("600519.SS")
-        assert "No dragon-tiger-board data" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_dragon_tiger("600519.SS")
 
 
 # ---------------------------------------------------------------------------
@@ -1014,12 +1151,12 @@ class TestGetSectorFundFlow(TestCase):
         assert "Sector Fund Flow" in result
         assert "主力净流入" in result
 
-    def test_empty_returns_message(self):
+    def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_sector_fund_flow_hist.return_value = pd.DataFrame()
-            result = akshare_vendor.get_sector_fund_flow("白酒")
-        assert "No sector fund-flow data" in result
+            with pytest.raises(NoMarketDataError, match="白酒"):
+                akshare_vendor.get_sector_fund_flow("白酒")
 
 
 # ---------------------------------------------------------------------------
@@ -1044,12 +1181,12 @@ class TestGetShareholderCount(TestCase):
         assert "Shareholder Count" in result
         assert "150,000" in result
 
-    def test_empty_returns_message(self):
+    def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_zh_a_gdhs_detail_em.return_value = pd.DataFrame()
-            result = akshare_vendor.get_shareholder_count("600519.SS")
-        assert "No shareholder-count data" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_shareholder_count("600519.SS")
 
 
 # ---------------------------------------------------------------------------
@@ -1078,12 +1215,12 @@ class TestGetPledgeRatio(TestCase):
         assert "控股股东" in result
         assert "预估平仓线" in result
 
-    def test_empty_returns_message(self):
+    def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_gpzy_individual_pledge_ratio_detail_em.return_value = pd.DataFrame()
-            result = akshare_vendor.get_pledge_ratio("600519.SS")
-        assert "No pledge-ratio data" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_pledge_ratio("600519.SS")
 
 
 # ---------------------------------------------------------------------------
@@ -1109,12 +1246,12 @@ class TestGetDividendHistory(TestCase):
         assert "Dividend History" in result
         assert "192.93元" in result or "分红方案" in result
 
-    def test_empty_returns_message(self):
+    def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_fhps_detail_em.return_value = pd.DataFrame()
-            result = akshare_vendor.get_dividend_history("600519.SS")
-        assert "No dividend history" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_dividend_history("600519.SS")
 
 
 # ---------------------------------------------------------------------------
@@ -1147,12 +1284,12 @@ class TestGetResearchReports(TestCase):
         assert "66.68" in result
         assert "19.8" in result
 
-    def test_empty_returns_message(self):
+    def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_research_report_em.return_value = pd.DataFrame()
-            result = akshare_vendor.get_research_reports("600519.SS")
-        assert "No research reports" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_research_reports("600519.SS")
 
 
 # ---------------------------------------------------------------------------
@@ -1180,12 +1317,12 @@ class TestGetEarningsEstimates(TestCase):
         assert "预增" in result
         assert "净利润增长约20%" in result
 
-    def test_empty_returns_message(self):
+    def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_yjyg_em.return_value = pd.DataFrame()
-            result = akshare_vendor.get_earnings_estimates("600519.SS")
-        assert "No earnings estimate data" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_earnings_estimates("600519.SS")
 
 
 # ---------------------------------------------------------------------------
@@ -1209,12 +1346,12 @@ class TestGetInstitutionalHoldings(TestCase):
         assert "Institutional Holdings" in result
         assert "国有资本运营公司" in result
 
-    def test_empty_holder_shows_fallback(self):
+    def test_empty_holder_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_main_stock_holder.return_value = pd.DataFrame()
-            result = akshare_vendor.get_institutional_holdings("600519.SS")
-        assert "No top shareholder data" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_institutional_holdings("600519.SS")
 
 
 # ---------------------------------------------------------------------------

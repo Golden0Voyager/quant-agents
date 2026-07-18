@@ -50,6 +50,18 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv sync
+      - name: Ensure all tests have a marker
+        run: |
+          set +e
+          output=$(uv run pytest -m "not unit and not integration and not smoke" --collect-only -q 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          # pytest exits 5 when nothing is collected — the desired state.
+          if [ "$status" -ne 5 ]; then
+            echo "::error::Every test must be marked unit, integration, or smoke; unmarked tests were collected above."
+            exit 1
+          fi
       - run: uv run pytest -m unit --no-header -q
       - run: |
           uv run coverage erase

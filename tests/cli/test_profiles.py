@@ -2,6 +2,8 @@ import pytest
 
 from cli.profiles import delete_profile, list_profiles, load_profile, save_profile
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _mock_profiles_dir(tmp_path, monkeypatch):

@@ -3,6 +3,8 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
+from tradingagents.dataflows.errors import NoMarketDataError
+
 
 @pytest.mark.unit
 class TestAkshareStockData:
@@ -31,15 +33,15 @@ class TestAkshareStockData:
         assert "Stock data for 600519.SS" in result
         assert "1680.5" in result
 
-    def test_empty_df_returns_no_data_message(self):
+    def test_empty_df_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
 
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_zh_a_hist.return_value = pd.DataFrame()
-            result = akshare_vendor.get_stock_data(
-                "600519.SS", "2026-05-10", "2026-05-14"
-            )
-        assert "No data" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_stock_data(
+                    "600519.SS", "2026-05-10", "2026-05-14"
+                )
 
 
 @pytest.mark.unit
@@ -68,13 +70,13 @@ class TestAkshareIncomeStatement:
         assert "15.7800" in result or "15.78" in result
         assert "akshare" in result.lower()
 
-    def test_empty_returns_warning(self):
+    def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
 
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_profit_sheet_by_report_em.return_value = pd.DataFrame()
-            result = akshare_vendor.get_income_statement("600519.SS")
-        assert "No income statement" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_income_statement("600519.SS")
 
 
 @pytest.mark.unit
@@ -100,13 +102,13 @@ class TestAkshareBalanceSheet:
         assert "1780.00亿" in result
         assert "Balance Sheet" in result
 
-    def test_empty_returns_warning(self):
+    def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
 
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_balance_sheet_by_report_em.return_value = pd.DataFrame()
-            result = akshare_vendor.get_balance_sheet("600519.SS")
-        assert "No balance sheet" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_balance_sheet("600519.SS")
 
 
 @pytest.mark.unit
@@ -128,13 +130,13 @@ class TestAkshareCashflow:
         assert "-50.00亿" in result
         assert "Cash Flow" in result
 
-    def test_empty_returns_warning(self):
+    def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
 
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_cash_flow_sheet_by_report_em.return_value = pd.DataFrame()
-            result = akshare_vendor.get_cashflow("600519.SS")
-        assert "No cash flow" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_cashflow("600519.SS")
 
 
 @pytest.mark.unit
@@ -164,14 +166,14 @@ class TestAkshareFundamentals:
         assert "91.50%" in result
         assert "ROE" in result or "净资产收益率" in result
 
-    def test_empty_returns_warning(self):
+    def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
 
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_individual_info_em.return_value = pd.DataFrame()
             mock_ak.stock_yjbb_em.return_value = pd.DataFrame()
-            result = akshare_vendor.get_fundamentals("600519.SS", "2026-05-14")
-        assert "No fundamentals" in result
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_fundamentals("600519.SS", "2026-05-14")
 
 
 @pytest.mark.unit

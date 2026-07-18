@@ -471,6 +471,228 @@ def test_local_catalog_used_when_litellm_omits_provider(tmp_path, monkeypatch):
     assert get_price_for_model("kimi-k2.6") == (0.95, 4.00)
 
 
+# ---- _load_pricing_yaml error handling ---------------------------------
+
+
+class TestLoadPricingYamlErrorHandling:
+    """Edge-case tests for _load_pricing_yaml error paths."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_cache(self):
+        """Reset the global PRICING_YAML cache before each test."""
+        pricing._PRICING_YAML = None
+        yield
+        pricing._PRICING_YAML = None
+
+    @pytest.fixture
+    def _mock_yaml_path(self, tmp_path, monkeypatch):
+        """Point _pricing_yaml_path to a temp file."""
+        pricing_yaml = tmp_path / "pricing.yaml"
+        monkeypatch.setattr(
+            pricing, "_pricing_yaml_path", lambda: pricing_yaml,
+        )
+        return pricing_yaml
+
+    def test_yaml_parse_exception_returns_empty(self, _mock_yaml_path, monkeypatch):
+        """Line 149: yaml.safe_load exception → _load_pricing_yaml returns {}."""
+        pricing_yaml = _mock_yaml_path
+        pricing_yaml.write_text("key: value", encoding="utf-8")
+
+        with patch("yaml.safe_load", side_effect=Exception("parse error")):
+            result = pricing._load_pricing_yaml()
+        assert result == {}
+
+    def test_yaml_non_dict_content_returns_empty(self, _mock_yaml_path):
+        """Lines 154-156: YAML content is a string, not a dict → returns {}."""
+        pricing_yaml = _mock_yaml_path
+        pricing_yaml.write_text("just a string", encoding="utf-8")
+
+        result = pricing._load_pricing_yaml()
+        assert result == {}
+
+    def test_yaml_non_dict_provider_skipped(self, _mock_yaml_path):
+        """Lines 159-160: provider value is a string, not a dict → skipped."""
+        pricing_yaml = _mock_yaml_path
+        pricing_yaml.write_text(
+            "deepseek: just a string\n", encoding="utf-8",
+        )
+
+        result = pricing._load_pricing_yaml()
+        assert "deepseek" not in result
+        assert result == {}
+
+    def test_yaml_invalid_price_entry_skipped(self, _mock_yaml_path):
+        """Line 165: price entry with unparseable values → skipped."""
+        pricing_yaml = _mock_yaml_path
+        pricing_yaml.write_text(
+            "deepseek:\n"
+            "  deepseek-v4-flash: [not, numbers]\n",
+            encoding="utf-8",
+        )
+
+        result = pricing._load_pricing_yaml()
+        assert "deepseek" not in result
+        assert result == {}
+
+    def test_yaml_price_entry_with_wrong_length_skipped(self, _mock_yaml_path):
+        """Price tuple with length != 2 is skipped via isinstance check."""
+        pricing_yaml = _mock_yaml_path
+        pricing_yaml.write_text(
+            "deepseek:\n"
+            "  deepseek-v4-flash: [0.14]\n",
+            encoding="utf-8",
+        )
+
+        result = pricing._load_pricing_yaml()
+        assert "deepseek" not in result
+        assert result == {}
+
+
+# ---- _write_default_pricing_yaml -----------------------------------------
+
+
+class TestWriteDefaultPricingYaml:
+    """Tests for _write_default_pricing_yaml error handling."""
+
+    def test_writes_default_pricing_yaml(self, tmp_path):
+        """Lines 183-200: _write_default_pricing_yaml writes a valid YAML file."""
+        yaml_path = tmp_path / "pricing.yaml"
+        pricing._write_default_pricing_yaml(yaml_path)
+        assert yaml_path.exists()
+        content = yaml_path.read_text(encoding="utf-8")
+        # Should contain some of the default providers.
+        assert "deepseek:" in content
+        assert "deepseek-v4-flash" in content
+        assert "sensenova:" in content
+
+    def test_oserror_on_mkdir_is_swallowed(self, tmp_path):
+        """Lines 172-173 (+ except OSError): OSError during mkdir is silently swallowed."""
+        yaml_path = tmp_path / "nonexistent" / "pricing.yaml"
+
+        def _fail_mkdir(*args, **kwargs):
+            raise OSError("read-only filesystem")
+
+        with patch("pathlib.Path.mkdir", side_effect=_fail_mkdir):
+            # Should not raise.
+            pricing._write_default_pricing_yaml(yaml_path)
+        # File should not have been created.
+        assert not yaml_path.exists()
+
+    def test_oserror_on_write_is_swallowed(self, tmp_path):
+        """OSError during write_text is silently swallowed."""
+        yaml_path = tmp_path / "pricing.yaml"
+        with patch("pathlib.Path.write_text", side_effect=OSError("read-only")):
+            pricing._write_default_pricing_yaml(yaml_path)
+        # mkdir succeeded but write failed — file may still exist as zero-byte.
+        assert yaml_path.parent.exists()
+
+    def test_load_triggers_write_when_missing(self, tmp_path, monkeypatch):
+        """_load_pricing_yaml calls _write_default_pricing_yaml when the YAML
+        doesn't exist yet, covering the full 183-200 body."""
+        pricing._PRICING_YAML = None
+        missing = tmp_path / "pricing.yaml"
+        monkeypatch.setattr(pricing, "_pricing_yaml_path", lambda: missing)
+        # First call — no YAML exists yet, so write is triggered.
+        result = pricing._load_pricing_yaml()
+        # Should have loaded content from the now-written default YAML.
+        assert "deepseek" in result
+        assert result["deepseek"]["deepseek-v4-flash"] == (0.14, 0.28)
+
+
+# ---- USD/CNY exchange rate ------------------------------------------------
+
+
+class TestUsdCnyRate:
+    """Tests for get_usd_to_cny_rate edge cases."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_cache(self):
+        """Reset the USD/CNY cache before each test."""
+        pricing._USD_CNY_CACHE = None
+        yield
+        pricing._USD_CNY_CACHE = None
+
+    def test_cache_hit(self):
+        """Cached rate is returned without an HTTP request."""
+        import time
+        now = time.time()
+        pricing._USD_CNY_CACHE = (7.15, now)
+        with patch("httpx.get") as mock_get:
+            rate = pricing.get_usd_to_cny_rate()
+        mock_get.assert_not_called()
+        assert rate == 7.15
+
+    def test_cache_expired(self):
+        """Cache older than 1 hour triggers a fresh fetch."""
+        import time
+        old = time.time() - 3601  # older than 1h
+        pricing._USD_CNY_CACHE = (7.15, old)
+        with patch("httpx.get") as mock_get:
+            mock_get.return_value.json.return_value = {"rates": {"CNY": 7.15}}
+            mock_get.return_value.raise_for_status = lambda: None
+            rate = pricing.get_usd_to_cny_rate()
+        mock_get.assert_called_once()
+        assert rate == 7.15
+
+    def test_successful_fetch_valid_rate(self):
+        """A valid rate from the API is cached and returned."""
+        with patch("httpx.get") as mock_get:
+            mock_get.return_value.json.return_value = {"rates": {"CNY": 7.15}}
+            mock_get.return_value.raise_for_status = lambda: None
+            rate = pricing.get_usd_to_cny_rate()
+        assert rate == 7.15
+        # Verify it was cached.
+        assert pricing._USD_CNY_CACHE is not None
+        assert pricing._USD_CNY_CACHE[0] == 7.15
+
+    def test_network_failure_falls_back(self):
+        """Lines 240-244: Network failure → returns 7.25 fallback."""
+        with patch("httpx.get", side_effect=RuntimeError("timeout")):
+            rate = pricing.get_usd_to_cny_rate()
+        assert rate == 7.25
+
+    def test_rate_out_of_bounds_low_falls_back(self):
+        """Rate < 1.0 is treated as invalid and falls back to 7.25."""
+        with patch("httpx.get") as mock_get:
+            mock_get.return_value.json.return_value = {"rates": {"CNY": 0.5}}
+            mock_get.return_value.raise_for_status = lambda: None
+            rate = pricing.get_usd_to_cny_rate()
+        assert rate == 7.25
+
+    def test_rate_out_of_bounds_high_falls_back(self):
+        """Rate > 20 is treated as invalid and falls back to 7.25."""
+        with patch("httpx.get") as mock_get:
+            mock_get.return_value.json.return_value = {"rates": {"CNY": 30.0}}
+            mock_get.return_value.raise_for_status = lambda: None
+            rate = pricing.get_usd_to_cny_rate()
+        assert rate == 7.25
+
+    def test_parse_error_falls_back(self):
+        """JSON parse error → falls back to 7.25."""
+        with patch("httpx.get") as mock_get:
+            mock_get.return_value.json.side_effect = ValueError("bad json")
+            mock_get.return_value.raise_for_status = lambda: None
+            rate = pricing.get_usd_to_cny_rate()
+        assert rate == 7.25
+
+    def test_missing_cny_in_response_falls_back(self):
+        """Response without CNY key → falls back to 7.25."""
+        with patch("httpx.get") as mock_get:
+            mock_get.return_value.json.return_value = {"rates": {"EUR": 0.92}}
+            mock_get.return_value.raise_for_status = lambda: None
+            rate = pricing.get_usd_to_cny_rate()
+        assert rate == 7.25
+
+    def test_http_error_status_falls_back(self):
+        """HTTP 500 → falls back to 7.25."""
+        with patch("httpx.get") as mock_get:
+            mock_get.return_value.raise_for_status.side_effect = (
+                RuntimeError("500 error")
+            )
+            rate = pricing.get_usd_to_cny_rate()
+        assert rate == 7.25
+
+
 # ---- _parse_litellm_payload edge cases -----------------------------------
 
 

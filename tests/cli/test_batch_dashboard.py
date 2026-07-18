@@ -1,4 +1,8 @@
+import pytest
+
 from cli.batch_dashboard import BatchDashboard
+
+pytestmark = pytest.mark.unit
 
 
 def test_dashboard_initial_state():

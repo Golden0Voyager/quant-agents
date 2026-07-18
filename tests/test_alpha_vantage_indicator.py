@@ -7,6 +7,7 @@ import pytest
 from tradingagents.dataflows.alpha_vantage_common import (
     AlphaVantageNotConfiguredError,
 )
+from tradingagents.dataflows.errors import NoMarketDataError
 
 
 def _indicator_csv(header_col: str = "SMA") -> str:
@@ -161,30 +162,29 @@ class TestGetIndicatorEdgeCases:
     def test_empty_data(self, mock_api):
         from tradingagents.dataflows.alpha_vantage_indicator import get_indicator
         mock_api.return_value = ""
-        result = get_indicator("AAPL", "rsi", "2026-05-20", 30)
-        assert "No data returned" in result
+        with pytest.raises(NoMarketDataError, match="No data returned"):
+            get_indicator("AAPL", "rsi", "2026-05-20", 30)
 
     @patch("tradingagents.dataflows.alpha_vantage_indicator._make_api_request")
     def test_missing_time_column(self, mock_api):
         from tradingagents.dataflows.alpha_vantage_indicator import get_indicator
         mock_api.return_value = "date,RSI\n2026-05-01,50.0"
-        result = get_indicator("AAPL", "rsi", "2026-05-20", 30)
-        assert "column not found" in result
+        with pytest.raises(NoMarketDataError, match="'time' column not found"):
+            get_indicator("AAPL", "rsi", "2026-05-20", 30)
 
     @patch("tradingagents.dataflows.alpha_vantage_indicator._make_api_request")
     def test_no_data_in_date_range(self, mock_api):
         from tradingagents.dataflows.alpha_vantage_indicator import get_indicator
         mock_api.return_value = "time,RSI\n2025-01-01,50.0"
-        result = get_indicator("AAPL", "rsi", "2026-05-20", 30)
-        assert "No data available" in result
+        with pytest.raises(NoMarketDataError, match="No data available"):
+            get_indicator("AAPL", "rsi", "2026-05-20", 30)
 
     @patch("tradingagents.dataflows.alpha_vantage_indicator._make_api_request")
-    def test_general_exception_caught(self, mock_api):
+    def test_general_exception_raises_no_market_data(self, mock_api):
         from tradingagents.dataflows.alpha_vantage_indicator import get_indicator
         mock_api.side_effect = RuntimeError("API failure")
-        result = get_indicator("AAPL", "rsi", "2026-05-20", 30)
-        assert "Error retrieving" in result
-        assert "API failure" in result
+        with pytest.raises(NoMarketDataError, match="API failure"):
+            get_indicator("AAPL", "rsi", "2026-05-20", 30)
 
     @patch("tradingagents.dataflows.alpha_vantage_indicator._make_api_request")
     def test_not_configured_propagates(self, mock_api):
@@ -197,8 +197,8 @@ class TestGetIndicatorEdgeCases:
     def test_bad_value_column(self, mock_api):
         from tradingagents.dataflows.alpha_vantage_indicator import get_indicator
         mock_api.return_value = "time,WrongCol\n2026-05-01,100.0"
-        result = get_indicator("AAPL", "close_50_sma", "2026-05-20", 30)
-        assert "Column" in result and "not found" in result
+        with pytest.raises(NoMarketDataError, match="Column 'SMA' not found"):
+            get_indicator("AAPL", "close_50_sma", "2026-05-20", 30)
 
     @patch("tradingagents.dataflows.alpha_vantage_indicator._make_api_request")
     def test_blank_lines_skipped(self, mock_api):

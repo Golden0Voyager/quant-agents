@@ -262,5 +262,118 @@ class ClearCheckpointOperationalErrorTests(_TempDirMixin, unittest.TestCase):
         clear_checkpoint(str(self._tmp), "NONEXISTENT", "2026-01-03")
 
 
+# =========================================================================
+# _run_graph resume semantics (P0): a crashed run must NOT re-run completed
+# nodes when the same ticker+date is analyzed again.
+# =========================================================================
+
+
+class _ResumeState(TypedDict):
+    count: int
+    market_report: str
+    final_trade_decision: str
+    verified_market_snapshot: str
+
+
+@pytest.mark.unit
+class RunGraphResumeTests(unittest.TestCase):
+    """TradingAgentsGraph._run_graph must resume via stream(None) when a
+    checkpoint exists for the ticker+date thread."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _make_graph(self):
+        from unittest.mock import MagicMock, patch
+
+        from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+        with patch.object(TradingAgentsGraph, "__init__", return_value=None):
+            g = TradingAgentsGraph.__new__(TradingAgentsGraph)
+        g.config = {
+            "data_cache_dir": self.tmpdir,
+            "results_dir": self.tmpdir,
+            "checkpoint_enabled": True,
+        }
+        g.callbacks = []
+        g.debug = False
+        g.memory_log = MagicMock()
+        g.memory_log.get_past_context.return_value = ""
+        g.reflector = MagicMock()
+        g.log_states_dict = {}
+        g.ticker = "TEST"
+        g.node_timings = []
+        g.selected_analysts = ["market"]
+        g.signal_processor = MagicMock()
+        g.signal_processor.process_signal.return_value = "Buy"
+        g.resolve_instrument_context = MagicMock(return_value="ctx")
+        g.propagator = MagicMock()
+        g.propagator.create_initial_state.return_value = {
+            "count": 0,
+            "market_report": "",
+            "final_trade_decision": "",
+            "verified_market_snapshot": "snap",
+        }
+        g.propagator.get_graph_args.return_value = {"config": {}}
+        g._log_state = MagicMock()
+        g._checkpointer_ctx = None
+        return g
+
+    def test_resume_does_not_rerun_completed_nodes(self):
+        """Crash at 'trader'; the re-run must skip the finished 'analyst' node
+        and still merge its checkpointed output into the final state."""
+        calls = {"analyst": 0, "trader": 0}
+        crash = {"enabled": True}
+
+        def analyst(state: _ResumeState) -> dict:
+            calls["analyst"] += 1
+            return {"count": state["count"] + 1, "market_report": "analyst-report"}
+
+        def trader(state: _ResumeState) -> dict:
+            calls["trader"] += 1
+            if crash["enabled"]:
+                raise RuntimeError("simulated mid-analysis crash")
+            return {"count": state["count"] + 10, "final_trade_decision": "Buy"}
+
+        builder = StateGraph(_ResumeState)
+        builder.add_node("analyst", analyst)
+        builder.add_node("trader", trader)
+        builder.set_entry_point("analyst")
+        builder.add_edge("analyst", "trader")
+        builder.add_edge("trader", END)
+
+        g = self._make_graph()
+
+        # Run 1: trader crashes; analyst's checkpoint persists.
+        with get_checkpointer(self.tmpdir, "TEST") as saver:
+            g.graph = builder.compile(checkpointer=saver)
+            with self.assertRaises(RuntimeError):
+                g._run_graph("TEST", "2026-04-20")
+
+        self.assertEqual(calls, {"analyst": 1, "trader": 1})
+        self.assertTrue(has_checkpoint(self.tmpdir, "TEST", "2026-04-20"))
+
+        # Run 2: no crash — must resume after 'analyst' instead of re-running it.
+        crash["enabled"] = False
+        with get_checkpointer(self.tmpdir, "TEST") as saver:
+            g.graph = builder.compile(checkpointer=saver)
+            final_state, signal = g._run_graph("TEST", "2026-04-20")
+
+        # analyst ran exactly once across both runs; trader ran in each.
+        self.assertEqual(calls["analyst"], 1)
+        self.assertEqual(calls["trader"], 2)
+        # The checkpointed analyst output survived into the merged final state.
+        self.assertEqual(final_state["market_report"], "analyst-report")
+        self.assertEqual(final_state["count"], 11)
+        self.assertEqual(final_state["final_trade_decision"], "Buy")
+        self.assertEqual(signal, "Buy")
+        # Successful completion clears the checkpoint.
+        self.assertFalse(has_checkpoint(self.tmpdir, "TEST", "2026-04-20"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -59,12 +59,12 @@ class TestGetBalanceSheet:
         from tradingagents.dataflows.alpha_vantage_fundamentals import get_balance_sheet
         mock_api.return_value = _fake_financial_reports()
         get_balance_sheet("IBM")
-        mock_api.assert_called_once_with("BALANCE_SHEET", {"symbol": "IBM"})
+        mock_api.assert_called_once_with("BALANCE_SHEET", {"symbol": "IBM"}, parse_json=True)
 
     @patch("tradingagents.dataflows.alpha_vantage_fundamentals._make_api_request")
     def test_get_balance_sheet_returns_raw_json(self, mock_api):
-        """get_balance_sheet returns raw JSON string; _filter_reports_by_date
-        receives a string so filtering is a no-op (pass-through)."""
+        """When the request layer yields a raw string (non-JSON body), the
+        date filter is a no-op pass-through."""
         from tradingagents.dataflows.alpha_vantage_fundamentals import get_balance_sheet
         reports_json = json.dumps({
             "annualReports": [
@@ -95,7 +95,7 @@ class TestGetCashFlow:
         from tradingagents.dataflows.alpha_vantage_fundamentals import get_cashflow
         mock_api.return_value = _fake_financial_reports()
         get_cashflow("IBM")
-        mock_api.assert_called_once_with("CASH_FLOW", {"symbol": "IBM"})
+        mock_api.assert_called_once_with("CASH_FLOW", {"symbol": "IBM"}, parse_json=True)
 
     @patch("tradingagents.dataflows.alpha_vantage_fundamentals._make_api_request")
     def test_get_cashflow_returns_raw_json(self, mock_api):
@@ -116,7 +116,7 @@ class TestGetIncomeStatement:
         from tradingagents.dataflows.alpha_vantage_fundamentals import get_income_statement
         mock_api.return_value = _fake_financial_reports()
         get_income_statement("IBM")
-        mock_api.assert_called_once_with("INCOME_STATEMENT", {"symbol": "IBM"})
+        mock_api.assert_called_once_with("INCOME_STATEMENT", {"symbol": "IBM"}, parse_json=True)
 
     @patch("tradingagents.dataflows.alpha_vantage_fundamentals._make_api_request")
     def test_get_income_statement_returns_raw_json(self, mock_api):
