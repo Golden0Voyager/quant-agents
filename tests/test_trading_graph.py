@@ -1747,5 +1747,33 @@ class PropagateTests(unittest.TestCase):
             self.assertEqual(g.ticker, "AAPL")
 
 
+@pytest.mark.unit
+class RateLimitPlumbingTests(unittest.TestCase):
+    """_create_fallback_llm forwards per-provider requests_per_minute."""
+
+    def test_rpm_passed_only_for_configured_providers(self):
+        g = _construct_graph(
+            config_override={"llm_requests_per_minute": {"sensenova": 15}}
+        )
+        calls = g._mocks["create_llm"].call_args_list
+        self.assertTrue(calls, "expected create_llm_client to be called")
+
+        saw_sensenova = False
+        for c in calls:
+            provider = c.kwargs.get("provider")
+            if provider == "sensenova":
+                saw_sensenova = True
+                self.assertEqual(c.kwargs.get("requests_per_minute"), 15)
+            else:
+                # Providers absent from the map must not be rate-limited.
+                self.assertNotIn("requests_per_minute", c.kwargs)
+        self.assertTrue(saw_sensenova, "sensenova tier should have been created")
+
+    def test_no_rpm_when_map_empty(self):
+        g = _construct_graph(config_override={"llm_requests_per_minute": {}})
+        for c in g._mocks["create_llm"].call_args_list:
+            self.assertNotIn("requests_per_minute", c.kwargs)
+
+
 if __name__ == "__main__":
     unittest.main()
