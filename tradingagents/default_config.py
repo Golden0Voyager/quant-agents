@@ -114,6 +114,15 @@ _BASE_CONFIG = {
         {"provider": "openrouter",  "model": "nvidia/nemotron-3-ultra-550b-a55b:free"},
         {"provider": "openrouter",  "model": "nvidia/nemotron-3-super-120b-a12b:free"},
     ],
+    # Client-side request pacing, keyed by provider (requests per minute).
+    # A process-wide shared token-bucket limiter caps aggregate RPM across all
+    # batch workers and both think tiers, preventing 429 "rpm exhausted" bursts
+    # against low-quota plans (e.g. the SenseNova token plan). A provider not
+    # listed here is not rate-limited client-side. Tune each value to your
+    # plan's quota; set to {} to disable pacing entirely.
+    "llm_requests_per_minute": {
+        "sensenova": 15,
+    },
     "input_token_price_per_1m": None,
     "output_token_price_per_1m": None,
     # Debate and discussion settings
