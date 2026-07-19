@@ -10,6 +10,7 @@ import logging
 import subprocess
 
 from tradingagents.portfolio.models import Transaction
+from tradingagents.portfolio.validators import parse_number
 
 logger = logging.getLogger(__name__)
 
@@ -56,19 +57,6 @@ def _run_gws_command(sheet_id: str, range_str: str) -> list[list[str]]:
     return data.get("values", [])
 
 
-def _parse_number(val: str) -> float:
-    """Parse a numeric string, handling commas, Chinese punctuation and empty values."""
-    if not val or not isinstance(val, str):
-        return 0.0
-    cleaned = val.strip().replace(",", "").replace("，", "").replace("、", "").replace("¥", "").replace("$", "")
-    if not cleaned:
-        return 0.0
-    try:
-        return float(cleaned)
-    except (ValueError, TypeError):
-        return 0.0
-
-
 def _resolve_column_indices(headers: list[str]) -> dict[str, int]:
     """Map field names to column indices based on header row."""
     indices: dict[str, int] = {}
@@ -92,11 +80,11 @@ def _transform_row(row: list[str], indices: dict[str, int]) -> Transaction | Non
         return None
 
     action_val = row[indices["action"]].strip() if "action" in indices else ""
-    shares_val = _parse_number(row[indices["shares"]]) if "shares" in indices else 0.0
-    price_val = _parse_number(row[indices["price"]]) if "price" in indices else 0.0
-    fee_val = _parse_number(row[indices["fee"]]) if "fee" in indices else None
+    shares_val = parse_number(row[indices["shares"]], fallback=0.0) if "shares" in indices else 0.0
+    price_val = parse_number(row[indices["price"]], fallback=0.0) if "price" in indices else 0.0
+    fee_val = parse_number(row[indices["fee"]], fallback=0.0) if "fee" in indices else None
     cash_change_val = (
-        _parse_number(row[indices["cash_change"]])
+        parse_number(row[indices["cash_change"]], fallback=0.0)
         if "cash_change" in indices
         else None
     )
