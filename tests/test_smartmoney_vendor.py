@@ -626,6 +626,30 @@ class GetSectorFundFlowTests(unittest.TestCase):
         finally:
             os.unlink(db_path)
 
+    def test_handles_null_numeric_columns(self):
+        # Regression: a row with SQL NULL (None/NaN) numeric cells must render
+        # "N/A" rather than crashing with
+        # "unsupported format string passed to NoneType.__format__".
+        import pandas as pd
+
+        from tradingagents.dataflows import smartmoney_vendor
+
+        df = pd.DataFrame(
+            {
+                "Date": ["2026-06-19"],
+                "main_net_inflow": [None],
+                "main_net_inflow_pct": [None],
+                "super_large_net_inflow": [1.0e8],
+                "large_net_inflow": [None],
+                "medium_net_inflow": [2.0e7],
+                "small_net_inflow": [None],
+            }
+        )
+        with patch.object(smartmoney_vendor, "_df_from_sql", return_value=df):
+            result = smartmoney_vendor.get_sector_fund_flow("新能源")
+        self.assertIn("新能源", result)
+        self.assertIn("N/A", result)
+
 
 @pytest.mark.unit
 class GetShareholderCountTests(unittest.TestCase):
