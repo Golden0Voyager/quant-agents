@@ -15,7 +15,7 @@ def _parse_number(value: Any) -> float:
         return float(value)
     if not isinstance(value, str):
         raise ValueError(f"Cannot parse number from {type(value)}")
-    cleaned = value.strip().replace(",", "").replace("，", "").replace("$", "").replace("¥", "")
+    cleaned = value.strip().replace(",", "").replace("，", "").replace("、", "").replace("$", "").replace("¥", "")
     return float(cleaned)
 
 
