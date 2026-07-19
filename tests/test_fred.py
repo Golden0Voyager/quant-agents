@@ -62,9 +62,17 @@ class FredResolutionTests(unittest.TestCase):
         self.assertEqual(fred._resolve_series_id("MyCustomSeries"), "MYCUSTOMSERIES")
 
     def test_descriptive_phrase_is_rejected(self):
-        # An LLM phrase (spaces / too long) is not a series ID — reject up front
-        # with guidance rather than 400ing the API.
-        for bad in ("bank of japan rate", "the unemployment number", "X" * 31):
+        # Not a series ID — reject up front with guidance rather than 400ing the
+        # API. FRED's contract is "<=25 alphanumeric chars", so phrases (spaces),
+        # over-long IDs, and A-share indicator names that fell back to FRED
+        # (e.g. 'social_finance', underscores) are all rejected locally.
+        for bad in (
+            "bank of japan rate",
+            "the unemployment number",
+            "X" * 31,
+            "X" * 26,
+            "social_finance",
+        ):
             with self.assertRaises(ValueError):
                 fred._resolve_series_id(bad)
 
@@ -113,11 +121,12 @@ class FredFormattingTests(unittest.TestCase):
         self.assertIn("No observations", out)
 
     def test_unknown_series_returns_not_found_message(self):
-        # A well-formed but unknown series ID returns guidance, not a crash, so
-        # the run is not aborted over an optional macro lookup.
+        # A well-formed but unknown series ID (alphanumeric, <=25 chars, so it
+        # passes local validation and reaches FRED) returns guidance, not a
+        # crash, so the run is not aborted over an optional macro lookup.
         no_series = {"seriess": []}
         with mock.patch.object(fred, "_request", side_effect=_request_stub(meta=no_series)):
-            out = fred.get_macro_data("totally_unknown_xyz", "2025-09-30", 30)
+            out = fred.get_macro_data("totallyunknownxyz", "2025-09-30", 30)
         self.assertIn("not found", out)
 
     def test_long_series_is_truncated_but_change_uses_full_range(self):

@@ -57,11 +57,16 @@ def _run_gws_command(sheet_id: str, range_str: str) -> list[list[str]]:
 
 
 def _parse_number(val: str) -> float:
-    """Parse a numeric string, handling commas and empty values."""
-    if not val or val.strip() == "":
+    """Parse a numeric string, handling commas, Chinese punctuation and empty values."""
+    if not val or not isinstance(val, str):
         return 0.0
-    cleaned = val.strip().replace(",", "").replace("，", "")
-    return float(cleaned)
+    cleaned = val.strip().replace(",", "").replace("，", "").replace("、", "").replace("¥", "").replace("$", "")
+    if not cleaned:
+        return 0.0
+    try:
+        return float(cleaned)
+    except (ValueError, TypeError):
+        return 0.0
 
 
 def _resolve_column_indices(headers: list[str]) -> dict[str, int]:

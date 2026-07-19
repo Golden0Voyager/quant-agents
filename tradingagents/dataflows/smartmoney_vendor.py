@@ -1223,15 +1223,21 @@ def get_sector_fund_flow(sector_name: str) -> str:
         f"Total records: {len(df)} trading days",
         "",
     ]
+
+    def _fmt(value, spec: str) -> str:
+        """Format a numeric cell, tolerating SQL NULLs (None/NaN)."""
+        return format(value, spec) if pd.notna(value) else "N/A"
+
     for _, row in df.iterrows():
         lines.append(f"**Date**: {row['Date']}")
         lines.append(
-            f"- Main Force: {row['main_net_inflow']:,.0f} ({row['main_net_inflow_pct']:.2f}%)"
+            f"- Main Force: {_fmt(row['main_net_inflow'], ',.0f')} "
+            f"({_fmt(row['main_net_inflow_pct'], '.2f')}%)"
         )
-        lines.append(f"- Super Large: {row['super_large_net_inflow']:,.0f}")
-        lines.append(f"- Large: {row['large_net_inflow']:,.0f}")
-        lines.append(f"- Medium: {row['medium_net_inflow']:,.0f}")
-        lines.append(f"- Small: {row['small_net_inflow']:,.0f}")
+        lines.append(f"- Super Large: {_fmt(row['super_large_net_inflow'], ',.0f')}")
+        lines.append(f"- Large: {_fmt(row['large_net_inflow'], ',.0f')}")
+        lines.append(f"- Medium: {_fmt(row['medium_net_inflow'], ',.0f')}")
+        lines.append(f"- Small: {_fmt(row['small_net_inflow'], ',.0f')}")
         lines.append("")
     return "\n".join(lines)
 

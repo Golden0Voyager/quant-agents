@@ -189,6 +189,7 @@ class TradingAgentsGraph:
             return self._fallback_to_legacy(config_key, llm_kwargs)
 
         primary_provider = fallback_config[0]["provider"]
+        rpm_map = self.config.get("llm_requests_per_minute") or {}
         llm_chain = []
         for i, entry in enumerate(fallback_config):
             tier_base_url = (
@@ -196,12 +197,16 @@ class TradingAgentsGraph:
                 if entry["provider"] == primary_provider
                 else None
             )
+            tier_kwargs = dict(llm_kwargs)
+            tier_rpm = rpm_map.get(entry["provider"])
+            if tier_rpm:
+                tier_kwargs["requests_per_minute"] = tier_rpm
             try:
                 client = create_llm_client(
                     provider=entry["provider"],
                     model=entry["model"],
                     base_url=tier_base_url,
-                    **llm_kwargs,
+                    **tier_kwargs,
                 )
                 llm_chain.append(client.get_llm())
             except ValueError as exc:
@@ -231,11 +236,16 @@ class TradingAgentsGraph:
         tiers could be created (all API keys missing) or fallback is not
         configured."""
         model_key = "deep_think_llm" if "deep" in config_key else "quick_think_llm"
+        provider = self.config["llm_provider"]
+        legacy_kwargs = dict(llm_kwargs)
+        legacy_rpm = (self.config.get("llm_requests_per_minute") or {}).get(provider)
+        if legacy_rpm:
+            legacy_kwargs["requests_per_minute"] = legacy_rpm
         client = create_llm_client(
-            provider=self.config["llm_provider"],
+            provider=provider,
             model=self.config[model_key],
             base_url=self.config.get("backend_url"),
-            **llm_kwargs,
+            **legacy_kwargs,
         )
         return client.get_llm()
 

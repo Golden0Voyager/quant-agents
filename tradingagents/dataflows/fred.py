@@ -105,9 +105,11 @@ def _resolve_series_id(indicator: str) -> str:
     if key in MACRO_SERIES:
         return MACRO_SERIES[key]
     candidate = indicator.strip().upper()
-    # FRED series IDs never contain whitespace and are short; reject anything
-    # else (a descriptive phrase the LLM passed) rather than 400ing the API.
-    if not candidate or len(candidate) > 30 or any(c.isspace() for c in candidate):
+    # FRED's contract: series IDs are "25 or less alphanumeric characters".
+    # Reject anything else locally (a descriptive phrase or an A-share indicator
+    # like 'social_finance' the routing layer fell back with) so it returns
+    # guidance instead of 400ing the API with an opaque error.
+    if not candidate or len(candidate) > 25 or not candidate.isalnum():
         raise ValueError(
             f"'{indicator}' is not a known macro alias or a valid FRED series ID. "
             f"Use an alias (e.g. 'cpi', 'unemployment', '10y_treasury') or a raw "
