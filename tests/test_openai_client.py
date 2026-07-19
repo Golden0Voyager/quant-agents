@@ -103,6 +103,39 @@ class OpenAIClientGetLlmTests(unittest.TestCase):
         _, kwargs = mock_chat.call_args
         self.assertEqual(kwargs.get("timeout"), 30)
 
+    @patch.dict(os.environ, {"SENSENOVA_API_KEY": "ss-test"}, clear=True)
+    @patch("tradingagents.llm_clients.openai_client.DeepSeekChatOpenAI")
+    def test_attaches_shared_rate_limiter(self, mock_chat):
+        """requests_per_minute attaches the process-wide shared limiter."""
+        from tradingagents.llm_clients.rate_limit import (
+            get_shared_rate_limiter,
+            reset_rate_limiters,
+        )
+
+        reset_rate_limiters()
+        self.addCleanup(reset_rate_limiters)
+        client = OpenAIClient(
+            "deepseek-v4-flash", provider="sensenova", requests_per_minute=15
+        )
+        client.get_llm()
+        _, kwargs = mock_chat.call_args
+        limiter = kwargs.get("rate_limiter")
+        self.assertIsNotNone(limiter)
+        # The registry hands back the same shared instance for this provider.
+        self.assertIs(limiter, get_shared_rate_limiter("sensenova", 15))
+        self.assertAlmostEqual(limiter.requests_per_second, 15 / 60)
+        # The raw rpm scalar must not leak through to the ChatOpenAI kwargs.
+        self.assertNotIn("requests_per_minute", kwargs)
+
+    @patch.dict(os.environ, {"SENSENOVA_API_KEY": "ss-test"}, clear=True)
+    @patch("tradingagents.llm_clients.openai_client.NormalizedChatOpenAI")
+    def test_no_rate_limiter_without_rpm(self, mock_chat):
+        """Without requests_per_minute, no rate_limiter is attached."""
+        client = OpenAIClient("sensenova-6.7-flash-lite", provider="sensenova")
+        client.get_llm()
+        _, kwargs = mock_chat.call_args
+        self.assertNotIn("rate_limiter", kwargs)
+
 
 @pytest.mark.unit
 class NormalizedChatOpenAITests(unittest.TestCase):

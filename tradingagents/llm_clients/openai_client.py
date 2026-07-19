@@ -307,6 +307,18 @@ class OpenAIClient(BaseLLMClient):
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
 
+        # Client-side request pacing: attach a process-wide shared token-bucket
+        # limiter so concurrent batch workers and both think tiers stay under
+        # the provider's per-minute quota, preventing 429 "rpm exhausted"
+        # bursts. ``requests_per_minute`` is passed by the graph from the
+        # ``llm_requests_per_minute`` config and is not forwarded to ChatOpenAI
+        # itself (it is not in _PASSTHROUGH_KWARGS).
+        rpm = self.kwargs.get("requests_per_minute")
+        if rpm:
+            from .rate_limit import get_shared_rate_limiter
+
+            llm_kwargs["rate_limiter"] = get_shared_rate_limiter(self.provider, rpm)
+
         # Native OpenAI: use Responses API for consistent behavior across
         # all model families. Third-party providers use Chat Completions.
         # The Responses API only exists on native OpenAI; if the user points
