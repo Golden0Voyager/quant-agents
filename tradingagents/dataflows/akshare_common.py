@@ -11,6 +11,7 @@ import logging
 import math
 import os
 import signal
+import threading
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -62,9 +63,11 @@ def to_akshare_symbol(ticker: str, style: str) -> str:
 def _call_with_timeout(func: Callable[[], T], timeout_seconds: float | None = None) -> T:
     """Run ``func()`` with a hard timeout.
 
-    Uses ``signal.setitimer`` (SIGALRM) on Unix for sub-second precision,
-    falling back to ``concurrent.futures`` on platforms without POSIX timers.
-    A non-positive timeout disables the guard entirely.
+    Uses ``signal.setitimer`` (SIGALRM) on Unix for sub-second precision when
+    called from the main thread, falling back to ``concurrent.futures`` on
+    platforms without POSIX timers or when called from a worker thread (where
+    signal handlers cannot be armed). A non-positive timeout disables the guard
+    entirely.
 
     When ``timeout_seconds`` is None the value is read from the
     ``AKSHARE_TIMEOUT`` environment variable (default 30.0s).
@@ -77,7 +80,17 @@ def _call_with_timeout(func: Callable[[], T], timeout_seconds: float | None = No
     if timeout_seconds <= 0:
         return func()
 
-    if hasattr(signal, "SIGALRM") and hasattr(signal, "setitimer"):
+    # signal.setitimer/SIGALRM can only be armed from the main thread of the
+    # main interpreter. In worker threads (e.g. batch concurrent mode's
+    # ThreadPoolExecutor) signal.signal() raises "ValueError: signal only works
+    # in main thread of the main interpreter", so restrict this branch to the
+    # main thread and let everything else fall through to the thread-safe
+    # ThreadPoolExecutor path below.
+    if (
+        hasattr(signal, "SIGALRM")
+        and hasattr(signal, "setitimer")
+        and threading.current_thread() is threading.main_thread()
+    ):
         def _handler(signum, frame):
             raise TimeoutError(
                 f"akshare call timed out after {timeout_seconds:.2f}s"
@@ -91,7 +104,9 @@ def _call_with_timeout(func: Callable[[], T], timeout_seconds: float | None = No
             signal.setitimer(signal.ITIMER_REAL, *old_timer)
             signal.signal(signal.SIGALRM, old_handler)
 
-    # Windows / platforms without setitimer
+    # Worker threads / Windows / platforms without setitimer: thread-safe
+    # timeout via a helper thread (cannot interrupt a blocked C call, but bounds
+    # wall-clock wait).
     import concurrent.futures
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
