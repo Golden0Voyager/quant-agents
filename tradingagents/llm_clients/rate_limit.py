@@ -52,7 +52,15 @@ def get_shared_rate_limiter(
 
     Returns:
         A shared :class:`InMemoryRateLimiter` for *provider*.
+
+    Raises:
+        ValueError: If *requests_per_minute* is not positive.
     """
+    if requests_per_minute <= 0:
+        raise ValueError(
+            f"requests_per_minute must be positive, got {requests_per_minute!r}"
+        )
+
     key = provider.strip().lower()
     with _LOCK:
         existing = _LIMITERS.get(key)

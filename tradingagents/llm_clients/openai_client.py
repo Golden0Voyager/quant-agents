@@ -1,9 +1,12 @@
+import logging
 import os
 from typing import Any
 from urllib.parse import urlparse
 
 from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
+
+logger = logging.getLogger(__name__)
 
 from .api_key_env import get_api_key_env
 from .base_client import BaseLLMClient, normalize_content
@@ -314,7 +317,17 @@ class OpenAIClient(BaseLLMClient):
         # ``llm_requests_per_minute`` config and is not forwarded to ChatOpenAI
         # itself (it is not in _PASSTHROUGH_KWARGS).
         rpm = self.kwargs.get("requests_per_minute")
-        if rpm:
+        try:
+            rpm = float(rpm) if rpm is not None else 0.0
+        except (TypeError, ValueError):
+            logger.warning(
+                "Ignoring invalid requests_per_minute=%r for provider '%s'; "
+                "rate limiting disabled.",
+                self.kwargs.get("requests_per_minute"),
+                self.provider,
+            )
+            rpm = 0.0
+        if rpm > 0:
             from .rate_limit import get_shared_rate_limiter
 
             llm_kwargs["rate_limiter"] = get_shared_rate_limiter(self.provider, rpm)

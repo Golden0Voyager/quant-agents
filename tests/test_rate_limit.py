@@ -60,3 +60,9 @@ class TestSharedRateLimiter:
             t.join()
 
         assert len({id(r) for r in results}) == 1
+
+    def test_non_positive_rpm_rejected(self) -> None:
+        # Zero or negative rpm would create a broken limiter; reject early.
+        for bad in (0, -1, 0.0):
+            with pytest.raises(ValueError):
+                get_shared_rate_limiter("sensenova", bad)
