@@ -1,17 +1,21 @@
 import json
 import subprocess
 import unittest
+from functools import partial
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from tradingagents.portfolio.transaction_sync import (
     TransactionSyncService,
-    _parse_number,
     _resolve_column_indices,
     _run_gws_command,
     _transform_row,
 )
+from tradingagents.portfolio.validators import parse_number
+
+# The old transaction_sync._parse_number was lenient (empty/invalid -> 0.0).
+_parse_number = partial(parse_number, fallback=0.0)
 
 
 @pytest.mark.unit

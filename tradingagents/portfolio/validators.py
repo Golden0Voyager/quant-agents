@@ -9,14 +9,48 @@ from tradingagents.portfolio.models import Holding
 logger = logging.getLogger(__name__)
 
 
-def _parse_number(value: Any) -> float:
-    """Strip thousand separators and parse as float."""
+def parse_number(value: Any, fallback: float | None = None) -> float:
+    """Strip thousand separators/currency symbols and parse as float.
+
+    Args:
+        value: The value to parse (int, float, or string).
+        fallback: If provided, return this value when parsing fails or the
+            input is empty/invalid. If None (default), a ValueError is raised.
+
+    Returns:
+        The parsed float value.
+
+    Raises:
+        ValueError: If the value cannot be parsed and no fallback is provided.
+    """
     if isinstance(value, (int, float)):
         return float(value)
-    if not isinstance(value, str):
+    if not value or not isinstance(value, str):
+        if fallback is not None:
+            return fallback
         raise ValueError(f"Cannot parse number from {type(value)}")
-    cleaned = value.strip().replace(",", "").replace("，", "").replace("、", "").replace("$", "").replace("¥", "")
-    return float(cleaned)
+    cleaned = (
+        value.strip()
+        .replace(",", "")
+        .replace("，", "")
+        .replace("、", "")
+        .replace("$", "")
+        .replace("¥", "")
+    )
+    if not cleaned:
+        if fallback is not None:
+            return fallback
+        raise ValueError("Cannot parse empty string as number")
+    try:
+        return float(cleaned)
+    except (ValueError, TypeError) as exc:
+        if fallback is not None:
+            return fallback
+        raise ValueError(f"Cannot parse number from {value!r}") from exc
+
+
+# Backward-compatible alias for existing callers/tests.
+_parse_number = parse_number
 
 
 def normalize_ticker(raw: str) -> str | None:

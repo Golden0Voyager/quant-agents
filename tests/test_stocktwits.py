@@ -4,6 +4,7 @@ from __future__ import annotations
 import http.client
 import json
 import unittest
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 
@@ -121,10 +122,16 @@ class StocktwitsFetchTests(unittest.TestCase):
         self.assertIn("To the moon!", result)
 
     def test_success_path_returns_formatted_messages(self):
+        # Use dynamically-generated dates so the test remains deterministic
+        # regardless of the current date (messages must be within days_back).
+        now = datetime.now(UTC)
+        d1 = (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        d2 = (now - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
         messages = [
-            {"created_at": "2026-06-18T10:30:00Z", "body": "Bullish on AAPL", "user": {"username": "bull1"},
+            {"created_at": d1, "body": "Bullish on AAPL", "user": {"username": "bull1"},
              "entities": {"sentiment": {"basic": "Bullish"}}},
-            {"created_at": "2026-06-17T09:00:00Z", "body": "Too expensive", "user": {"username": "bear1"},
+            {"created_at": d2, "body": "Too expensive", "user": {"username": "bear1"},
              "entities": {"sentiment": {"basic": "Bearish"}}},
         ]
         payload = json.dumps({"messages": messages}).encode("utf-8")
