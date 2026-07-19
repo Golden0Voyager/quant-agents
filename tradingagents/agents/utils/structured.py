@@ -19,8 +19,9 @@ all three agents log the same warnings when fallback fires.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel
 
@@ -57,6 +58,52 @@ def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Any | None:
 
 
 FALLBACK_MARKER = "<!--STRUCTURED_FALLBACK: schema validation failed, treat with low confidence-->"
+
+
+# Canonical three-tier confidence scale used by ResearchPlan / TraderProposal /
+# PortfolioDecision. Both English levels and common Chinese phrasings normalise
+# to the same literals so the heuristic parser below survives multilingual
+# free-text fallbacks.
+_CONFIDENCE_NORMALIZE: dict[str, Literal["low", "medium", "high"]] = {
+    "low": "low", "低": "low", "较低": "low", "偏低": "low",
+    "medium": "medium", "中": "medium", "中等": "medium", "中性": "medium",
+    "中等偏高": "medium", "中等偏低": "medium",
+    "high": "high", "高": "high", "较高": "high", "偏高": "high",
+}
+
+# Matches "Confidence: X" / "**Confidence**: X" / "置信度：X" / "整体置信度较低" /
+# a "| 置信度 | 低 |" table cell — tolerates markdown bold, whitespace, table
+# pipes, and an EN or CN colon (or the glued Chinese 为/是/no-sep form) between
+# the label and value. The captured value is restricted to a known confidence
+# token so prose like "Confidence in the thesis is high" does not misparse.
+_CONFIDENCE_LABEL_RE = re.compile(
+    r"(?:confidence|置信度|置信水平|信心)[\s*:：\-为是|｜]*"
+    r"(low|medium|high|较低|偏低|中等偏[高低]|中等|中性|较高|偏高|低|中|高)",
+    re.IGNORECASE,
+)
+
+
+def parse_confidence(text: str) -> Literal["low", "medium", "high"] | None:
+    """Heuristically extract a low/medium/high confidence level from prose text.
+
+    Mirrors :func:`tradingagents.agents.utils.rating.parse_rating`: scan each
+    line for an explicit ``Confidence: X`` / ``置信度：X`` label (tolerant of
+    markdown bold and EN/CN colons), then normalise the English or Chinese
+    value word to the canonical three-tier scale. The first labelled line wins.
+
+    Returns ``None`` when no confidence word is present so callers can decide
+    the default rather than silently assuming ``low``.
+    """
+    if not text:
+        return None
+    for line in text.splitlines():
+        m = _CONFIDENCE_LABEL_RE.search(line)
+        if m:
+            raw = m.group(1).strip("*:：.,()（） 　").lower()
+            level = _CONFIDENCE_NORMALIZE.get(raw)
+            if level is not None:
+                return level
+    return None
 
 
 def invoke_structured_or_freetext(
@@ -104,4 +151,15 @@ def invoke_structured_or_freetext(
             )
 
     response = plain_llm.invoke(prompt)
-    return f"\n{FALLBACK_MARKER}\n{response.content}"
+    content = response.content
+    fallback = f"\n{FALLBACK_MARKER}\n{content}"
+    # The free-text path bypasses the schema renderer, so the structured
+    # ``**Confidence**`` line is normally lost. If the model stated a
+    # confidence level anywhere in prose, re-surface it in the canonical form
+    # so downstream consumers (report body, batch summary) still see it and do
+    # not have to assume "low" just because the output format degraded.
+    if isinstance(content, str) and "**Confidence**" not in content:
+        level = parse_confidence(content)
+        if level is not None:
+            fallback = f"{fallback}\n\n**Confidence**: {level}"
+    return fallback

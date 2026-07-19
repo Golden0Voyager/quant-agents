@@ -1299,13 +1299,18 @@ class TestGetResearchReports(TestCase):
 @pytest.mark.unit
 class TestGetEarningsEstimates(TestCase):
     def setUp(self):
+        # Mirrors the current ak.stock_yjyg_em schema (period-keyed, all stocks).
         self.est_df = pd.DataFrame([{
-            "报告期": "2026-12-31",
+            "股票代码": "600519",
+            "股票简称": "贵州茅台",
+            "预测指标": "归属净利润",
+            "业绩变动": "预增",
+            "预测数值": "约850亿元",
+            "业绩变动幅度": "20%",
+            "业绩变动原因": "市场需求旺盛",
             "预告类型": "预增",
-            "预告内容": "净利润增长约20%",
-            "预告原因": "市场需求旺盛",
-            "变动下限": 15.0,
-            "变动上限": 25.0,
+            "上年同期值": "708亿元",
+            "公告日期": "2026-01-15",
         }])
 
     def test_returns_formatted_data(self):
@@ -1313,14 +1318,25 @@ class TestGetEarningsEstimates(TestCase):
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_yjyg_em.return_value = self.est_df
             result = akshare_vendor.get_earnings_estimates("600519.SS")
-        assert "Earnings Estimates" in result
+        assert "Earnings Preannouncement" in result
         assert "预增" in result
-        assert "净利润增长约20%" in result
+        assert "市场需求旺盛" in result
 
     def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
             mock_ak.stock_yjyg_em.return_value = pd.DataFrame()
+            with pytest.raises(NoMarketDataError, match="600519.SS"):
+                akshare_vendor.get_earnings_estimates("600519.SS")
+
+    def test_filters_out_other_tickers(self):
+        """A period row for a different ticker must not be returned as this
+        ticker's preannouncement."""
+        from tradingagents.dataflows import akshare_vendor
+        other = self.est_df.copy()
+        other["股票代码"] = "000001"
+        with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
+            mock_ak.stock_yjyg_em.return_value = other
             with pytest.raises(NoMarketDataError, match="600519.SS"):
                 akshare_vendor.get_earnings_estimates("600519.SS")
 

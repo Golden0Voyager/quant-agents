@@ -1,6 +1,6 @@
 import os
 
-from tradingagents.agents.utils.structured import FALLBACK_MARKER
+from tradingagents.agents.utils.structured import FALLBACK_MARKER, parse_confidence
 
 # Batch mode is unattended — tqdm progress bars from akshare/yfinance/third-party
 # libraries spam the terminal and break the Rich TUI layout. Disable globally.
@@ -470,23 +470,20 @@ class BatchRunner:
 
         fields = self._parse_summary_fields(decision, trader)
 
-        # Detect structured-output fallback so the batch summary can flag degraded
-        # decisions and force confidence to low.
+        # Detect structured-output fallback so the batch summary can flag a
+        # degraded (free-text) decision. The fallback flag is kept independent
+        # of confidence: a degraded format does not by itself mean the analysis
+        # is low-confidence, so we no longer force "low" here — the free-text
+        # path re-surfaces a canonical **Confidence** line when the model stated
+        # one (see structured.invoke_structured_or_freetext), and we parse it
+        # below just like a structured decision.
         is_fallback = bool(
             final_state.get("structured_fallback_agents")
             or final_state.get("_structured_fallback")
             or FALLBACK_MARKER in decision
         )
         fields["fallback"] = is_fallback
-        if is_fallback:
-            fields["confidence"] = "low"
-        else:
-            m = re.search(
-                r"\*\*Confidence\*\*\s*[:：]\s*(low|medium|high)",
-                decision,
-                re.IGNORECASE,
-            )
-            fields["confidence"] = m.group(1).lower() if m else "—"
+        fields["confidence"] = parse_confidence(decision) or "—"
 
         self.summaries[ticker] = {"company": company or ticker, **fields}
 
