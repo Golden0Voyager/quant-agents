@@ -1283,30 +1283,73 @@ def get_research_reports(
 # ---------------------------------------------------------------------------
 
 
-def get_earnings_estimates(symbol: str) -> str:
-    """Fetch A-share analyst earnings estimate consensus via akshare."""
-    code = to_akshare_symbol(symbol, "bare")
+_QUARTER_ENDS = ("0331", "0630", "0930", "1231")
 
+
+def _recent_report_periods(curr_date: str | None, count: int = 4) -> list[str]:
+    """Return the ``count`` most recent quarterly report periods (YYYYMMDD),
+    newest first, starting from the one most likely to be published already.
+
+    ``ak.stock_yjyg_em`` is keyed by reporting period, and any single period
+    only carries preannouncements for the minority of firms that issued one, so
+    callers walk back through several periods to find the latest available row.
+    """
+    period = _yjbb_report_date_for(curr_date)
+    year, mmdd = int(period[:4]), period[4:]
+    idx = _QUARTER_ENDS.index(mmdd)
+    periods = [period]
+    for _ in range(count - 1):
+        idx -= 1
+        if idx < 0:
+            idx = len(_QUARTER_ENDS) - 1
+            year -= 1
+        periods.append(f"{year}{_QUARTER_ENDS[idx]}")
+    return periods
+
+
+def get_earnings_estimates(symbol: str, curr_date: str | None = None) -> str:
+    """Fetch A-share company earnings preannouncement (业绩预告) via akshare.
+
+    ``ak.stock_yjyg_em`` is period-based (one call returns every stock's
+    preannouncement for a reporting period), so walk back through the most
+    recent quarterly periods and return the first that carries a row for this
+    ticker. Not every firm issues a preannouncement, so an absence here is a
+    legitimate ``NoMarketDataError`` rather than a fetch failure.
+    """
+    code = to_akshare_symbol(symbol, "bare").zfill(6)
+
+    df_hit = None
+    period_hit = None
     with _akshare_task_context(f"📊 {symbol} 盈利预测"), no_proxy():
-        df = _safe_call(ak.stock_yjyg_em, symbol=code)
+        for period in _recent_report_periods(curr_date):
+            df = _safe_call(ak.stock_yjyg_em, date=period)
+            if df is None or df.empty or "股票代码" not in df.columns:
+                continue
+            sub = df[df["股票代码"].astype(str).str.zfill(6) == code]
+            if not sub.empty:
+                df_hit, period_hit = sub, period
+                break
 
-    if df is None or df.empty:
+    if df_hit is None:
         raise NoMarketDataError(
-            symbol, detail=f"no earnings estimate data found for {symbol} via akshare"
+            symbol, detail=f"no earnings preannouncement found for {symbol} via akshare"
         )
 
     lines = [
-        f"## {symbol.upper()} Analyst Earnings Estimates (source: akshare / Eastmoney)",
-        f"Total records: {len(df)}",
+        f"## {symbol.upper()} Earnings Preannouncement 业绩预告 "
+        f"(period {period_hit}, source: akshare / Eastmoney)",
+        f"Total records: {len(df_hit)}",
         "",
     ]
-    for _, row in df.iterrows():
-        lines.append(f"**Report Period**: {row.get('报告期', 'N/A')}")
-        lines.append(f"- Forecast Type: {row.get('预告类型', 'N/A')}")
-        lines.append(f"- Forecast Content: {row.get('预告内容', 'N/A')}")
-        lines.append(f"- Forecast Reason: {row.get('预告原因', 'N/A')}")
-        lines.append(f"- Change Lower Limit: {row.get('变动下限', 'N/A')}")
-        lines.append(f"- Change Upper Limit: {row.get('变动上限', 'N/A')}")
+    for _, row in df_hit.iterrows():
+        lines.append(f"**Forecast Type 预告类型**: {row.get('预告类型', 'N/A')}")
+        lines.append(f"- Metric 预测指标: {row.get('预测指标', 'N/A')}")
+        lines.append(f"- Change 业绩变动: {row.get('业绩变动', 'N/A')}")
+        lines.append(f"- Forecast Value 预测数值: {row.get('预测数值', 'N/A')}")
+        lines.append(f"- Change % 业绩变动幅度: {row.get('业绩变动幅度', 'N/A')}")
+        lines.append(f"- Prior-Year Value 上年同期值: {row.get('上年同期值', 'N/A')}")
+        lines.append(f"- Reason 业绩变动原因: {row.get('业绩变动原因', 'N/A')}")
+        lines.append(f"- Announced 公告日期: {row.get('公告日期', 'N/A')}")
         lines.append("")
 
     return "\n".join(lines)
