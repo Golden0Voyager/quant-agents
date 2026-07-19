@@ -31,8 +31,11 @@ class TestBatchRunnerFallbackDetection:
             "structured_fallback_agents": ["Research Manager"],
         }
         runner._extract_summary("AAPL", final_state)
+        # An upstream (Research Manager) fallback flags the run as degraded but
+        # must NOT drag the PM's own stated confidence down: the decision text
+        # says "high", so "high" is what the summary records.
         assert runner.summaries["AAPL"]["fallback"] is True
-        assert runner.summaries["AAPL"]["confidence"] == "low"
+        assert runner.summaries["AAPL"]["confidence"] == "high"
 
     def test_extract_summary_flags_fallback_from_state(self):
         runner = BatchRunner(
@@ -48,8 +51,10 @@ class TestBatchRunnerFallbackDetection:
             "_structured_fallback": True,
         }
         runner._extract_summary("AAPL", final_state)
+        # Degraded run with no confidence stated anywhere in the decision text:
+        # record "—" (unknown), not an assumed "low".
         assert runner.summaries["AAPL"]["fallback"] is True
-        assert runner.summaries["AAPL"]["confidence"] == "low"
+        assert runner.summaries["AAPL"]["confidence"] == "—"
 
     def test_extract_summary_flags_fallback_from_marker(self):
         runner = BatchRunner(
@@ -65,8 +70,10 @@ class TestBatchRunnerFallbackDetection:
             "company_name": "Apple",
         }
         runner._extract_summary("AAPL", final_state)
+        # The fallback marker flags the run as degraded, but with no confidence
+        # word in the decision the summary records "—" rather than assuming low.
         assert runner.summaries["AAPL"]["fallback"] is True
-        assert runner.summaries["AAPL"]["confidence"] == "low"
+        assert runner.summaries["AAPL"]["confidence"] == "—"
 
     def test_extract_summary_parses_confidence_from_decision(self):
         runner = BatchRunner(
@@ -83,6 +90,28 @@ class TestBatchRunnerFallbackDetection:
         runner._extract_summary("AAPL", final_state)
         assert runner.summaries["AAPL"]["fallback"] is False
         assert runner.summaries["AAPL"]["confidence"] == "high"
+
+    def test_extract_summary_parses_chinese_confidence_under_fallback(self):
+        """A degraded (fallback) decision that states its confidence in Chinese
+        prose is recorded at that stated level, not force-downgraded to low."""
+        runner = BatchRunner(
+            tickers=["600901.SS"],
+            profile_config={"llm_provider": "openai", "output_language": "Chinese"},
+            output_dir=Path("/tmp/reports"),
+            workers=1,
+        )
+        marker = "<!--STRUCTURED_FALLBACK: schema validation failed, treat with low confidence-->"
+        final_state = {
+            "final_trade_decision": (
+                f"{marker}\n**评级**: 持有\n"
+                "**Confidence**: low （源于基本面核心矛盾待解，且情绪数据缺失）\n"
+            ),
+            "trader_investment_plan": "",
+            "company_name": "江苏金租",
+        }
+        runner._extract_summary("600901.SS", final_state)
+        assert runner.summaries["600901.SS"]["fallback"] is True
+        assert runner.summaries["600901.SS"]["confidence"] == "low"
 
 
 @pytest.mark.unit
