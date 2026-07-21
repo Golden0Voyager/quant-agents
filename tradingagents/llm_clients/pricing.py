@@ -1,4 +1,4 @@
-"""Per-model USD-per-million-token pricing for cost estimation.
+"""Per-model token pricing for cost estimation.
 
 The CLI dashboard shows a live cost estimate computed from token usage
 returned by each LLM call. This module is the single source of truth.
@@ -17,9 +17,11 @@ to the env-var defaults (``INPUT_TOKEN_PRICE_PER_1M`` /
 ``OUTPUT_TOKEN_PRICE_PER_1M``). If those are also unset, the callback
 silently disables cost for that call.
 
-Prices are USD per million tokens (input, output) at standard (non-
-discounted) public list price. Discount programs (Azure commitments,
-DeepSeek off-peak, Alibaba reserved) are not modeled here.
+Prices in ``pricing.yaml`` are specified in the provider's **native currency**
+(e.g. CNY for Chinese providers, USD for US providers) per million tokens
+(input, output). The code automatically converts them to USD/M using the live
+``get_usd_to_cny_rate()``. This ensures accuracy against original sources
+without manual conversion work.
 """
 
 from __future__ import annotations
@@ -52,6 +54,7 @@ _DEFAULT_PRICING: dict[str, dict[str, Price]] = {
     "kimi": {
         "kimi-k2.6":   (0.95, 4.00),
         "kimi-k2.7-code": (0.95, 4.00),
+        "kimi-k3":     (3.0, 15.0),
     },
     # ModelScope inference — used in fallback chains. Prices follow each
     # model's official provider rate since ModelScope passes through at
@@ -71,7 +74,9 @@ _DEFAULT_PRICING: dict[str, dict[str, Price]] = {
     },
     # SenseNova (Token Plan endpoint)
     "sensenova": {
-        "sensenova-6.7-flash-lite": (0.00, 0.00),
+        # Post-beta rate verified 2026-07: ¥1.5/M input, ¥4.5/M output.
+        # Stored as native CNY values; converted to USD/M by _load_pricing_yaml().
+        "sensenova-6.7-flash-lite": {"input": 1.5, "output": 4.5, "currency": "CNY"},
         "deepseek-v4-flash":        (0.14, 0.28),
     },
 }
@@ -136,9 +141,9 @@ _PRICING_YAML: dict[str, dict[str, Price]] | None = None
 def _load_pricing_yaml() -> dict[str, dict[str, Price]]:
     """Load the project-root ``pricing.yaml``, writing defaults on first use.
 
-    Returns a ``{provider: {model: (input, output)}}`` dict. The file
-    is auto-generated with default entries on the first call if it
-    doesn't exist yet.
+    Returns a ``{provider: {model: (input_usd, output_usd)}}`` dict where
+    rates are in USD per million tokens, having been converted from the
+    native currency specified in the yaml.
     """
     global _PRICING_YAML
     if _PRICING_YAML is not None:
@@ -165,7 +170,33 @@ def _load_pricing_yaml() -> dict[str, dict[str, Price]]:
             continue
         prices: dict[str, Price] = {}
         for model_name, entry in models.items():
-            if isinstance(entry, (list, tuple)) and len(entry) == 2:
+            if isinstance(entry, dict):
+                # New format: {input: 1.5, output: 4.5, currency: "CNY"}
+                try:
+                    in_rate = float(entry["input"])
+                    out_rate = float(entry["output"])
+                    currency = entry.get("currency", "USD").upper()
+
+                    if currency == "CNY":
+                        cny_rate = get_usd_to_cny_rate()
+                        in_usd = in_rate / cny_rate
+                        out_usd = out_rate / cny_rate
+                    elif currency == "USD":
+                        in_usd, out_usd = in_rate, out_rate
+                    else:
+                        # Unknown currency — treat as USD and warn.
+                        import warnings as _w
+                        _w.warn(
+                            f"Unknown currency {currency!r} for model {model_name!r}, "
+                            f"treating as USD",
+                        )
+                        in_usd, out_usd = in_rate, out_rate
+
+                    prices[model_name] = (in_usd, out_usd)
+                except (TypeError, ValueError, KeyError):
+                    pass
+            elif isinstance(entry, (list, tuple)) and len(entry) == 2:
+                # Legacy format: [input_usd, output_usd]
                 try:
                     in_rate, out_rate = float(entry[0]), float(entry[1])
                     prices[model_name] = (in_rate, out_rate)
@@ -184,20 +215,32 @@ def _write_default_pricing_yaml(path: Path) -> None:
         "# Pricing configuration — USD per million tokens (input, output).",
         "#",
         "# Edit this file to add or override model prices without touching",
-        "# Python source. Entries here are the primary local pricing source",
+        "# Python source. This file is the primary local pricing source",
         "# (the LiteLLM community catalog is checked first, then this file).",
         "#",
-        "# Format:",
-        "#   provider_name:",
-        "#     model_name: [input_price_per_1M, output_price_per_1M]",
-        "#",
+        "# Format: `model_name: [input_price_per_1M, output_price_per_1M]`",
+        "# All prices in USD. CNY equivalents are shown in trailing comments.",
+        "",
     ]
+
     for provider in sorted(_DEFAULT_PRICING):
         models = _DEFAULT_PRICING[provider]
         lines.append(f"{provider}:")
         for model_name in sorted(models):
-            in_rate, out_rate = models[model_name]
-            lines.append(f"  {model_name}: [{in_rate}, {out_rate}]")
+            entry = models[model_name]
+            if isinstance(entry, dict):
+                # Dict-format entries (native currency) — write as-is
+                in_rate = entry["input"]
+                out_rate = entry["output"]
+                currency = entry.get("currency", "USD").upper()
+                lines.append(f"  {model_name}:")
+                lines.append(f"    input: {in_rate}")
+                lines.append(f"    output: {out_rate}")
+                lines.append(f"    currency: {currency}")
+            else:
+                # Legacy tuple/list — USD format
+                in_rate, out_rate = entry
+                lines.append(f"  {model_name}: [{in_rate}, {out_rate}]")
         lines.append("")
 
     try:

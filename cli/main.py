@@ -1122,17 +1122,26 @@ def run_batch_analysis(
         tin_str = f"{tin / 1000:.1f}k" if tin >= 1000 else str(tin)
         tout_str = f"{tout / 1000:.1f}k" if tout >= 1000 else str(tout)
         cost_by_model = runner.batch_stats.get("cost_by_model", {})
+        calls_by_model = runner.batch_stats.get("calls_by_model", {}) or {}
         total_cost = sum(cost_by_model.values())
+        total_calls = int(runner.batch_stats.get("llm_calls", 0) or 0)
         cny_rate = get_usd_to_cny_rate()
         console.print("\n[bold]Batch Cost Summary[/bold]")
         console.print(f"  Tokens: {tin_str}\u2191 {tout_str}\u2193")
+        console.print(f"  LLM calls: {total_calls}")
         if cost_by_model:
             console.print(f"  Total Cost: [yellow]${total_cost:.4f}[/yellow] (\u00a5{total_cost * cny_rate:.2f})")
             console.print("  By Model:")
             for model, cost in sorted(cost_by_model.items(), key=lambda kv: -kv[1]):
-                console.print(f"    {model}: ${cost:.4f} (\u00a5{cost * cny_rate:.2f})")
+                model_calls = int(calls_by_model.get(model, 0) or 0)
+                call_part = f" ({model_calls} calls)" if model_calls else ""
+                console.print(f"    {model}: ${cost:.4f} (\u00a5{cost * cny_rate:.2f}){call_part}")
         else:
             console.print("  Total Cost: \u2014 (no priced models in this batch)")
+            if calls_by_model:
+                console.print("  By Model (calls only):")
+                for model, count in sorted(calls_by_model.items(), key=lambda kv: -kv[1]):
+                    console.print(f"    {model}: {int(count)} calls")
 
     # For single-ticker runs, offer to display the complete report
     if not headless and len(tickers) == 1:

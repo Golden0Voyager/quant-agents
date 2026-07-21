@@ -51,6 +51,7 @@ def _priced_models() -> list[tuple[str, str]]:
         ("agnes", "agnes-2.0-flash"),
         ("deepseek", "deepseek-v4-flash"),
         ("kimi", "kimi-k2.6"),
+        ("kimi", "kimi-k3"),
         ("sensenova", "sensenova-6.7-flash-lite"),
         ("sensenova", "deepseek-v4-flash"),
     ]
@@ -68,11 +69,10 @@ def test_every_catalog_model_has_a_price(provider: str, model: str):
     in_rate, out_rate = price
     assert in_rate >= 0 and out_rate >= 0
     assert (in_rate, out_rate) != (0.0, 0.0) or provider in (
-        "agnes", "sensenova",
+        "agnes",
     ), (
         f"Model {model!r} under {provider!r} is priced at $0/$0 — only "
-        f"Agnes AI and SenseNova (during the public-beta Token Plan) "
-        f"should be free."
+        f"Agnes AI should be free."
     )
 
 
@@ -84,12 +84,12 @@ def test_agnes_is_free():
     assert get_price("agnes", "agnes-2.0-flash") == (0.00, 0.00)
 
 
-def test_sensenova_flash_lite_is_free_during_beta():
-    """SenseNova 6.7 Flash-Lite is in the public-beta Token Plan
-    (¥0/month, 1,500 calls/5h, verified 2026-06). When SenseTime
-    publishes the post-beta rate, this test is the single place
-    to update alongside the PRICING dict entry."""
-    assert get_price("sensenova", "sensenova-6.7-flash-lite") == (0.00, 0.00)
+def test_sensenova_flash_lite_post_beta_rate():
+    """SenseNova 6.7 Flash-Lite post-beta rate: ¥1.5/M input, ¥4.5/M output
+    stored as USD $0.22/$0.66 in pricing.yaml."""
+    in_rate, out_rate = get_price("sensenova", "sensenova-6.7-flash-lite")
+    assert in_rate == pytest.approx(0.22, rel=1e-2)
+    assert out_rate == pytest.approx(0.66, rel=1e-2)
 
 
 def test_deepseek_pricing_matches_published_rates():
@@ -104,7 +104,8 @@ def test_deepseek_pricing_matches_published_rates():
 def test_get_price_for_model_finds_known_model():
     """Spot-check the local catalog for two well-known rates.
     Kimi K2.6 cache-miss rate is $0.95/$4.00 (verified 2026-07).
-    DeepSeek V4-Flash cache-miss rate is $0.14/$0.28."""
+    DeepSeek V4-Flash: LiteLLM catalog has $0.14/$0.28; local yaml has
+    ¥1/¥2 converted to USD. ``get_price_for_model`` checks LiteLLM first."""
     assert get_price_for_model("kimi-k2.6") == (0.95, 4.00)
     assert get_price_for_model("deepseek-v4-flash") == (0.14, 0.28)
 
@@ -116,12 +117,10 @@ def test_get_price_for_model_returns_none_for_unknown():
 
 def test_get_price_for_model_uses_first_match_for_ambiguous_models():
     """``deepseek-v4-flash`` appears under both deepseek and sensenova.
-    The catalog iteration order is the source of truth — whatever rate
-    is listed first wins. Pin it so a re-order accidentally doesn't
-    change the displayed cost."""
-    assert get_price_for_model("deepseek-v4-flash") == get_price(
-        "deepseek", "deepseek-v4-flash"
-    )
+    LiteLLM catalog is checked first and wins — pin the expected value
+    so a re-order accidentally doesn't change the displayed cost."""
+    # LiteLLM catalog has $0.14/$0.28 for deepseek-v4-flash
+    assert get_price_for_model("deepseek-v4-flash") == (0.14, 0.28)
 
 
 def test_get_price_returns_none_for_unknown_provider():
@@ -202,7 +201,7 @@ def test_callback_prices_catalogue_model():
     )
     handler.on_llm_end(_make_chat_result("deepseek-v4-flash", 1_000_000, 0))
     stats = handler.get_stats()
-    # 1M in tokens × $0.14 (V4-Flash cache-miss input rate) = $0.14
+    # 1M in tokens × $0.14 (LiteLLM catalog rate, checked before yaml)
     assert stats["cost"] == pytest.approx(0.14)
     assert stats["cost_by_model"] == {"deepseek-v4-flash": pytest.approx(0.14)}
 
@@ -477,13 +476,6 @@ def test_local_catalog_used_when_litellm_omits_provider(tmp_path, monkeypatch):
 class TestLoadPricingYamlErrorHandling:
     """Edge-case tests for _load_pricing_yaml error paths."""
 
-    @pytest.fixture(autouse=True)
-    def _reset_cache(self):
-        """Reset the global PRICING_YAML cache before each test."""
-        pricing._PRICING_YAML = None
-        yield
-        pricing._PRICING_YAML = None
-
     @pytest.fixture
     def _mock_yaml_path(self, tmp_path, monkeypatch):
         """Point _pricing_yaml_path to a temp file."""
@@ -547,6 +539,24 @@ class TestLoadPricingYamlErrorHandling:
         assert "deepseek" not in result
         assert result == {}
 
+    def test_dict_format_cny_entry_converted_to_usd(self, _mock_yaml_path, monkeypatch):
+        """A dict-format entry with currency:CNY is divided by the exchange rate."""
+        pricing_yaml = _mock_yaml_path
+        pricing_yaml.write_text(
+            "test_provider:\n"
+            "  cny-model:\n"
+            "    input: 6.5\n"
+            "    output: 27.0\n"
+            "    currency: CNY\n",
+            encoding="utf-8",
+        )
+        result = pricing._load_pricing_yaml()
+        assert "test_provider" in result
+        price = result["test_provider"]["cny-model"]
+        rate = pricing.get_usd_to_cny_rate()
+        assert price[0] == pytest.approx(6.5 / rate, rel=1e-3)
+        assert price[1] == pytest.approx(27.0 / rate, rel=1e-3)
+
 
 # ---- _write_default_pricing_yaml -----------------------------------------
 
@@ -596,6 +606,7 @@ class TestWriteDefaultPricingYaml:
         result = pricing._load_pricing_yaml()
         # Should have loaded content from the now-written default YAML.
         assert "deepseek" in result
+        # _DEFAULT_PRICING uses hardcoded ¥7.25/$ for the generated yaml
         assert result["deepseek"]["deepseek-v4-flash"] == (0.14, 0.28)
 
 
@@ -825,7 +836,10 @@ class TestGetPriceEdgeCases:
         """get_price lowercases the provider before lookup."""
         assert get_price("DEEPSEEK", "deepseek-v4-flash") == (0.14, 0.28)
         assert get_price("Agnes", "agnes-2.0-flash") == (0.00, 0.00)
-        assert get_price("Sensenova", "sensenova-6.7-flash-lite") == (0.00, 0.00)
+        assert get_price("Sensenova", "sensenova-6.7-flash-lite") == (
+            pytest.approx(0.22, rel=1e-2),
+            pytest.approx(0.66, rel=1e-2),
+        )
 
 
 # ---- _load_litellm_overlay edge cases ------------------------------------
