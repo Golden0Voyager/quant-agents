@@ -697,7 +697,7 @@ def get_limit_up_down(trade_date: str) -> str:
             f"No limit-up/limit-down data in quant_core.db for {trade_date}."
         )
 
-    counts = dict(zip(df_counts["limit_type"], df_counts["cnt"]))
+    counts = dict(zip(df_counts["limit_type"], df_counts["cnt"], strict=True))
     limit_up_count = counts.get("涨停", 0)
     limit_down_count = counts.get("跌停", 0)
 
