@@ -59,6 +59,21 @@ def _isolate_config():
     config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
 
 
+@pytest.fixture(autouse=True)
+def _reset_pricing_yaml_cache():
+    """Reset the module-level pricing YAML cache before and after each test.
+
+    ``_load_pricing_yaml`` memoizes in ``_PRICING_YAML``; a cached value
+    from one test (possibly pointing at a temp dir) would leak into later
+    tests and make price lookups order-dependent.
+    """
+    from tradingagents.llm_clients import pricing as pricing_module
+
+    pricing_module._PRICING_YAML = None
+    yield
+    pricing_module._PRICING_YAML = None
+
+
 @pytest.fixture()
 def mock_llm_client():
     client = MagicMock()
