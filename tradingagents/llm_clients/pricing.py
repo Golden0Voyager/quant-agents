@@ -189,6 +189,7 @@ def _load_pricing_yaml() -> dict[str, dict[str, Price]]:
                         _w.warn(
                             f"Unknown currency {currency!r} for model {model_name!r}, "
                             f"treating as USD",
+                            stacklevel=2,
                         )
                         in_usd, out_usd = in_rate, out_rate
 
