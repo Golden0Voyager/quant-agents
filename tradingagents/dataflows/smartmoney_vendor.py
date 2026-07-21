@@ -553,20 +553,48 @@ def get_fund_flow(
 # Index data
 # ===========================================================================
 
+def _to_index_code(symbol: str) -> str:
+    """Convert index ticker to quant_core.db index_code format.
+
+    quant_core.db stores index codes with exchange prefix (e.g. sh000001, sz399001).
+
+    Examples:
+        000001.SS  → sh000001
+        399001.SZ  → sz399001
+        399006.SZ  → sz399006
+        000688.SS  → sh000688
+        sh000001   → sh000001  (already correct)
+    """
+    # Already in correct format
+    if symbol.startswith(("sh", "sz")):
+        return symbol
+    # Strip exchange suffix and add prefix
+    bare = symbol.split(".")[0]
+    suffix = symbol.split(".")[-1].upper() if "." in symbol else ""
+    if suffix == "SS":
+        return f"sh{bare}"
+    elif suffix == "SZ":
+        return f"sz{bare}"
+    # Fallback: guess by code prefix (000/888 → sh, 399 → sz)
+    if bare.startswith(("000", "888", "688")):
+        return f"sh{bare}"
+    return f"sz{bare}"
+
+
 def get_index_daily(
     index_code: Annotated[
         str,
         "A-share index code e.g. 000001.SS (SSE Composite), 399001.SZ (SZSE Component), "
         "399006.SZ (ChiNext), 000688.SS (STAR Market). Exchange suffix is normalised to "
-        "the bare numeric code used in quant_core.db.",
+        "the quant_core.db index_code format (sh000001, sz399001, etc.).",
     ],
     start_date: Annotated[str, "Start date YYYY-MM-DD"],
     end_date: Annotated[str, "End date YYYY-MM-DD"],
 ) -> str:
     """Fetch A-share index daily OHLCV from quant_core.db.
 
-    Reads the ``index_daily`` table for major A-share indices. Expected schema:
-        ts_code TEXT, trade_date TEXT, open REAL, high REAL,
+    Reads the ``index_daily`` table for major A-share indices. Schema:
+        index_code TEXT, index_name TEXT, trade_date TEXT, open REAL, high REAL,
         low REAL, close REAL, volume REAL
 
     Returns a CSV-formatted OHLCV table for the requested index and date range.
@@ -578,14 +606,14 @@ def get_index_daily(
       ``smartmoney_db`` vendor (no fallback), a hard crash would abort the
       agent call; degrading gracefully keeps the pipeline alive.
     """
-    code = _to_smartmoney_symbol(index_code)
+    code = _to_index_code(index_code)
 
     df = _df_from_sql(
         """
         SELECT trade_date AS Date, open AS Open, high AS High,
                low AS Low, close AS Close, volume AS Volume
         FROM index_daily
-        WHERE ts_code = ? AND trade_date BETWEEN ? AND ?
+        WHERE index_code = ? AND trade_date BETWEEN ? AND ?
         ORDER BY trade_date DESC
         """,
         (code, start_date, end_date),
@@ -638,59 +666,129 @@ def get_index_daily(
 def get_limit_up_down(trade_date: str) -> str:
     """Fetch market-wide limit-up/limit-down stats for a trading date.
 
-    Reads the ``limit_up_down`` table, which aggregates daily A-share
-    limit-up and limit-down counts. Returns a markdown summary for the
-    Market Analyst / Sentiment Analyst to gauge short-term market emotion.
+    Reads the ``limit_up_down`` table which stores per-stock records:
+        trade_date TEXT, ts_code TEXT, name TEXT, pct_change REAL,
+        close_price REAL, turnover_rate REAL, limit_type TEXT (涨停/跌停),
+        board_count INTEGER (连板数), industry TEXT
 
-    Expected schema:
-        trade_date TEXT, limit_up_count INTEGER, limit_down_count INTEGER
-    Optional columns (rendered when present):
-        up_limit_stocks TEXT, down_limit_stocks TEXT
+    Aggregates into a market sentiment summary with:
+    - Total limit-up / limit-down counts
+    - Board-count distribution (连板分布) for limit-up stocks
+    - Top industries by limit-up count
+    - Sample stock names
+
+    Returns a markdown summary for the Market Analyst / Sentiment Analyst
+    to gauge short-term market emotion.
     """
-    df = _df_from_sql(
+    # Aggregate counts by limit_type
+    df_counts = _df_from_sql(
         """
-        SELECT trade_date, limit_up_count, limit_down_count,
-               up_limit_stocks, down_limit_stocks
+        SELECT limit_type, COUNT(*) AS cnt
         FROM limit_up_down
         WHERE trade_date = ?
-        LIMIT 1
+        GROUP BY limit_type
         """,
         (trade_date,),
     )
 
-    if df is None or df.empty:
+    if df_counts is None or df_counts.empty:
         raise NoMarketDataError(
             trade_date, trade_date,
             f"No limit-up/limit-down data in quant_core.db for {trade_date}."
         )
 
-    row = df.iloc[0]
+    counts = dict(zip(df_counts["limit_type"], df_counts["cnt"], strict=True))
+    limit_up_count = counts.get("涨停", 0)
+    limit_down_count = counts.get("跌停", 0)
+
     lines = [
         f"## A-Share Limit-Up / Limit-Down Stats for {trade_date} "
         f"(source: quant_core.db / local SQLite)",
         "",
+        f"- **Limit-up stocks (涨停)**: {limit_up_count}",
+        f"- **Limit-down stocks (跌停)**: {limit_down_count}",
+        f"- **Up/Down ratio**: {limit_up_count}:{limit_down_count}",
     ]
 
-    up = row.get("limit_up_count")
-    down = row.get("limit_down_count")
-    if pd.notna(up):
-        lines.append(f"- **Limit-up stocks**: {int(up)}")
-    if pd.notna(down):
-        lines.append(f"- **Limit-down stocks**: {int(down)}")
+    # Board-count distribution (连板分布) — only for limit-up
+    df_boards = _df_from_sql(
+        """
+        SELECT board_count, COUNT(*) AS cnt, GROUP_CONCAT(name, ', ') AS stocks
+        FROM limit_up_down
+        WHERE trade_date = ? AND limit_type = '涨停' AND board_count IS NOT NULL
+        GROUP BY board_count
+        ORDER BY board_count DESC
+        """,
+        (trade_date,),
+    )
 
-    up_stocks = row.get("up_limit_stocks")
-    if pd.notna(up_stocks) and str(up_stocks).strip():
+    if df_boards is not None and not df_boards.empty:
+        lines.append("")
+        lines.append("**连板分布 (Board-count distribution):**")
+        for _, row in df_boards.iterrows():
+            bc = int(row["board_count"]) if pd.notna(row["board_count"]) else 1
+            cnt = int(row["cnt"])
+            label = f"{bc}连板" if bc > 1 else "首板"
+            stocks = str(row.get("stocks", ""))[:80]
+            lines.append(f"- {label}: {cnt} 只 ({stocks}...)")
+
+    # Top industries by limit-up count
+    df_industry = _df_from_sql(
+        """
+        SELECT industry, COUNT(*) AS cnt
+        FROM limit_up_down
+        WHERE trade_date = ? AND limit_type = '涨停' AND industry IS NOT NULL AND industry != ''
+        GROUP BY industry
+        ORDER BY cnt DESC
+        LIMIT 5
+        """,
+        (trade_date,),
+    )
+
+    if df_industry is not None and not df_industry.empty:
+        lines.append("")
+        lines.append("**涨停行业分布 (Top industries):**")
+        for _, row in df_industry.iterrows():
+            lines.append(f"- {row['industry']}: {int(row['cnt'])} 只")
+
+    # Sample limit-up stocks (top 10 by board_count)
+    df_up_sample = _df_from_sql(
+        """
+        SELECT name, board_count, industry
+        FROM limit_up_down
+        WHERE trade_date = ? AND limit_type = '涨停'
+        ORDER BY board_count DESC, turnover_rate ASC
+        LIMIT 10
+        """,
+        (trade_date,),
+    )
+
+    if df_up_sample is not None and not df_up_sample.empty:
         lines.append("")
         lines.append("**Sample limit-up stocks:**")
-        for line in str(up_stocks).split(",")[:10]:
-            lines.append(f"- {line.strip()}")
+        for _, row in df_up_sample.iterrows():
+            bc = int(row["board_count"]) if pd.notna(row["board_count"]) else 1
+            bc_str = f" ({bc}连板)" if bc > 1 else ""
+            ind = f" [{row['industry']}]" if pd.notna(row.get("industry")) and row["industry"] else ""
+            lines.append(f"- {row['name']}{bc_str}{ind}")
 
-    down_stocks = row.get("down_limit_stocks")
-    if pd.notna(down_stocks) and str(down_stocks).strip():
+    # Sample limit-down stocks
+    df_down_sample = _df_from_sql(
+        """
+        SELECT name, industry
+        FROM limit_up_down
+        WHERE trade_date = ? AND limit_type = '跌停'
+        LIMIT 10
+        """,
+        (trade_date,),
+    )
+
+    if df_down_sample is not None and not df_down_sample.empty:
         lines.append("")
         lines.append("**Sample limit-down stocks:**")
-        for line in str(down_stocks).split(",")[:10]:
-            lines.append(f"- {line.strip()}")
+        for _, row in df_down_sample.iterrows():
+            ind = f" [{row['industry']}]" if pd.notna(row.get("industry")) and row["industry"] else ""
+            lines.append(f"- {row['name']}{ind}")
 
     return "\n".join(lines)
 
@@ -781,14 +879,17 @@ def get_northbound_hold(
     symbol: str,
     curr_date: str | None = None,
 ) -> str:
-    """Fetch northbound (Stock Connect) flow for an A-share from quant_core.db.
+    """Fetch northbound (Stock Connect) holdings for an A-share from quant_core.db.
 
-    Reads the ``north_flow`` table, which tracks daily buy/sell/net amounts of
-    foreign investors via HKEX Stock Connect.
+    Reads the ``north_hold`` table — quarter-end snapshots of foreign-investor
+    (northbound / HKEX Stock Connect) holdings per stock. Since 2024-08-19 the
+    exchanges stopped daily per-stock disclosure and publish quarter-end
+    snapshots instead, so this is the authoritative post-2024 source.
 
     The expected schema is:
-        ts_code TEXT, trade_date TEXT,
-        buy_amount REAL, sell_amount REAL, net_amount REAL
+        ts_code TEXT, security_name TEXT, trade_date DATE,
+        close_price REAL, hold_shares REAL, hold_market_cap REAL,
+        hold_shares_ratio REAL, free_shares_ratio REAL, total_shares_ratio REAL
 
     - Missing/empty result or schema failure: raises ``NoMarketDataError`` so
       ``route_to_vendor`` returns ``NO_DATA_AVAILABLE`` (or falls back to the
@@ -804,11 +905,13 @@ def get_northbound_hold(
 
     df = _df_from_sql(
         f"""
-        SELECT trade_date AS Date, buy_amount, sell_amount, net_amount
-        FROM north_flow
+        SELECT trade_date AS Date, security_name, close_price,
+               hold_shares, hold_market_cap, hold_shares_ratio,
+               free_shares_ratio, total_shares_ratio
+        FROM north_hold
         WHERE ts_code = ?{date_filter}
         ORDER BY trade_date DESC
-        LIMIT 10
+        LIMIT 8
         """,
         tuple(params),
     )
@@ -816,26 +919,52 @@ def get_northbound_hold(
     if df is None or df.empty:
         raise NoMarketDataError(
             symbol, symbol,
-            "No northbound flow data in quant_core.db for the requested symbol."
+            "No northbound holding data in quant_core.db for the requested symbol."
         )
 
+    name = ""
+    first_name = df.iloc[0].get("security_name")
+    if pd.notna(first_name) and str(first_name).strip():
+        name = f" ({str(first_name).strip()})"
+
     lines = [
-        f"## {symbol.upper()} Northbound (Stock Connect) Flow "
+        f"## {symbol.upper()}{name} Northbound (Stock Connect) Holdings "
         f"(source: quant_core.db / local SQLite)",
-        f"Total records: {len(df)} trading days",
+        f"Quarter-end snapshots: {len(df)} periods (latest first)",
         "",
     ]
 
+    # Quarter-over-quarter trend on the two most recent snapshots.
+    if len(df) >= 2:
+        latest = df.iloc[0].get("hold_shares")
+        prev = df.iloc[1].get("hold_shares")
+        if pd.notna(latest) and pd.notna(prev) and prev:
+            chg = latest - prev
+            pct = chg / prev * 100
+            direction = "增持" if chg > 0 else ("减持" if chg < 0 else "持平")
+            lines.append(
+                f"**QoQ change (季度环比)**: {direction} "
+                f"{chg:+,.0f} shares ({pct:+.2f}%)"
+            )
+            lines.append("")
+
     for _, row in df.iterrows():
-        lines.append(f"**Date**: {row['Date']}")
-        for col, label in [
-            ("buy_amount", "Buy Amount"),
-            ("sell_amount", "Sell Amount"),
-            ("net_amount", "Net Amount"),
-        ]:
-            v = row.get(col)
-            if pd.notna(v):
-                lines.append(f"- {label}: {v:,.0f}")
+        lines.append(f"**Report date**: {row['Date']}")
+        v = row.get("hold_shares")
+        if pd.notna(v):
+            lines.append(f"- Hold shares: {v:,.0f}")
+        v = row.get("hold_market_cap")
+        if pd.notna(v):
+            lines.append(f"- Hold market cap: {v / 1e8:,.2f} 亿元")
+        v = row.get("free_shares_ratio")
+        if pd.notna(v):
+            lines.append(f"- % of free float: {v:.2f}%")
+        v = row.get("total_shares_ratio")
+        if pd.notna(v):
+            lines.append(f"- % of total shares: {v:.2f}%")
+        v = row.get("close_price")
+        if pd.notna(v):
+            lines.append(f"- Close price: {v:,.2f}")
         lines.append("")
 
     return "\n".join(lines)

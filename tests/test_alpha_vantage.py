@@ -3,7 +3,7 @@
 import json
 import os
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -219,8 +219,25 @@ class AlphaVantageStockGetStockTests(unittest.TestCase):
         """Recent start date (< 100 days ago) uses outputsize=compact."""
         from tradingagents.dataflows.alpha_vantage_stock import get_stock
 
-        mock_api.return_value = self._FAKE_CSV
-        result = get_stock("IBM", "2026-06-01", "2026-06-30")
+        # Use dynamic dates so the test remains a "recent" range regardless of
+        # the current date. The implementation chooses outputsize based on the
+        # delta between today and start_date.
+        today = datetime.now()
+        start_dt = today - timedelta(days=30)
+        mid_dt = today - timedelta(days=16)
+        end_date = today.strftime("%Y-%m-%d")
+        start_date = start_dt.strftime("%Y-%m-%d")
+        mid_date = mid_dt.strftime("%Y-%m-%d")
+        past_date = (today - timedelta(days=60)).strftime("%Y-%m-%d")
+
+        fake_csv = (
+            f"timestamp,open,high,low,close,volume\n"
+            f"{start_date},100,101,99,100.5,1000\n"
+            f"{mid_date},150,152,149,151,2000\n"
+            f"{past_date},200,201,199,200.5,3000\n"
+        )
+        mock_api.return_value = fake_csv
+        result = get_stock("IBM", start_date, end_date)
 
         mock_api.assert_called_once()
         call_args = mock_api.call_args
@@ -230,9 +247,9 @@ class AlphaVantageStockGetStockTests(unittest.TestCase):
         self.assertEqual(call_args[0][1]["datatype"], "csv")
 
         # Result filtered to date range
-        self.assertIn("2026-06-01", result)
-        self.assertIn("2026-06-15", result)
-        self.assertNotIn("2026-07-01", result)
+        self.assertIn(start_date, result)
+        self.assertIn(mid_date, result)
+        self.assertNotIn(past_date, result)
 
     @patch("tradingagents.dataflows.alpha_vantage_stock._make_api_request")
     def test_get_stock_full_range(self, mock_api):

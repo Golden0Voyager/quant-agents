@@ -201,38 +201,54 @@ def _create_full_test_db(path):
         INSERT INTO institutional_holdings VALUES ('600519',20260331,1372,'{"基金持仓": 1352, "券商持仓": 20}');
         INSERT INTO institutional_holdings VALUES ('600519',20251231,18,'{"券商持仓": 18}');
 
-        CREATE TABLE north_flow (
+        CREATE TABLE north_hold (
             ts_code TEXT NOT NULL,
-            trade_date TEXT NOT NULL,
-            buy_amount REAL,
-            sell_amount REAL,
-            net_amount REAL,
+            security_name TEXT,
+            trade_date DATE NOT NULL,
+            close_price REAL,
+            hold_shares REAL,
+            hold_market_cap REAL,
+            hold_shares_ratio REAL,
+            free_shares_ratio REAL,
+            total_shares_ratio REAL,
             PRIMARY KEY (ts_code, trade_date)
         );
-        INSERT INTO north_flow VALUES ('600519','2026-06-19',1.2e8,8.0e7,4.0e7);
-        INSERT INTO north_flow VALUES ('600519','2026-06-18',9.0e7,1.0e8,-1.0e7);
+        INSERT INTO north_hold VALUES ('600519','贵州茅台','2026-06-30',1185.49,53711656,63674631071,4.29,4.30,4.30);
+        INSERT INTO north_hold VALUES ('600519','贵州茅台','2026-03-31',1420.0,52000000,73840000000,4.16,4.16,4.16);
 
         CREATE TABLE limit_up_down (
-            trade_date TEXT PRIMARY KEY,
-            limit_up_count INTEGER,
-            limit_down_count INTEGER,
-            up_limit_stocks TEXT,
-            down_limit_stocks TEXT
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_date TEXT NOT NULL,
+            ts_code TEXT NOT NULL,
+            name TEXT,
+            pct_change REAL,
+            close_price REAL,
+            turnover_rate REAL,
+            limit_type TEXT NOT NULL,
+            board_count INTEGER,
+            industry TEXT,
+            UNIQUE(trade_date, ts_code, limit_type)
         );
-        INSERT INTO limit_up_down VALUES ('2026-06-19', 85, 12, '600519,000858,002594', '000001,000002');
+        INSERT INTO limit_up_down (trade_date, ts_code, name, pct_change, close_price, turnover_rate, limit_type, board_count, industry) VALUES ('2026-06-19', '600519', '贵州茅台', 10.0, 1550.0, 0.5, '涨停', 2, '白酒');
+        INSERT INTO limit_up_down (trade_date, ts_code, name, pct_change, close_price, turnover_rate, limit_type, board_count, industry) VALUES ('2026-06-19', '000858', '五粮液', 10.0, 180.0, 1.2, '涨停', 1, '白酒');
+        INSERT INTO limit_up_down (trade_date, ts_code, name, pct_change, close_price, turnover_rate, limit_type, board_count, industry) VALUES ('2026-06-19', '002594', '比亚迪', 10.0, 250.0, 0.8, '涨停', 1, '汽车');
+        INSERT INTO limit_up_down (trade_date, ts_code, name, pct_change, close_price, turnover_rate, limit_type, board_count, industry) VALUES ('2026-06-19', '000001', '平安银行', -10.0, 10.0, 2.0, '跌停', NULL, '银行');
+        INSERT INTO limit_up_down (trade_date, ts_code, name, pct_change, close_price, turnover_rate, limit_type, board_count, industry) VALUES ('2026-06-19', '000002', '万科A', -10.0, 8.0, 1.5, '跌停', NULL, '房地产');
 
         CREATE TABLE index_daily (
-            ts_code TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            index_code TEXT NOT NULL,
+            index_name TEXT NOT NULL,
             trade_date TEXT NOT NULL,
             open REAL, high REAL, low REAL, close REAL, volume REAL,
-            PRIMARY KEY (ts_code, trade_date)
+            UNIQUE(index_code, trade_date)
         );
-        INSERT INTO index_daily VALUES ('000001','2026-06-15',3050.0,3060.0,3045.0,3055.0,2.5e9);
-        INSERT INTO index_daily VALUES ('000001','2026-06-16',3055.0,3070.0,3050.0,3065.0,2.6e9);
-        INSERT INTO index_daily VALUES ('000001','2026-06-17',3065.0,3080.0,3060.0,3075.0,2.7e9);
-        INSERT INTO index_daily VALUES ('000001','2026-06-18',3075.0,3090.0,3070.0,3085.0,2.8e9);
-        INSERT INTO index_daily VALUES ('000001','2026-06-19',3085.0,3100.0,3080.0,3095.0,2.9e9);
-        INSERT INTO index_daily VALUES ('399001','2026-06-19',9850.0,9900.0,9820.0,9880.0,3.1e9);
+        INSERT INTO index_daily (index_code, index_name, trade_date, open, high, low, close, volume) VALUES ('sh000001', '上证指数', '2026-06-15', 3050.0, 3060.0, 3045.0, 3055.0, 2.5e9);
+        INSERT INTO index_daily (index_code, index_name, trade_date, open, high, low, close, volume) VALUES ('sh000001', '上证指数', '2026-06-16', 3055.0, 3070.0, 3050.0, 3065.0, 2.6e9);
+        INSERT INTO index_daily (index_code, index_name, trade_date, open, high, low, close, volume) VALUES ('sh000001', '上证指数', '2026-06-17', 3065.0, 3080.0, 3060.0, 3075.0, 2.7e9);
+        INSERT INTO index_daily (index_code, index_name, trade_date, open, high, low, close, volume) VALUES ('sh000001', '上证指数', '2026-06-18', 3075.0, 3090.0, 3070.0, 3085.0, 2.8e9);
+        INSERT INTO index_daily (index_code, index_name, trade_date, open, high, low, close, volume) VALUES ('sh000001', '上证指数', '2026-06-19', 3085.0, 3100.0, 3080.0, 3095.0, 2.9e9);
+        INSERT INTO index_daily (index_code, index_name, trade_date, open, high, low, close, volume) VALUES ('sz399001', '深证成指', '2026-06-19', 9850.0, 9900.0, 9820.0, 9880.0, 3.1e9);
 
         CREATE TABLE research_report (
             ts_code TEXT NOT NULL,
@@ -727,7 +743,7 @@ class RuntimeErrorStubsTests(unittest.TestCase):
         from tradingagents.dataflows.errors import NoMarketDataError
         from tradingagents.dataflows.smartmoney_vendor import get_northbound_hold
         with self.assertRaises(NoMarketDataError) as ctx:
-            get_northbound_hold("600519.SS")
+            get_northbound_hold("999999.SS")
         self.assertIn("northbound", str(ctx.exception))
 
     def test_get_news_raises(self):
@@ -966,8 +982,11 @@ class GetNorthboundHoldTests(unittest.TestCase):
                 result = get_northbound_hold("600519.SS")
                 self.assertIn("600519", result)
                 self.assertIn("Northbound", result)
-                self.assertIn("Buy Amount", result)
-                self.assertIn("Net Amount", result)
+                self.assertIn("贵州茅台", result)
+                self.assertIn("Hold shares", result)
+                self.assertIn("Hold market cap", result)
+                self.assertIn("QoQ change", result)
+                self.assertIn("增持", result)
         finally:
             os.unlink(db_path)
 
@@ -1023,10 +1042,12 @@ class GetLimitUpDownTests(unittest.TestCase):
             with _PatchedVendor(db_path):
                 result = get_limit_up_down("2026-06-19")
             self.assertIn("Limit-Up / Limit-Down", result)
-            self.assertIn("85", result)
-            self.assertIn("12", result)
-            self.assertIn("600519", result)
-            self.assertIn("000001", result)
+            self.assertIn("涨停", result)
+            self.assertIn("跌停", result)
+            self.assertIn("贵州茅台", result)
+            self.assertIn("平安银行", result)
+            self.assertIn("连板分布", result)
+            self.assertIn("行业分布", result)
         finally:
             os.unlink(db_path)
 
