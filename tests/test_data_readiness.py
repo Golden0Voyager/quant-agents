@@ -493,8 +493,8 @@ class TestCheckDataReadinessIntegration:
         """Governance analyst data sources are all realtime."""
         mock_load.return_value = pd.DataFrame({"Date": ["2026-07-03"], "Close": [10.0]})
         report = check_data_readiness("AAPL", "2026-07-03", ["governance"])
-        # governance has: dragon_tiger, margin_trading, shareholders, pledge, northbound, inst_survey
-        expected_labels = {"龙虎榜", "融资融券", "股东户数", "股权质押", "北向资金", "机构调研"}
+        # governance has: dragon_tiger, margin_trading, shareholders, pledge, northbound, inst_intel
+        expected_labels = {"龙虎榜", "融资融券", "股东户数", "股权质押", "北向资金", "机构综合情报"}
         actual_labels = {i.label for i in report.items}
         assert actual_labels == expected_labels
         for item in report.items:
