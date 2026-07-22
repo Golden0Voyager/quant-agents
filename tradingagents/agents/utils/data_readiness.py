@@ -43,33 +43,38 @@ _MAJOR_INDEX_CODES = frozenset({
 # 分析师到所需数据源的映射
 ANALYST_DATA_REQUIREMENTS: dict[str, list[dict]] = {
     "market": [
-        {"key": "ohlcv",         "label": "日K行情",     "cache": True},
-        {"key": "indicators",    "label": "技术指标",    "cache": True, "derived": "ohlcv"},
-        {"key": "fund_flow",     "label": "资金流向",    "cache": True},
-        {"key": "limit_up_down", "label": "涨跌停统计",  "cache": True},
-        {"key": "index_daily",   "label": "指数日线",    "cache": True},
+        {"key": "ohlcv",             "label": "日K行情",     "cache": True},
+        {"key": "indicators",        "label": "技术指标",    "cache": True, "derived": "ohlcv"},
+        {"key": "chip_distribution", "label": "筹码分布",    "cache": True},
+        {"key": "fund_flow",         "label": "资金流向",    "cache": True},
+        {"key": "limit_up_down",     "label": "涨跌停统计",  "cache": True},
+        {"key": "index_daily",       "label": "指数日线",    "cache": True},
     ],
     "social": [
-        {"key": "stocktwits",    "label": "StockTwits",  "cache": False},
-        {"key": "reddit",        "label": "Reddit",      "cache": False},
+        {"key": "stocktwits",        "label": "StockTwits",  "cache": False},
+        {"key": "reddit",            "label": "Reddit",      "cache": False},
     ],
     "news": [
-        {"key": "news_akshare",  "label": "新闻 (A股)",  "cache": False},
+        {"key": "news_akshare",      "label": "新闻 (A股)",  "cache": False},
     ],
     "fundamentals": [
-        {"key": "company_info",  "label": "公司信息",    "cache": False},
-        {"key": "fin_statements","label": "财务报表",    "cache": True},
+        {"key": "company_info",      "label": "公司信息",    "cache": False},
+        {"key": "fin_statements",    "label": "财务报表",    "cache": True},
+        {"key": "historical_val",    "label": "历史估值分位","cache": True},
+        {"key": "earnings_forecast", "label": "业绩预告",    "cache": True},
     ],
     "governance": [
-        {"key": "dragon_tiger",  "label": "龙虎榜",      "cache": False},
-        {"key": "margin_trading","label": "融资融券",    "cache": False},
-        {"key": "shareholders",  "label": "股东户数",    "cache": False},
-        {"key": "pledge",        "label": "股权质押",    "cache": False},
-        {"key": "northbound",    "label": "北向资金",    "cache": True},
+        {"key": "dragon_tiger",      "label": "龙虎榜",      "cache": False},
+        {"key": "margin_trading",    "label": "融资融券",    "cache": False},
+        {"key": "shareholders",      "label": "股东户数",    "cache": False},
+        {"key": "pledge",            "label": "股权质押",    "cache": False},
+        {"key": "northbound",        "label": "北向资金",    "cache": True},
+        {"key": "inst_survey",       "label": "机构调研",    "cache": True},
     ],
     "industry": [
-        {"key": "industry_val",  "label": "行业估值",    "cache": False},
-        {"key": "macro",         "label": "宏观数据",    "cache": False},
+        {"key": "industry_val",      "label": "行业估值",    "cache": False},
+        {"key": "concept_board",     "label": "概念题材",    "cache": True},
+        {"key": "macro",             "label": "宏观数据",    "cache": False},
     ],
 }
 
