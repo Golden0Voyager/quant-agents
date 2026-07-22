@@ -43,6 +43,7 @@ from tradingagents.agents.utils.news_data_tools import (  # noqa: F401
     get_insider_transactions,
     get_institution_survey,
     get_institutional_holdings,
+    get_institutional_intelligence,
     get_news,
     get_northbound_hold,
     get_pledge_ratio,
