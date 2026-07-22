@@ -237,17 +237,21 @@ def get_research_reports(
 
 
 @tool
-def get_institution_survey(
+def get_institutional_intelligence(
     ticker: Annotated[str, "Ticker symbol of the company e.g. 600519.SS"],
     curr_date: Annotated[str, "Current date you are trading at, yyyy-mm-dd"] = None,
 ) -> str:
     """
-    Retrieve institutional survey frequency, visiting institutions (funds/券商), and focus topics.
-    Shows institutional attention and communication trends.
+    Retrieve merged institutional intelligence (survey frequency, visiting funds/brokers, and shareholder positioning).
+    Shows institutional attention, communication trends, and top holder structure.
     """
-    from tradingagents.dataflows.smartmoney_vendor import get_institution_survey as _get_surv
+    from tradingagents.dataflows.smartmoney_vendor import get_institutional_intelligence as _get_intel
     try:
-        return _get_surv(ticker, curr_date)
+        return _get_intel(ticker, curr_date)
     except Exception as exc:
-        return f"NO_DATA_AVAILABLE: Institutional survey unavailable for {ticker} ({exc})"
+        return f"NO_DATA_AVAILABLE: Institutional intelligence unavailable for {ticker} ({exc})"
+
+
+get_institution_survey = get_institutional_intelligence
+
 
