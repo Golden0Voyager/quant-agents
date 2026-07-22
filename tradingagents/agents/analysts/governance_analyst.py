@@ -5,6 +5,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_company_announcements,
     get_dragon_tiger,
     get_insider_transactions,
+    get_institution_survey,
     get_institutional_holdings,
     get_language_instruction,
     get_margin_trading,
@@ -23,17 +24,13 @@ def create_governance_analyst(llm):
             state["company_of_interest"], state.get("company_name", "")
         )
 
-        # NOTE: 9 tools is the largest analyst tool-set in the framework.
-        # Each extra tool increases tool_choice latency and LLM reasoning
-        # cost. If latency becomes an issue, consider trimming to the 5-6
-        # most impactful tools (e.g. insider_transactions, company_announcements,
-        # institutional_holdings, margin_trading, pledge_ratio).
         tools = [
             get_company_announcements,
             get_insider_transactions,
             get_news,
             get_restricted_release,
             get_institutional_holdings,
+            get_institution_survey,
             get_northbound_hold,
             get_margin_trading,
             get_pledge_ratio,
@@ -56,6 +53,7 @@ def create_governance_analyst(llm):
             "for related news coverage, get_restricted_release to identify upcoming "
             "share unlock events and their potential supply pressure, "
             "get_institutional_holdings to track top shareholder and fund positioning, "
+            "get_institution_survey to track institutional survey frequency and key focus topics, "
             "get_northbound_hold to monitor foreign investor sentiment, "
             "get_margin_trading to assess leverage and speculative sentiment, "
             "get_pledge_ratio to evaluate equity pledge risk and liquidation pressure, "
