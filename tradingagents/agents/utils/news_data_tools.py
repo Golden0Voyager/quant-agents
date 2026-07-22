@@ -234,3 +234,20 @@ def get_research_reports(
     if curr_date is None:
         return route_to_vendor("get_research_reports", ticker)
     return route_to_vendor("get_research_reports", ticker, curr_date)
+
+
+@tool
+def get_institution_survey(
+    ticker: Annotated[str, "Ticker symbol of the company e.g. 600519.SS"],
+    curr_date: Annotated[str, "Current date you are trading at, yyyy-mm-dd"] = None,
+) -> str:
+    """
+    Retrieve institutional survey frequency, visiting institutions (funds/券商), and focus topics.
+    Shows institutional attention and communication trends.
+    """
+    from tradingagents.dataflows.smartmoney_vendor import get_institution_survey as _get_surv
+    try:
+        return _get_surv(ticker, curr_date)
+    except Exception as exc:
+        return f"NO_DATA_AVAILABLE: Institutional survey unavailable for {ticker} ({exc})"
+
