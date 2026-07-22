@@ -69,7 +69,7 @@ ANALYST_DATA_REQUIREMENTS: dict[str, list[dict]] = {
         {"key": "shareholders",      "label": "股东户数",    "cache": False},
         {"key": "pledge",            "label": "股权质押",    "cache": False},
         {"key": "northbound",        "label": "北向资金",    "cache": True},
-        {"key": "inst_survey",       "label": "机构调研",    "cache": True},
+        {"key": "inst_intel",        "label": "机构综合情报","cache": True},
     ],
     "industry": [
         {"key": "industry_val",      "label": "行业估值",    "cache": False},
