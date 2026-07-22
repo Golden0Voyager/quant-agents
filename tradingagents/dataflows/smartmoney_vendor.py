@@ -1471,6 +1471,25 @@ def get_pledge_ratio(symbol: str) -> str:
     return "\n".join(lines)
 
 
+def _check_stale_warning(latest_date: str | None, curr_date: str | None, max_days: int = 2) -> str:
+    """Return a warning string if latest_date is more than max_days behind curr_date."""
+    if not latest_date or not curr_date:
+        return ""
+    try:
+        dt_latest = pd.to_datetime(str(latest_date).split(" ")[0])
+        dt_curr = pd.to_datetime(str(curr_date).split(" ")[0])
+        days_behind = (dt_curr - dt_latest).days
+        if days_behind > max_days:
+            return (
+                f"> ⚠️ [数据时效性预警]: 数据库记录最新日期为 {dt_latest.strftime('%Y-%m-%d')}，"
+                f"距当前分析日期 ({dt_curr.strftime('%Y-%m-%d')}) 已滞后 {days_behind} 天。"
+                f"请将以下数据视为历史参考背景，并适当降低决策置信度。\n\n"
+            )
+    except Exception:
+        pass
+    return ""
+
+
 # ===========================================================================
 # Chip Distribution & Cost Bias (筹码分布与成本偏离度) — High Alpha
 # ===========================================================================
@@ -1517,6 +1536,9 @@ def get_chip_distribution(symbol: str, curr_date: str | None = None) -> str:
     if df is None or df.empty:
         raise RuntimeError(f"No chip distribution data in quant_core.db for {symbol}")
 
+    latest = df.iloc[0]
+    stale_warn = _check_stale_warning(latest["trade_date"], curr_date)
+
     # Fetch latest close price to calculate cost bias
     bar_df = _df_from_sql(
         f"SELECT close FROM daily_bars WHERE ts_code = ?{date_filter} ORDER BY trade_date DESC LIMIT 1",
@@ -1524,7 +1546,6 @@ def get_chip_distribution(symbol: str, curr_date: str | None = None) -> str:
     )
     latest_close = bar_df.iloc[0]["close"] if bar_df is not None and not bar_df.empty else None
 
-    latest = df.iloc[0]
     p_ratio = latest["profit_ratio"]
     if p_ratio is not None and p_ratio <= 1.0:
         p_ratio_pct = p_ratio * 100.0
@@ -1551,7 +1572,7 @@ def get_chip_distribution(symbol: str, curr_date: str | None = None) -> str:
             synthesis = "🛡️ 获利盘极低 (<15%)，深幅超跌/筹码沉淀筑底区"
 
     lines = [
-        f"## {symbol.upper()} Chip Distribution (筹码分布与成本偏离度)",
+        stale_warn + f"## {symbol.upper()} Chip Distribution (筹码分布与成本偏离度)",
         f"Source: quant_core.db (Date: {latest['trade_date']})",
         f"- 获利盘比例: {p_ratio_pct:.2f}%",
         f"- 筹码平均成本: {avg_cost if avg_cost else 'N/A'} 元" + (f" (最新股价: {latest_close:.2f}元)" if latest_close else ""),
@@ -1610,8 +1631,18 @@ def get_historical_valuation(symbol: str, curr_date: str | None = None) -> str:
         raise RuntimeError(f"No historical valuation data in quant_core.db for {symbol}")
 
     latest = df.iloc[0]
+    stale_warn = _check_stale_warning(latest["trade_date"], curr_date)
+
     curr_pe = latest["pe_ttm"]
     curr_pb = latest["pb"]
+
+    # Sample Size Guard
+    sample_notice = ""
+    if len(df) < 120:
+        sample_notice = (
+            f"\n> ⚠️ [次新股/小样本警示]: 本标的历史交易日仅 {len(df)} 条 (不足6个月)，"
+            f"估值分位数仅反映上市以来的短期分位数，不代表长期历史高低位，请谨慎参考。\n"
+        )
 
     # Calculate percentile
     valid_pes = df["pe_ttm"].dropna()
@@ -1627,6 +1658,29 @@ def get_historical_valuation(symbol: str, curr_date: str | None = None) -> str:
     )
     latest_roe = f_df.iloc[0]["roe"] if f_df is not None and not f_df.empty else None
 
+    # Sector Relative & Cyclical Stock Guard
+    sector_info = "N/A"
+    cyclical_warning = ""
+    ind_df = _df_from_sql("SELECT industry FROM stock_list WHERE code = ?", (code,))
+    if ind_df is not None and not ind_df.empty:
+        ind_name = ind_df.iloc[0]["industry"]
+        if ind_name:
+            sec_df = _df_from_sql(
+                "SELECT avg_pe FROM sector_industry WHERE industry_name = ? ORDER BY trade_date DESC LIMIT 1",
+                (ind_name,),
+            )
+            if sec_df is not None and not sec_df.empty and pd.notna(sec_df.iloc[0]["avg_pe"]):
+                avg_pe = sec_df.iloc[0]["avg_pe"]
+                diff_pct = ((curr_pe - avg_pe) / avg_pe) * 100.0 if avg_pe > 0 else 0.0
+                sector_info = f"{ind_name} (行业均值PE: {avg_pe:.2f}, 相对行业折溢价: {diff_pct:+.1f}%)"
+
+            CYCLICAL_INDUSTRIES = {"钢铁", "煤炭", "煤炭开采", "航运", "海运", "化工", "基础化工", "有色金属", "猪肉", "养殖业"}
+            if ind_name in CYCLICAL_INDUSTRIES and curr_pe < 8.0:
+                cyclical_warning = (
+                    "\n> ⚠️ [周期股景气顶点预警]: 周期性行业 (如钢铁/煤炭/航运/化工) 极低PE (<8) 常出现在盈利顶点 (周期顶部)，"
+                    "极低PE并不等于便宜，必须结合产品大宗价格与ROE变动趋势进行防爆判定。\n"
+                )
+
     # Quant valuation synthesis
     synthesis = "估值处于合理区间"
     if pe_pct < 20.0:
@@ -1640,10 +1694,11 @@ def get_historical_valuation(symbol: str, curr_date: str | None = None) -> str:
         synthesis = "🔴 极高估值区: PE处于近3年顶部的80%以上分位，溢价过高"
 
     lines = [
-        f"## {symbol.upper()} Historical Valuation Percentile (近3年估值分位数)",
+        stale_warn + sample_notice + cyclical_warning + f"## {symbol.upper()} Historical Valuation Percentile (近3年估值分位数)",
         f"Source: quant_core.db (Latest Date: {latest['trade_date']}, Total Bars: {len(df)})",
         f"- PE (TTM): {curr_pe:.2f} (处于近3年 {pe_pct:.1f}% 分位数)",
         f"- PB: {curr_pb:.2f} (处于近3年 {pb_pct:.1f}% 分位数)",
+        f"- 所属行业对比: {sector_info}",
         f"- 股息率 (Dividend Yield): {latest['dividend_yield'] if latest['dividend_yield'] is not None else 'N/A'}%",
         f"- 最新 ROE: {f'{latest_roe:.2f}%' if latest_roe is not None else 'N/A'}",
         f"- 估值因子综合判定: {synthesis}",
@@ -1652,16 +1707,14 @@ def get_historical_valuation(symbol: str, curr_date: str | None = None) -> str:
 
 
 # ===========================================================================
-# Institutional Survey & Holdings (机构调研与关注度) — High Alpha
+# Institutional Intelligence (机构综合情报 - 调研与持仓合并) — High Alpha
 # ===========================================================================
 
-def get_institution_survey(symbol: str, curr_date: str | None = None) -> str:
-    """Fetch institutional survey & holdings data from quant_core.db."""
+def get_institutional_intelligence(symbol: str, curr_date: str | None = None) -> str:
+    """Fetch merged institutional survey & holdings intelligence from quant_core.db."""
     code = _to_smartmoney_symbol(symbol)
-    params = [code]
 
-    # Try institution_survey first
-    df = _df_from_sql(
+    df_survey = _df_from_sql(
         f"""
         SELECT trade_date, survey_org, survey_type, survey_count
         FROM institution_survey
@@ -1672,8 +1725,7 @@ def get_institution_survey(symbol: str, curr_date: str | None = None) -> str:
         (code, symbol),
     )
 
-    # Fallback/complement with institutional_holdings
-    h_df = _df_from_sql(
+    df_holdings = _df_from_sql(
         f"""
         SELECT report_date, institution_count, top10_holder_ratio, type_counts
         FROM institutional_holdings
@@ -1684,26 +1736,40 @@ def get_institution_survey(symbol: str, curr_date: str | None = None) -> str:
         (code, symbol),
     )
 
-    if (df is None or df.empty) and (h_df is None or h_df.empty):
-        raise RuntimeError(f"No institutional survey or holdings data in quant_core.db for {symbol}")
+    if (df_survey is None or df_survey.empty) and (df_holdings is None or df_holdings.empty):
+        raise RuntimeError(f"No institutional intelligence (survey/holdings) in quant_core.db for {symbol}")
+
+    latest_dt = None
+    if df_survey is not None and not df_survey.empty:
+        latest_dt = df_survey.iloc[0]["trade_date"]
+    elif df_holdings is not None and not df_holdings.empty:
+        latest_dt = df_holdings.iloc[0]["report_date"]
+
+    stale_warn = _check_stale_warning(latest_dt, curr_date)
 
     lines = [
-        f"## {symbol.upper()} Institutional Survey & Positioning (机构调研与持仓结构)",
+        stale_warn + f"## {symbol.upper()} Institutional Intelligence (机构综合情报)",
         "Source: quant_core.db",
     ]
 
-    if df is not None and not df.empty:
-        lines.append(f"### 近期机构调研记录 ({len(df)} 项):")
-        for _, row in df.iterrows():
+    if df_survey is not None and not df_survey.empty:
+        lines.append(f"### 近期机构调研动向 ({len(df_survey)} 项记录):")
+        for _, row in df_survey.iterrows():
             lines.append(f"- **{row.get('trade_date', 'N/A')}**: 机构 {row.get('survey_org', 'N/A')}, 调研类型 {row.get('survey_type', 'N/A')}, 频次 {row.get('survey_count', 1)}")
         lines.append("")
 
-    if h_df is not None and not h_df.empty:
-        lines.append("### 机构持仓结构:")
-        for _, row in h_df.iterrows():
+    if df_holdings is not None and not df_holdings.empty:
+        lines.append("### 机构持仓与筹码结构:")
+        for _, row in df_holdings.iterrows():
             lines.append(f"- **报告期 {row['report_date']}**: 持仓机构总数 {row['institution_count']} 家, 前十名持仓集中度 {row['top10_holder_ratio'] if row['top10_holder_ratio'] else 'N/A'}%, 机构分类: {row['type_counts']}")
 
     return "\n".join(lines)
+
+
+# Backward compatibility alias
+get_institution_survey = get_institutional_intelligence
+
+
 
 
 # ===========================================================================
