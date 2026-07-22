@@ -159,6 +159,32 @@ def _create_full_test_db(path):
              10.57,89.76,52.22,6.34,1.47,
              12.12,21.76,216.32);
 
+        CREATE TABLE IF NOT EXISTS chip_distribution_em (
+            id INTEGER PRIMARY KEY, ts_code TEXT, trade_date TEXT,
+            profit_ratio REAL, avg_cost REAL, cost_90_low REAL, cost_90_high REAL,
+            concentration_90 REAL, cost_70_low REAL, cost_70_high REAL, concentration_70 REAL,
+            chip_concentration REAL
+        );
+        INSERT INTO chip_distribution_em VALUES (1, '600519', '2026-06-19', 0.85, 1500.0, 1450.0, 1550.0, 0.08, 1480.0, 1520.0, 0.05, 0.08);
+
+        CREATE TABLE institution_survey (
+            id INTEGER PRIMARY KEY, trade_date TEXT, stock_code TEXT,
+            stock_name TEXT, survey_org TEXT, survey_type TEXT, survey_count INTEGER
+        );
+        INSERT INTO institution_survey VALUES (1, '2026-06-19', '600519', '贵州茅台', '易方达基金', '现场调研', 1);
+
+        CREATE TABLE earnings_forecast (
+            id INTEGER PRIMARY KEY, ts_code TEXT, name TEXT, end_date TEXT,
+            forecast_type TEXT, net_profit_change REAL, previous_profit REAL, data_source TEXT
+        );
+        INSERT INTO earnings_forecast VALUES (1, '600519', '贵州茅台', '2026-06-30', '预增', 25.5, 1.5e10, 'akshare');
+
+        CREATE TABLE concept_member (
+            concept_code TEXT, concept_name TEXT, ts_code TEXT, updated_at TEXT
+        );
+        INSERT INTO concept_member VALUES ('BK0447', '白酒概念', '600519', '2026-06-19');
+
+
         CREATE TABLE sector_industry (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             industry_name TEXT NOT NULL,
@@ -1405,5 +1431,82 @@ class CurrDateFilteringTests(unittest.TestCase):
             os.unlink(db_path)
 
 
+@pytest.mark.unit
+class HighAlphaVendorTests(unittest.TestCase):
+    """Unit tests for new high-alpha quant_data vendor functions."""
+
+    def test_get_chip_distribution(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_chip_distribution
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                res = get_chip_distribution("600519.SS")
+            self.assertIn("Chip Distribution", res)
+            self.assertIn("获利盘比例", res)
+            self.assertIn("85.00%", res)
+        finally:
+            os.unlink(db_path)
+
+    def test_get_historical_valuation(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_historical_valuation
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                res = get_historical_valuation("600519.SS")
+            self.assertIn("Historical Valuation Percentile", res)
+            self.assertIn("PE (TTM)", res)
+        finally:
+            os.unlink(db_path)
+
+    def test_get_institution_survey(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_institution_survey
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                res = get_institution_survey("600519.SS")
+            self.assertIn("Institutional Survey", res)
+            self.assertIn("易方达基金", res)
+        finally:
+            os.unlink(db_path)
+
+    def test_get_earnings_forecast(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_earnings_forecast
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                res = get_earnings_forecast("600519.SS")
+            self.assertIn("Earnings Forecast", res)
+            self.assertIn("预增", res)
+        finally:
+            os.unlink(db_path)
+
+    def test_get_concept_board(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_concept_board
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                res = get_concept_board("600519.SS")
+            self.assertIn("Belonging Concept Boards", res)
+            self.assertIn("白酒概念", res)
+        finally:
+            os.unlink(db_path)
+
+
 if __name__ == "__main__":
     unittest.main()
+
