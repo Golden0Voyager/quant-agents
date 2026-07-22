@@ -2,6 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
+    get_concept_board,
     get_industry_valuation,
     get_language_instruction,
     sanitize_company_name_in_report,
@@ -19,6 +20,7 @@ def create_industry_analyst(llm):
 
         tools = [
             get_industry_valuation,
+            get_concept_board,
         ]
 
         company_line = f"Target company: {company_name} ({ticker}). " if company_name else ""
@@ -26,7 +28,9 @@ def create_industry_analyst(llm):
             company_line +
             "You are an Industry Analyst. Your job is to compare the target company's "
             "valuation (PE, PB, PS) against its industry peers and historical benchmarks. "
-            "Use `get_industry_valuation` to fetch comparative data. Assess whether the "
+            "Use `get_industry_valuation` to fetch comparative data. "
+            "Use `get_concept_board` to identify belonging concept themes, hot sector topics, and theme momentum. "
+            "Assess whether the stock is relatively overvalued, undervalued, or fairly priced within its sector. "
             "stock is relatively overvalued, undervalued, or fairly priced within its sector. "
             "Highlight any valuation anomalies or regime shifts. Provide specific, actionable "
             "insights with supporting evidence to help traders make informed decisions."
