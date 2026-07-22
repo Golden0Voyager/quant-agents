@@ -7,7 +7,10 @@ import yfinance as yf
 from langchain_core.messages import HumanMessage, RemoveMessage
 
 # Import tools from separate utility files
-from tradingagents.agents.utils.core_stock_tools import get_stock_data  # noqa: F401
+from tradingagents.agents.utils.core_stock_tools import (  # noqa: F401
+    get_chip_distribution,
+    get_stock_data,
+)
 from tradingagents.agents.utils.fund_flow_tools import (  # noqa: F401
     get_fund_flow,
     get_margin_trading,
@@ -18,12 +21,17 @@ from tradingagents.agents.utils.fundamental_data_tools import (  # noqa: F401
     get_cashflow,
     get_dividend_history,
     get_earnings_estimates,
+    get_earnings_forecast,
     get_fundamentals,
+    get_historical_valuation,
     get_income_statement,
     get_shareholder_count,
 )
 from tradingagents.agents.utils.index_data_tools import get_index_daily  # noqa: F401
-from tradingagents.agents.utils.industry_data_tools import get_industry_valuation  # noqa: F401
+from tradingagents.agents.utils.industry_data_tools import (  # noqa: F401
+    get_concept_board,
+    get_industry_valuation,
+)
 from tradingagents.agents.utils.macro_data_tools import get_macro_indicators  # noqa: F401
 from tradingagents.agents.utils.market_breadth_tools import get_limit_up_down  # noqa: F401
 from tradingagents.agents.utils.market_data_validation_tools import get_verified_market_snapshot  # noqa: F401
@@ -33,6 +41,7 @@ from tradingagents.agents.utils.news_data_tools import (  # noqa: F401
     get_dragon_tiger,
     get_global_news,
     get_insider_transactions,
+    get_institution_survey,
     get_institutional_holdings,
     get_news,
     get_northbound_hold,
