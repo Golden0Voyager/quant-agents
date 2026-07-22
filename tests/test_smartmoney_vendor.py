@@ -1507,6 +1507,72 @@ class HighAlphaVendorTests(unittest.TestCase):
             os.unlink(db_path)
 
 
+@pytest.mark.unit
+class RobustnessGuardsTests(unittest.TestCase):
+    """Unit tests for v2.0 robustness & anti-hallucination guards."""
+
+    def test_check_stale_warning_helper(self):
+        from tradingagents.dataflows.smartmoney_vendor import _check_stale_warning
+
+        # Lagging by 7 days -> trigger warning
+        warn = _check_stale_warning("2026-07-15", "2026-07-22", max_days=2)
+        self.assertIn("数据时效性预警", warn)
+        self.assertIn("滞后 7 天", warn)
+
+        # Lagging by 1 day -> no warning
+        no_warn = _check_stale_warning("2026-07-21", "2026-07-22", max_days=2)
+        self.assertEqual(no_warn, "")
+
+    def test_chip_distribution_stale_warning(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_chip_distribution
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                # 600519 db trade_date is 2026-07-03; query with curr_date=2026-07-10 (7 days lag)
+                res = get_chip_distribution("600519.SS", curr_date="2026-07-10")
+            self.assertIn("数据时效性预警", res)
+        finally:
+            os.unlink(db_path)
+
+    def test_cyclical_pe_trap_warning(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_historical_valuation
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            # Insert a cyclical industry stock with low PE (4.5)
+            conn = sqlite3.connect(db_path)
+            conn.execute("INSERT INTO stock_list (code, name, industry) VALUES ('600019', '宝钢股份', '钢铁')")
+            conn.execute("INSERT INTO historical_valuation (ts_code, trade_date, pe_ttm, pb, dividend_yield) VALUES ('600019', '2026-07-03', 4.5, 0.7, 5.0)")
+            conn.commit()
+            conn.close()
+
+            with _PatchedVendor(db_path):
+                res = get_historical_valuation("600019.SS")
+            self.assertIn("周期股景气顶点预警", res)
+        finally:
+            os.unlink(db_path)
+
+    def test_sub_new_stock_sample_notice(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_historical_valuation
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                # 600519 has only 1 row in mock test db (<120 bars)
+                res = get_historical_valuation("600519.SS")
+            self.assertIn("次新股/小样本警示", res)
+        finally:
+            os.unlink(db_path)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
