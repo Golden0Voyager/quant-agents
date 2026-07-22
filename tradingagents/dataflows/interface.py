@@ -76,6 +76,7 @@ from .smartmoney_vendor import (
     get_insider_transactions as get_smartmoney_insider_transactions,
     get_institution_survey as get_smartmoney_institution_survey,
     get_institutional_holdings as get_smartmoney_institutional_holdings,
+    get_institutional_intelligence as get_smartmoney_institutional_intelligence,
     get_limit_up_down as get_smartmoney_limit_up_down,
     get_macro_indicators as get_smartmoney_macro_indicators,
     get_margin_trading as get_smartmoney_margin_trading,
