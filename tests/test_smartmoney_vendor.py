@@ -1473,7 +1473,7 @@ class HighAlphaVendorTests(unittest.TestCase):
             _create_full_test_db(db_path)
             with _PatchedVendor(db_path):
                 res = get_institution_survey("600519.SS")
-            self.assertIn("Institutional Survey", res)
+            self.assertIn("Institutional Intelligence", res)
             self.assertIn("易方达基金", res)
         finally:
             os.unlink(db_path)
