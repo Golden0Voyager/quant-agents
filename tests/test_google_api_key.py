@@ -322,6 +322,7 @@ class NormalizedInvokeTests(unittest.TestCase):
     @patch("tradingagents.llm_clients.google_client.normalize_content")
     def test_invoke_calls_normalize_on_super_result(self, mock_normalize):
         from langchain_google_genai import ChatGoogleGenerativeAI
+
         from tradingagents.llm_clients.google_client import (
             NormalizedChatGoogleGenerativeAI,
         )

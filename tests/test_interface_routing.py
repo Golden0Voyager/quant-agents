@@ -928,11 +928,10 @@ class TestRouteToVendorAdditionalEdgeCases:
                     ],
                 }
             },
-        ):
-            with pytest.raises(ValueError, match="not supported"):
-                interface.route_to_vendor(
-                    "nonexistent_governance_method", "AAPL"
-                )
+        ), pytest.raises(ValueError, match="not supported"):
+            interface.route_to_vendor(
+                "nonexistent_governance_method", "AAPL"
+            )
 
     def test_multiple_rate_limits_first_error_stored(self):
         """
