@@ -37,6 +37,7 @@ from tradingagents.agents.utils.market_breadth_tools import get_limit_up_down  #
 from tradingagents.agents.utils.market_data_validation_tools import get_verified_market_snapshot  # noqa: F401
 from tradingagents.agents.utils.news_data_tools import (  # noqa: F401
     get_block_trade,
+    get_cailianpress_telegrams,
     get_company_announcements,
     get_dragon_tiger,
     get_global_news,

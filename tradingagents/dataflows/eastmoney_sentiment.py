@@ -280,6 +280,48 @@ def fetch_eastmoney_guba_sentiment(ticker: str, limit: int = 10) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Function C — Market-wide hot keywords/concepts (热点概念)
+# ---------------------------------------------------------------------------
+
+def fetch_eastmoney_hot_keywords(limit: int = 15) -> str:
+    """Fetch market-wide hot keywords/concepts from Eastmoney (东方财富).
+
+    Uses ``ak.stock_hot_keyword_em()`` which returns the top trending
+    concept板块 (sectors/concepts) with heat scores across all A-shares.
+    This is a market-wide sentiment signal — not ticker-specific — so it
+    provides context on what the market is collectively focused on.
+
+    Returns a placeholder string on any failure.
+    """
+    try:
+        with no_proxy():
+            df = _akshare_retry(lambda: ak.stock_hot_keyword_em(), max_retries=3)
+        if df is None or df.empty:
+            return "<Eastmoney hot keywords: no data returned>"
+
+        lines = ["Eastmoney 市场热点概念 (实时热度排名):"]
+        recent = df.head(limit)
+        for _, row in recent.iterrows():
+            cols = df.columns.tolist()
+            date = _safe_col(row, cols, "时间", 0)
+            code = _safe_col(row, cols, "股票代码", 1)
+            concept = _safe_col(row, cols, "概念名称", 2)
+            concept_code = _safe_col(row, cols, "概念代码", 3)
+            heat = _safe_col(row, cols, "热度", 4)
+            lines.append(
+                f"  [{date}] {concept}({concept_code}) — 代码: {code} — 热度: {heat}"
+            )
+        if len(recent) < len(df):
+            lines.append(f"  (共 {len(df)} 个热点概念，显示前 {len(recent)} 个)")
+        return "\n".join(lines)
+    except Exception as exc:
+        logger.warning("Eastmoney hot keywords fetch failed: %s", exc)
+        return (
+            f"<Eastmoney hot keywords unavailable: {type(exc).__name__}>"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

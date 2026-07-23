@@ -788,7 +788,7 @@ class RuntimeErrorStubsTests(unittest.TestCase):
         from tradingagents.dataflows.smartmoney_vendor import get_macro_indicators
         with self.assertRaises(RuntimeError) as ctx:
             get_macro_indicators()
-        self.assertIn("Macro indicators", str(ctx.exception))
+        self.assertIn("not available in quant_core.db", str(ctx.exception))
 
 
 @pytest.mark.unit

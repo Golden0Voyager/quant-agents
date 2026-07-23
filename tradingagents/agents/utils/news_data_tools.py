@@ -255,3 +255,32 @@ def get_institutional_intelligence(
 get_institution_survey = get_institutional_intelligence
 
 
+@tool
+def get_cailianpress_telegrams(
+    limit: Annotated[int, "Maximum number of telegrams to fetch (default 20)"] = 20,
+    look_back_days: Annotated[int | None, "Days to look back; omit for latest only"] = None,
+) -> str:
+    """
+    Retrieve real-time flash news telegrams from Cailianpress (财联社快讯).
+    
+    Provides event-driven financial news and company announcements across A-shares,
+    including major policy changes, corporate events, and market-moving headlines.
+    
+    Unlike general news feeds, Cailianpress telegrams are time-sensitive flash
+    announcements optimized for immediate market impact assessment.
+    
+    Args:
+        limit: Maximum number of telegrams to fetch (default 20).
+        look_back_days: Optional days to look back for historical telegrams.
+    
+    Returns:
+        str: Formatted markdown report of Cailianpress telegrams.
+    """
+    from tradingagents.dataflows.cailianpress_vendor import fetch_cailianpress_telegrams
+    
+    try:
+        return fetch_cailianpress_telegrams(limit=limit)
+    except Exception as exc:
+        return f"NO_DATA_AVAILABLE: Cailianpress telegrams unavailable ({type(exc).__name__}: {exc})"
+
+

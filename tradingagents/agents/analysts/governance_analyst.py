@@ -2,6 +2,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
+    get_block_trade,
     get_company_announcements,
     get_dragon_tiger,
     get_insider_transactions,
@@ -33,6 +34,7 @@ def create_governance_analyst(llm):
             get_margin_trading,
             get_pledge_ratio,
             get_dragon_tiger,
+            get_block_trade,
         ]
 
         company_name = state.get("company_name", "")
@@ -53,12 +55,14 @@ def create_governance_analyst(llm):
             "get_insider_transactions for shareholder change data, get_news "
             "for related news coverage, get_restricted_release to identify upcoming "
             "share unlock events and their potential supply pressure, "
-            "get_institutional_holdings to track top shareholder and fund positioning, "
-            "get_institution_survey to track institutional survey frequency and key focus topics, "
+            "get_institutional_intelligence to track top shareholder positioning, fund holdings, "
+            "institutional survey frequency, and key focus topics (merged indicator), "
             "get_northbound_hold to monitor foreign investor sentiment, "
             "get_margin_trading to assess leverage and speculative sentiment, "
             "get_pledge_ratio to evaluate equity pledge risk and liquidation pressure, "
-            "and get_dragon_tiger to track hot-money and institutional trading activity. "
+            "get_dragon_tiger to track hot-money and institutional trading activity, "
+            "and get_block_trade to monitor off-exchange large-block transactions "
+            "that may signal institutional accumulation (premium) or distribution (discount). "
             "Provide specific, actionable insights on governance risks, capital structure "
             "changes, management signals, and any red flags that could impact investment decisions."
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""

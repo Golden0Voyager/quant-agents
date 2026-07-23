@@ -20,21 +20,36 @@ from tradingagents.agents import *
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_balance_sheet,
+    get_block_trade,
+    get_cailianpress_telegrams,
     get_cashflow,
+    get_chip_distribution,
     get_company_announcements,
+    get_concept_board,
+    get_dividend_history,
+    get_dragon_tiger,
+    get_earnings_estimates,
+    get_earnings_forecast,
     get_fundamentals,
     get_global_news,
+    get_historical_valuation,
     get_income_statement,
     get_indicators,
+    get_index_daily,
     get_industry_valuation,
     get_insider_transactions,
-    get_institutional_holdings,
+    get_institutional_intelligence,
+    get_limit_up_down,
     get_macro_indicators,
+    get_margin_trading,
     get_news,
     get_northbound_hold,
+    get_pledge_ratio,
     get_research_reports,
     get_restricted_release,
+    get_shareholder_count,
     get_stock_data,
+    get_verified_market_snapshot,
     resolve_instrument_identity,
 )
 from tradingagents.agents.utils.memory import TradingMemoryLog
@@ -261,6 +276,10 @@ class TradingAgentsGraph:
                     # Capital flow analysis
                     get_fund_flow,
                     get_sector_fund_flow,
+                    get_chip_distribution,
+                    get_limit_up_down,
+                    get_index_daily,
+                    get_verified_market_snapshot,
                 ]
             ),
             "social": ToolNode(
@@ -278,6 +297,8 @@ class TradingAgentsGraph:
                     get_company_announcements,
                     get_macro_indicators,
                     get_research_reports,
+                    # Cailianpress flash news telegrams
+                    get_cailianpress_telegrams,
                 ]
             ),
             "governance": ToolNode(
@@ -287,14 +308,24 @@ class TradingAgentsGraph:
                     get_insider_transactions,
                     get_news,
                     get_restricted_release,
-                    get_institutional_holdings,
+                    get_institutional_intelligence,
                     get_northbound_hold,
+                    get_margin_trading,
+                    get_pledge_ratio,
+                    get_dragon_tiger,
+                    # Block trades (大宗交易) for institutional accumulation/distribution signals
+                    get_block_trade,
                 ]
             ),
             "industry": ToolNode(
                 [
                     # Industry valuation comparison
                     get_industry_valuation,
+                    get_concept_board,
+                    # Macroeconomic indicators for sector-wide context
+                    get_macro_indicators,
+                    # Sector fund flow for capital rotation patterns
+                    get_sector_fund_flow,
                 ]
             ),
             "fundamentals": ToolNode(
@@ -304,6 +335,11 @@ class TradingAgentsGraph:
                     get_balance_sheet,
                     get_cashflow,
                     get_income_statement,
+                    get_historical_valuation,
+                    get_earnings_forecast,
+                    get_earnings_estimates,
+                    get_shareholder_count,
+                    get_dividend_history,
                 ]
             ),
         }

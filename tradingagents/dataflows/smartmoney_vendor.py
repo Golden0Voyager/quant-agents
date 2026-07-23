@@ -1101,7 +1101,188 @@ def get_macro_indicators(
     curr_date: str | None = None,
     look_back_days: int | None = None,
 ) -> str:
-    raise RuntimeError("Macro indicators not available in quant_core.db")
+    """Read China macro indicators from quant_core.db.
+
+    Reads from local tables:
+      - macro_monthly → CPI, PMI, M2, retail sales, industrial production, LPR
+      - macro_quarterly → GDP
+      - money_market → SHIBOR, repo rates, PBOC policy rate
+      - market_valuation → equity-bond spread (股债利差), market PE/PB median
+      - us_treasury → US & China treasury yields, 10y-2y spread
+
+    Raises RuntimeError for unsupported indicators so route_to_vendor can
+    fall back to akshare or FRED.
+    """
+    indicator = indicator.lower().strip()
+    max_rows = _resolve_lookback(look_back_days) if look_back_days else 12
+
+    # ------------------------------------------------------------------
+    # macro_monthly table — monthly China macro (CPI, PMI, M2, etc.)
+    # ------------------------------------------------------------------
+    monthly_dispatch: dict[str, dict] = {
+        "cpi": {
+            "cols": ["cpi_yoy", "cpi_mom", "cpi_core_yoy", "ppi_yoy", "ppi_mom"],
+            "title": "China CPI & PPI",
+        },
+        "pmi": {
+            "cols": ["pmi", "pmi_yoy", "pmi_caixin", "pmi_mom", "pmi_monthly_change"],
+            "title": "China PMI (Manufacturing)",
+        },
+        "m2": {
+            "cols": ["m2", "m2_yoy", "m1_yoy", "m0_yoy", "new_loans", "new_loans_yoy"],
+            "title": "China Money Supply (M2)",
+        },
+        "retail_sales": {
+            "cols": ["retail_sales_yoy", "retail_sales_ytd_yoy"],
+            "title": "China Retail Sales",
+        },
+        "fixed_asset_investment": {
+            "cols": ["fixed_asset_investment_yoy", "fixed_asset_investment_ytd_yoy"],
+            "title": "China Fixed Asset Investment",
+        },
+        "industrial_production": {
+            "cols": ["industrial_production_yoy", "industrial_production_ytd_yoy"],
+            "title": "China Industrial Production",
+        },
+        "consumer_confidence": {
+            "cols": ["consumer_confidence", "consumer_satisfaction", "consumer_expectation"],
+            "title": "China Consumer Confidence",
+        },
+        "lpr": {
+            "cols": ["lpr_1y", "lpr_5y"],
+            "title": "China Loan Prime Rate (LPR)",
+        },
+    }
+
+    if indicator in monthly_dispatch:
+        return _macro_from_table(
+            "macro_monthly", monthly_dispatch[indicator], max_rows
+        )
+
+    if indicator in ("social_finance", "社融"):
+        # social_finance not directly in macro_monthly; fall through to akshare
+        raise RuntimeError(
+            "Social financing not available in quant_core.db as a standalone column."
+        )
+
+    # ------------------------------------------------------------------
+    # macro_quarterly table — GDP
+    # ------------------------------------------------------------------
+    if indicator == "gdp":
+        return _macro_from_table(
+            "macro_quarterly",
+            {
+                "cols": ["gdp", "gdp_yoy", "gdp_qoq", "gdp_primary", "gdp_secondary", "gdp_tertiary"],
+                "title": "China GDP",
+            },
+            12 if look_back_days is None else max_rows,
+        )
+
+    # ------------------------------------------------------------------
+    # money_market table — SHIBOR, repo rates, PBOC policy rate
+    # ------------------------------------------------------------------
+    if indicator in ("shibor", "interbank"):
+        return _macro_from_table(
+            "money_market",
+            {
+                "cols": [
+                    "shibor_on", "shibor_1w", "shibor_2w", "shibor_1m",
+                    "shibor_3m", "shibor_6m", "shibor_1y",
+                    "fr001", "fr007", "pboc_policy_rate",
+                ],
+                "title": "China Money Market Rates (SHIBOR & Repo)",
+            },
+            _resolve_lookback(look_back_days) if look_back_days else 60,
+        )
+
+    # ------------------------------------------------------------------
+    # market_valuation table — equity-bond spread, market PE/PB median
+    # ------------------------------------------------------------------
+    if indicator in ("equity_bond_spread", "ebs"):
+        return _macro_from_table(
+            "market_valuation",
+            {
+                "cols": [
+                    "pe_median", "pe_quantile", "pb_median", "pb_quantile",
+                    "equity_bond_spread", "ebs_ma", "csi300_close",
+                ],
+                "title": "A-Share Market Valuation & Equity-Bond Spread (股债利差)",
+            },
+            _resolve_lookback(look_back_days) if look_back_days else 60,
+        )
+
+    # ------------------------------------------------------------------
+    # us_treasury table — US & China yield curves
+    # ------------------------------------------------------------------
+    if indicator in ("10y_treasury", "yield_curve", "cn_10y", "treasury_yield"):
+        return _macro_from_table(
+            "us_treasury",
+            {
+                "cols": [
+                    "us_2y", "us_5y", "us_10y", "us_30y",
+                    "cn_2y", "cn_5y", "cn_10y", "cn_30y",
+                    "spread_10y_2y",
+                ],
+                "title": "US & China Treasury Yields",
+                "date_col": "trade_date",
+            },
+            _resolve_lookback(look_back_days) if look_back_days else 60,
+        )
+
+    # Unsupported — let fallback chain try akshare / FRED.
+    raise RuntimeError(
+        f"Indicator '{indicator}' not available in quant_core.db. "
+        "route_to_vendor will fall back to akshare or FRED."
+    )
+
+
+def _resolve_lookback(look_back_days: int | None) -> int:
+    if look_back_days is None:
+        return 12
+    if look_back_days >= 365 * 5:
+        return 60
+    if look_back_days >= 365:
+        return 24
+    if look_back_days >= 180:
+        return 12
+    return max(6, look_back_days // 30)
+
+
+def _macro_from_table(table: str, spec: dict, limit: int) -> str:
+    """Read *limit* rows and format as markdown. spec keys: cols, title, date_col."""
+    date_col = spec.get("date_col", "date")
+    col_list = ", ".join(spec["cols"])
+    df = _df_from_sql(
+        f"SELECT {date_col} AS date, {col_list} FROM \"{table}\" ORDER BY {date_col} DESC LIMIT ?",
+        (limit,),
+    )
+
+    if df is None or df.empty:
+        raise RuntimeError(
+            f"No macro data in quant_core.db for table '{table}'."
+        )
+
+    lines = [
+        f"## {spec['title']} (source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)}",
+        "---",
+        "",
+    ]
+
+    for _, row in df.iterrows():
+        date_val = row.get("date", "")
+        parts = [f"**{date_val}**"]
+        for col in spec["cols"]:
+            v = row.get(col)
+            if pd.notna(v):
+                if isinstance(v, (float, int)):
+                    parts.append(f"  {col}: {v:.2f}")
+                else:
+                    parts.append(f"  {col}: {v}")
+        lines.append("  \n".join(parts))
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 # ===========================================================================
