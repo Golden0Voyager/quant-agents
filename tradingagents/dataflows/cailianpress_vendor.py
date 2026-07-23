@@ -9,7 +9,7 @@ This is a separate vendor from Eastmoney to maintain clear separation of concern
 
 Main API endpoint pattern (based on open-source implementations):
     https://www.cls.cn/nodeapi/updateTelegraphList
-    
+
 Returns structured telegrams with timestamps, titles, content, level (A/B/C),
 and associated stock codes for filtering.
 """
@@ -50,7 +50,7 @@ RED_KEYWORDS = [
 
 def _generate_signature(params: dict) -> str:
     """Generate API signature.
-    
+
     Algorithm (matches cls-telegraph implementation):
         sign_str = sorted params joined by "&" with "=value"
         sha1_hash = SHA1(sign_str)
@@ -104,7 +104,7 @@ def fetch_cailianpress_telegrams(
             resp.raise_for_status()
             data = resp.json()
     except Exception as exc:
-        raise RuntimeError(f"Cailianpress API request failed: {exc}")
+        raise RuntimeError(f"Cailianpress API request failed: {exc}") from exc
 
     if data.get("error") != 0 or data.get("data") is None:
         raise RuntimeError(f"Cailianpress API returned error: {data}")
@@ -143,10 +143,7 @@ def fetch_cailianpress_telegrams(
 
         # Build line entry
         prefix = "⚠️" if is_important else ""
-        if stocks:
-            stock_line = f"   📈 {' | '.join(stocks)}"
-        else:
-            stock_line = ""
+        stock_line = f"   📈 {' | '.join(stocks)}" if stocks else ""
 
         lines.append(f"**{ts_str}** [{level}] {prefix} {title.strip()}")
         if brief.strip() and brief.strip() != title.strip():

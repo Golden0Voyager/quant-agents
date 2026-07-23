@@ -6,7 +6,7 @@ as ``test_eastmoney_sentiment.py`` and ``test_akshare_vendor_mocked.py``.
 from __future__ import annotations
 
 import hashlib
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -443,7 +443,7 @@ class TestFetchCailianpressTelegrams:
 
         assert "..." in result
         # Find the quote line
-        lines = [l for l in result.split("\n") if l.startswith("> ")]
+        lines = [ln for ln in result.split("\n") if ln.startswith("> ")]
         assert len(lines) == 1
         # Content after "> " should be 200 chars + "..." = 203 chars
         quote_content = lines[0][2:]

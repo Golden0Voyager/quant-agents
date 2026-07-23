@@ -277,7 +277,7 @@ def get_cailianpress_telegrams(
         str: Formatted markdown report of Cailianpress telegrams.
     """
     from tradingagents.dataflows.cailianpress_vendor import fetch_cailianpress_telegrams
-    
+
     try:
         return fetch_cailianpress_telegrams(limit=limit)
     except Exception as exc:
