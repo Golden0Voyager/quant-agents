@@ -262,17 +262,17 @@ def get_cailianpress_telegrams(
 ) -> str:
     """
     Retrieve real-time flash news telegrams from Cailianpress (财联社快讯).
-    
+
     Provides event-driven financial news and company announcements across A-shares,
     including major policy changes, corporate events, and market-moving headlines.
-    
+
     Unlike general news feeds, Cailianpress telegrams are time-sensitive flash
     announcements optimized for immediate market impact assessment.
-    
+
     Args:
         limit: Maximum number of telegrams to fetch (default 20).
         look_back_days: Optional days to look back for historical telegrams.
-    
+
     Returns:
         str: Formatted markdown report of Cailianpress telegrams.
     """
