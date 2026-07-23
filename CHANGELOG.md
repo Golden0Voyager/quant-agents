@@ -6,6 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+## Unreleased
+
+### Added
+
+- **财联社 (Cailianpress) flash news integration.** New
+  `cailianpress_vendor.py` module fetches real-time financial news telegrams
+  from cls.cn via the `v1/roll/get_roll_list` API. Registered as
+  `get_cailianpress_telegrams` in `news_analyst` and the graph's news
+  ToolNode. 27 unit tests, smoke test script. (#40)
+- **Eastmoney market hot keywords** (`fetch_eastmoney_hot_keywords`)
+  injected into `sentiment_analyst` as an additional market-wide sentiment
+  signal alongside the existing hot-rank and Guba indicators.
+- **Macro indicators from quant_core.db.** `get_macro_indicators` now reads
+  CPI, PMI, M2, SHIBOR, equity-bond spread, and treasury yields from the
+  local SQLite database with fallback to akshare/FRED for unsupported
+  indicators.
+- **Additional fundamental-analyst tools.** `get_historical_valuation`,
+  `get_earnings_forecast`, `get_earnings_estimates`, `get_shareholder_count`,
+  and `get_dividend_history` registered in the fundamentals ToolNode.
+- **Additional governance-analyst tools.** `get_block_trade`,
+  `get_institutional_intelligence`, `get_margin_trading`, `get_pledge_ratio`,
+  and `get_dragon_tiger` registered in the governance ToolNode.
+- **Additional industry-analyst tools.** `get_concept_board`,
+  `get_macro_indicators`, and `get_sector_fund_flow` registered in the
+  industry ToolNode.
+- **Additional market-analyst tools.** `get_chip_distribution`,
+  `get_limit_up_down`, `get_index_daily`, and `get_verified_market_snapshot`
+  registered in the market ToolNode.
+
+### Fixed
+
+- **Cailianpress API endpoint.** The old `nodeapi/updateTelegraphList`
+  endpoint returned 404 after CLS deprecated it. Updated to
+  `v1/roll/get_roll_list` — same signature algorithm (SHA1→MD5), same
+  response format. Parameter name `app_name` changed to `app`. User-agent
+  bumped from Chrome 91 to 131 with `Referer` header.
+- **Governance and industry ToolNodes** were missing several tools that the
+  analysts' LLM prompts referenced (`get_block_trade`, `get_macro_indicators`,
+  `get_sector_fund_flow`). All six analysts' LLM-bound tools are now fully
+  covered by their respective ToolNodes.
+- **Sentiment-analyst prompt indentation** — YAML-like field markers were
+  incorrectly indented under the narrative paragraph, breaking structured
+  output parsing.
+- **Industry-analyst prompt** had a sentence fragment (`"stock is relatively
+  overvalued"` left disconnected from its parent clause).
+
 ## [0.2.5] — 2026-05-11
 
 ### Added
