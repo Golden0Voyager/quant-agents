@@ -51,21 +51,24 @@ _FAKE_ROLL_DATA = [
 ]
 
 _FAKE_API_RESPONSE = {
-    "error": 0,
+    "errno": 0,
+    "msg": "",
     "data": {
         "roll_data": _FAKE_ROLL_DATA,
     },
 }
 
 _EMPTY_API_RESPONSE = {
-    "error": 0,
+    "errno": 0,
+    "msg": "",
     "data": {
         "roll_data": [],
     },
 }
 
 _ERROR_API_RESPONSE = {
-    "error": 1,
+    "errno": 10012,
+    "msg": "签名错误",
     "data": None,
 }
 
@@ -87,8 +90,8 @@ class TestGenerateSignature:
 
     def test_matches_algorithm(self):
         """Verify the SHA1→MD5 chain manually."""
-        params = {"app_name": "CailianpressWeb", "os": "web"}
-        expected_raw = "app_name=CailianpressWeb&os=web"
+        params = {"app": "CailianpressWeb", "os": "web"}
+        expected_raw = "app=CailianpressWeb&os=web"
         expected_sha1 = hashlib.sha1(expected_raw.encode("utf-8")).hexdigest()
         expected_md5 = hashlib.md5(expected_sha1.encode("utf-8")).hexdigest()
         assert cailianpress_vendor._generate_signature(params) == expected_md5
@@ -119,9 +122,9 @@ class TestGetRequestParams:
     """Tests for the internal _get_request_params helper."""
 
     def test_contains_expected_keys(self):
-        """Params should include app_name, os, sv, rn, and sign."""
+        """Params should include app, os, sv, rn, and sign."""
         params = cailianpress_vendor._build_request_params(limit=20)
-        assert params["app_name"] == "CailianpressWeb"
+        assert params["app"] == "CailianpressWeb"
         assert params["os"] == "web"
         assert params["sv"] == "8.4.6"
         assert params["rn"] == "20"
@@ -226,7 +229,7 @@ class TestFetchCailianpressTelegrams:
         mock_get.assert_called_once()
         call_args = mock_get.call_args
         # URL should contain the base
-        assert "cls.cn/nodeapi/updateTelegraphList" in str(call_args[0][0])
+        assert "cls.cn/v1/roll/get_roll_list" in str(call_args[0][0])
         # Headers should be set
         headers = call_args[1]["headers"]
         assert headers["User-Agent"].startswith("Mozilla/")
@@ -283,7 +286,7 @@ class TestFetchCailianpressTelegrams:
 
     def test_missing_data_key_raises(self):
         """When response has no 'data' key, RuntimeError should be raised."""
-        resp = self._mock_response({"error": 0, "data": None})
+        resp = self._mock_response({"errno": 0, "msg": "", "data": None})
         with patch.object(cailianpress_vendor.requests, "get") as mock_get:
             mock_get.return_value = resp
 
@@ -316,7 +319,7 @@ class TestFetchCailianpressTelegrams:
                 "stock_list": [],
             }
         ]
-        resp = {"error": 0, "data": {"roll_data": roll}}
+        resp = {"errno": 0, "msg": "", "data": {"roll_data": roll}}
         with patch.object(cailianpress_vendor.requests, "get") as mock_get:
             mock_get.return_value = self._mock_response(resp)
             result = cailianpress_vendor.fetch_cailianpress_telegrams()
@@ -337,7 +340,7 @@ class TestFetchCailianpressTelegrams:
                 "stock_list": [],
             }
         ]
-        resp = {"error": 0, "data": {"roll_data": roll}}
+        resp = {"errno": 0, "msg": "", "data": {"roll_data": roll}}
         with patch.object(cailianpress_vendor.requests, "get") as mock_get:
             mock_get.return_value = self._mock_response(resp)
             result = cailianpress_vendor.fetch_cailianpress_telegrams()
@@ -357,7 +360,7 @@ class TestFetchCailianpressTelegrams:
                 "stock_list": [],
             }
         ]
-        resp = {"error": 0, "data": {"roll_data": roll}}
+        resp = {"errno": 0, "msg": "", "data": {"roll_data": roll}}
         with patch.object(cailianpress_vendor.requests, "get") as mock_get:
             mock_get.return_value = self._mock_response(resp)
             result = cailianpress_vendor.fetch_cailianpress_telegrams()
@@ -376,7 +379,7 @@ class TestFetchCailianpressTelegrams:
                 "stock_list": [],
             }
         ]
-        resp = {"error": 0, "data": {"roll_data": roll}}
+        resp = {"errno": 0, "msg": "", "data": {"roll_data": roll}}
         with patch.object(cailianpress_vendor.requests, "get") as mock_get:
             mock_get.return_value = self._mock_response(resp)
             result = cailianpress_vendor.fetch_cailianpress_telegrams()
@@ -412,7 +415,7 @@ class TestFetchCailianpressTelegrams:
                 "stock_list": [],
             },
         ]
-        resp = {"error": 0, "data": {"roll_data": roll}}
+        resp = {"errno": 0, "msg": "", "data": {"roll_data": roll}}
         with patch.object(cailianpress_vendor.requests, "get") as mock_get:
             mock_get.return_value = self._mock_response(resp)
             result = cailianpress_vendor.fetch_cailianpress_telegrams()
@@ -436,7 +439,7 @@ class TestFetchCailianpressTelegrams:
                 "stock_list": [],
             }
         ]
-        resp = {"error": 0, "data": {"roll_data": roll}}
+        resp = {"errno": 0, "msg": "", "data": {"roll_data": roll}}
         with patch.object(cailianpress_vendor.requests, "get") as mock_get:
             mock_get.return_value = self._mock_response(resp)
             result = cailianpress_vendor.fetch_cailianpress_telegrams()

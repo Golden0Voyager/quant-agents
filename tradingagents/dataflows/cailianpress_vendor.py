@@ -8,7 +8,7 @@ This is a separate vendor from Eastmoney to maintain clear separation of concern
 - **Cailianpress** → official flash news/company announcements
 
 Main API endpoint pattern (based on open-source implementations):
-    https://www.cls.cn/nodeapi/updateTelegraphList
+    https://www.cls.cn/v1/roll/get_roll_list
 
 Returns structured telegrams with timestamps, titles, content, level (A/B/C),
 and associated stock codes for filtering.
@@ -30,17 +30,18 @@ logger = logging.getLogger(__name__)
 # Constants (matching open-source implementations)
 # ---------------------------------------------------------------------------
 
-BASE_URL = "https://www.cls.cn/nodeapi/updateTelegraphList"
+BASE_URL = "https://www.cls.cn/v1/roll/get_roll_list"
 
 APP_PARAMS = {
-    "app_name": "CailianpressWeb",
+    "app": "CailianpressWeb",
     "os": "web",
-    "sv": "8.4.6",  # Latest working version based on cls-telegraph implementation
+    "sv": "8.4.6",
 }
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.cls.cn/telegraph",
 }
 
 RED_KEYWORDS = [
@@ -82,7 +83,7 @@ def fetch_cailianpress_telegrams(
 ) -> str:
     """Fetch latest Cailianpress telegrams (flash news) via nodeapi.
 
-    Uses the ``nodeapi/updateTelegraphList`` endpoint which does NOT require
+    Uses the ``v1/roll/get_roll_list`` endpoint which does NOT require
     authentication or API keys (based on reverse-engineered public calls).
 
     Args:
@@ -106,7 +107,7 @@ def fetch_cailianpress_telegrams(
     except Exception as exc:
         raise RuntimeError(f"Cailianpress API request failed: {exc}") from exc
 
-    if data.get("error") != 0 or data.get("data") is None:
+    if data.get("errno", -1) != 0 or data.get("data") is None:
         raise RuntimeError(f"Cailianpress API returned error: {data}")
 
     roll_data = data["data"].get("roll_data", [])
