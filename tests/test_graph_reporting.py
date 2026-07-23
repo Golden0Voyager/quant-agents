@@ -8,6 +8,8 @@ import pytest
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.reporting import write_report_tree
 
+pytestmark = pytest.mark.unit
+
 
 def _state():
     return {
