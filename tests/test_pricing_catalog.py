@@ -579,7 +579,6 @@ class TestLoadPricingYamlErrorHandling:
         """A dict-format entry with unknown currency logs a warning via
         ``warnings.warn`` and treats the rates as USD (the ``else``
         branch, lines 186-194)."""
-        import warnings
 
         pricing_yaml = _mock_yaml_path
         pricing_yaml.write_text(

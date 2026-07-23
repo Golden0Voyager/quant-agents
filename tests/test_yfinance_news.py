@@ -436,8 +436,8 @@ class GetNewsYFinanceTests(unittest.TestCase):
         self.assertIn("No Summary", result)
         # Only the title line should appear; the output should not contain the
         # (empty) summary body, and the only newlines are from header + link.
-        lines = [l for l in result.split("\n") if l.strip()]
-        self.assertTrue(any("No Summary" in l for l in lines))
+        lines = [ln for ln in result.split("\n") if ln.strip()]
+        self.assertTrue(any("No Summary" in ln for ln in lines))
 
     def test_article_with_empty_link_omits_link_line(self):
         """Cover branch 122->124: when data['link'] is falsy,

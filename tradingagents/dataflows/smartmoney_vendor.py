@@ -1896,7 +1896,7 @@ def get_institutional_intelligence(symbol: str, curr_date: str | None = None) ->
     code = _to_smartmoney_symbol(symbol)
 
     df_survey = _df_from_sql(
-        f"""
+        """
         SELECT trade_date, survey_org, survey_type, survey_count
         FROM institution_survey
         WHERE stock_code = ? OR stock_code = ?
@@ -1907,7 +1907,7 @@ def get_institutional_intelligence(symbol: str, curr_date: str | None = None) ->
     )
 
     df_holdings = _df_from_sql(
-        f"""
+        """
         SELECT report_date, institution_count, top10_holder_ratio, type_counts
         FROM institutional_holdings
         WHERE ts_code = ? OR ts_code = ?
@@ -1976,7 +1976,7 @@ def get_earnings_forecast(symbol: str) -> str:
 
     lines = [
         f"## {symbol.upper()} Earnings Forecast (业绩预告)",
-        f"Source: quant_core.db",
+        "Source: quant_core.db",
         "",
     ]
     for _, row in df.iterrows():
