@@ -255,5 +255,193 @@ def test_urlopen_transport_errors_return_unavailable(exc, expected_class_name):
     assert expected_class_name in result
 
 
+# -----------------------------------------------------------------------------
+# Additional edge-case tests for previously uncovered branches.
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected_class_name"),
+    [
+        pytest.param(
+            OSError("connection reset by peer"),
+            "OSError",
+            id="plain-os-error",
+        ),
+        pytest.param(
+            http.client.BadStatusLine("''"),
+            "BadStatusLine",
+            id="bad-status-line",
+        ),
+    ],
+)
+def test_additional_transport_errors(exc, expected_class_name):
+    """Plain ``OSError`` and ``http.client.BadStatusLine`` (both caught by
+    the ``except`` clause at line 49) must also produce the placeholder.
+    """
+    with patch(
+        "tradingagents.dataflows.stocktwits.urlopen", side_effect=exc
+    ):
+        result = fetch_stocktwits_messages("AAPL")
+    assert "stocktwits unavailable" in result
+    assert expected_class_name in result
+
+
+def test_non_dict_json_response():
+    """If the API returns a JSON array (not an object), the ``isinstance(data, dict)``
+    guard should yield an empty messages list and return the no-messages placeholder."""
+    with patch("tradingagents.dataflows.stocktwits.urlopen") as mock:
+        mock_resp = MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.read.return_value = b'["unexpected", "array"]'
+        mock.return_value = mock_resp
+
+        result = fetch_stocktwits_messages("AAPL", days_back=0)
+    assert "no StockTwits messages found" in result
+
+
+def test_sentiment_object_is_not_a_dict():
+    """If the ``sentiment`` field is not a dict (e.g. a string), the code must
+    treat it as no-label rather than crashing."""
+    data = {
+        "messages": [
+            {
+                "created_at": "2026-06-15T10:00:00Z",
+                "user": {"username": "trader1"},
+                "entities": {"sentiment": "Bullish"},  # string, not dict
+                "body": "Sentiment is a string!",
+            },
+        ]
+    }
+    with patch("tradingagents.dataflows.stocktwits.urlopen") as mock:
+        mock_resp = MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.read.return_value = json.dumps(data).encode("utf-8")
+        mock.return_value = mock_resp
+
+        result = fetch_stocktwits_messages("AAPL", limit=5, days_back=0)
+    # ``sentiment_obj.get("basic")`` will raise AttributeError on a string,
+    # but the code guards with ``isinstance(sentiment_obj, dict)`` → falls
+    # to the ``else`` branch, so the tag should be ``no-label``.
+    assert "no-label" in result
+    assert "sentiment is a string" in result.lower()
+
+
+def test_days_back_none_includes_all():
+    """``days_back=None`` must skip date filtering (the condition checks
+    ``days_back is not None`` first), returning all messages."""
+    with patch("tradingagents.dataflows.stocktwits.urlopen") as mock:
+        mock_resp = MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.read.return_value = json.dumps(_ST_SAMPLE).encode("utf-8")
+        mock.return_value = mock_resp
+
+        result = fetch_stocktwits_messages("AAPL", limit=5, days_back=None)
+    assert "Bullish" in result
+    assert "Bearish" in result
+
+
+def test_limit_respects_max_messages():
+    """Only ``limit`` messages should appear in the output even when more are
+    available."""
+    now = datetime.now(UTC)
+    messages = [
+        {
+            "created_at": (now - timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "body": f"Message {i}",
+            "user": {"username": f"user{i}"},
+        }
+        for i in range(10)
+    ]
+    payload = json.dumps({"messages": messages}).encode("utf-8")
+
+    with patch("tradingagents.dataflows.stocktwits.urlopen") as mock:
+        mock_resp = MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.read.return_value = payload
+        mock.return_value = mock_resp
+
+        result = fetch_stocktwits_messages("AAPL", limit=3, days_back=30)
+    assert "Message 0" in result
+    assert "Message 1" in result
+    assert "Message 2" in result
+    assert "Message 3" not in result
+
+
+def test_empty_body_does_not_crash():
+    """A message with an empty or None body must not crash the formatter."""
+    now = datetime.now(UTC)
+    messages = [
+        {
+            "created_at": (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "body": "",
+            "user": {"username": "empty1"},
+            "entities": {"sentiment": {"basic": "Bullish"}},
+        },
+        {
+            "created_at": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "body": None,
+            "user": {"username": "none1"},
+        },
+    ]
+    payload = json.dumps({"messages": messages}).encode("utf-8")
+
+    with patch("tradingagents.dataflows.stocktwits.urlopen") as mock:
+        mock_resp = MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.read.return_value = payload
+        mock.return_value = mock_resp
+
+        result = fetch_stocktwits_messages("AAPL", limit=5, days_back=30)
+    assert "Bullish" in result
+    assert "no-label" in result
+
+
+def test_lowercase_ticker_uppercased_in_output():
+    """A lowercase ticker should be uppercased for the no-messages placeholder."""
+    with patch("tradingagents.dataflows.stocktwits.urlopen") as mock:
+        mock_resp = MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.read.return_value = b'{"messages": []}'
+        mock.return_value = mock_resp
+
+        result = fetch_stocktwits_messages("aapl", days_back=0)
+    assert "$AAPL" in result or "AAPL" in result
+
+
+def test_old_messages_filtered_by_days_back():
+    """Messages older than ``days_back`` should be excluded."""
+    now = datetime.now(UTC)
+    recent = (now - timedelta(hours=6)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    old = (now - timedelta(days=14)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    messages = [
+        {
+            "created_at": old,
+            "body": "This is old",
+            "user": {"username": "oldie"},
+            "entities": {"sentiment": {"basic": "Bearish"}},
+        },
+        {
+            "created_at": recent,
+            "body": "This is recent",
+            "user": {"username": "newbie"},
+            "entities": {"sentiment": {"basic": "Bullish"}},
+        },
+    ]
+    payload = json.dumps({"messages": messages}).encode("utf-8")
+
+    with patch("tradingagents.dataflows.stocktwits.urlopen") as mock:
+        mock_resp = MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.read.return_value = payload
+        mock.return_value = mock_resp
+
+        # days_back=7 means only messages within the last 7 days survive
+        result = fetch_stocktwits_messages("AAPL", limit=5, days_back=7)
+    assert "Bullish" in result  # recent message should be present
+    assert "This is old" not in result  # old message should be filtered out
+
+
 if __name__ == "__main__":
     unittest.main()

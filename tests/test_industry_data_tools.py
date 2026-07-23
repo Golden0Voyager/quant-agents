@@ -75,3 +75,44 @@ class TestIndustryDataToolsMetadata:
         assert hasattr(get_industry_valuation, "args")
         assert hasattr(get_industry_valuation, "invoke")
         assert get_industry_valuation.name == "get_industry_valuation"
+
+
+# ===================================================================
+# get_concept_board
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestGetConceptBoard:
+    def test_returns_concept_board(self):
+        from tradingagents.agents.utils.industry_data_tools import get_concept_board
+
+        with patch(
+            "tradingagents.dataflows.smartmoney_vendor.get_concept_board",
+            return_value="concept data: AI, cloud computing",
+        ) as mock_cb:
+            result = get_concept_board.invoke({"ticker": "600519.SS"})
+
+        mock_cb.assert_called_once_with("600519.SS")
+        assert "concept data" in result
+
+    def test_error_returns_no_data_message(self):
+        from tradingagents.agents.utils.industry_data_tools import get_concept_board
+
+        with patch(
+            "tradingagents.dataflows.smartmoney_vendor.get_concept_board",
+            side_effect=ValueError("API failure"),
+        ):
+            result = get_concept_board.invoke({"ticker": "000001.SZ"})
+
+        assert "NO_DATA_AVAILABLE" in result
+        assert "000001.SZ" in result
+        assert "API failure" in result
+
+    def test_is_structured_tool(self):
+        from tradingagents.agents.utils.industry_data_tools import get_concept_board
+
+        assert hasattr(get_concept_board, "name")
+        assert hasattr(get_concept_board, "args")
+        assert hasattr(get_concept_board, "invoke")
+        assert get_concept_board.name == "get_concept_board"

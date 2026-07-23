@@ -408,6 +408,67 @@ class GetNewsYFinanceTests(unittest.TestCase):
         self.assertIn("Flat summary", result)
         self.assertIn("https://flat.example.com", result)
 
+    def test_article_with_empty_summary_omits_summary_line(self):
+        """Cover branch 120->122: when data['summary'] is falsy,
+        no summary line is added to the output."""
+        mock_news = [
+            _nested_article(
+                title="No Summary",
+                summary="",  # empty summary
+                pub_date="2025-06-10T12:00:00Z",
+            ),
+        ]
+        with patch(
+            "tradingagents.dataflows.yfinance_news.get_config",
+            return_value=_mock_config(),
+        ):
+            mock_ticker = MagicMock()
+            mock_ticker.get_news.return_value = mock_news
+            with patch(
+                "tradingagents.dataflows.yfinance_news.yf.Ticker",
+                return_value=mock_ticker,
+            ), patch(
+                "tradingagents.dataflows.yfinance_news.yf_retry",
+                side_effect=lambda f, **kwargs: f(),
+            ):
+                result = get_news_yfinance(self.ticker, self.start, self.end)
+
+        self.assertIn("No Summary", result)
+        # Only the title line should appear; the output should not contain the
+        # (empty) summary body, and the only newlines are from header + link.
+        lines = [l for l in result.split("\n") if l.strip()]
+        self.assertTrue(any("No Summary" in l for l in lines))
+
+    def test_article_with_empty_link_omits_link_line(self):
+        """Cover branch 122->124: when data['link'] is falsy,
+        no Link: line is added to the output."""
+        mock_news = [
+            _nested_article(
+                title="No Link",
+                summary="Has summary but no link",
+                url="",  # empty URL
+                pub_date="2025-06-10T12:00:00Z",
+            ),
+        ]
+        with patch(
+            "tradingagents.dataflows.yfinance_news.get_config",
+            return_value=_mock_config(),
+        ):
+            mock_ticker = MagicMock()
+            mock_ticker.get_news.return_value = mock_news
+            with patch(
+                "tradingagents.dataflows.yfinance_news.yf.Ticker",
+                return_value=mock_ticker,
+            ), patch(
+                "tradingagents.dataflows.yfinance_news.yf_retry",
+                side_effect=lambda f, **kwargs: f(),
+            ):
+                result = get_news_yfinance(self.ticker, self.start, self.end)
+
+        self.assertIn("No Link", result)
+        self.assertIn("Has summary but no link", result)
+        self.assertNotIn("Link:", result)
+
 
 @pytest.mark.unit
 class GetGlobalNewsYFinanceTests(unittest.TestCase):
@@ -594,6 +655,38 @@ class GetGlobalNewsYFinanceTests(unittest.TestCase):
         self.assertIn("Article 2", result)
         self.assertNotIn("Article 3", result)
         self.assertNotIn("Article 4", result)
+
+    def test_global_article_with_empty_link_omits_link_line(self):
+        """Cover branch 213->215: when data['link'] is falsy in global news,
+        no Link: line is added to the output."""
+        mock_search_news = [
+            _nested_article(
+                title="No Link Global",
+                summary="Global article without link",
+                url="",
+                pub_date="2025-06-18T12:00:00Z",
+            ),
+        ]
+        mock_search = MagicMock()
+        mock_search.news = mock_search_news
+
+        with patch(
+            "tradingagents.dataflows.yfinance_news.get_config",
+            return_value=_mock_config(),
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf.Search",
+            return_value=mock_search,
+        ), patch(
+            "tradingagents.dataflows.yfinance_news.yf_retry",
+            side_effect=lambda f, **kwargs: f(),
+        ):
+            result = get_global_news_yfinance(self.curr_date)
+
+        self.assertIn("No Link Global", result)
+        self.assertIn("Global article without link", result)
+        # There is no link field in this nested article (empty URL), so the
+        # link line should be absent.
+        self.assertNotIn("Link:", result)
 
     def test_exception_returns_error_string(self):
         with patch(

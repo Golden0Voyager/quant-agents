@@ -557,6 +557,77 @@ class TestLoadPricingYamlErrorHandling:
         assert price[0] == pytest.approx(6.5 / rate, rel=1e-3)
         assert price[1] == pytest.approx(27.0 / rate, rel=1e-3)
 
+    def test_dict_format_usd_entry_uses_rate_directly(self, _mock_yaml_path):
+        """A dict-format entry with currency:USD uses rates directly
+        without exchange-rate conversion (the ``elif currency == "USD"``
+        branch, line 184-185)."""
+        pricing_yaml = _mock_yaml_path
+        pricing_yaml.write_text(
+            "test_provider:\n"
+            "  usd-model:\n"
+            "    input: 2.50\n"
+            "    output: 15.00\n"
+            "    currency: USD\n",
+            encoding="utf-8",
+        )
+        result = pricing._load_pricing_yaml()
+        assert "test_provider" in result
+        price = result["test_provider"]["usd-model"]
+        assert price == (2.50, 15.00)
+
+    def test_dict_format_unknown_currency_warns_and_treats_as_usd(self, _mock_yaml_path):
+        """A dict-format entry with unknown currency logs a warning via
+        ``warnings.warn`` and treats the rates as USD (the ``else``
+        branch, lines 186-194)."""
+        import warnings
+
+        pricing_yaml = _mock_yaml_path
+        pricing_yaml.write_text(
+            "test_provider:\n"
+            "  eur-model:\n"
+            "    input: 5.00\n"
+            "    output: 20.00\n"
+            "    currency: EUR\n",
+            encoding="utf-8",
+        )
+        with pytest.warns(UserWarning, match="Unknown currency.*EUR"):
+            result = pricing._load_pricing_yaml()
+        assert "test_provider" in result
+        price = result["test_provider"]["eur-model"]
+        # Treated as USD — no conversion applied.
+        assert price == (5.00, 20.00)
+
+    def test_dict_format_missing_input_key_skipped(self, _mock_yaml_path):
+        """A dict-format entry missing the ``input`` key raises ``KeyError``
+        and is skipped entirely (the ``except (TypeError, ValueError, KeyError)``
+        block, lines 197-198)."""
+        pricing_yaml = _mock_yaml_path
+        pricing_yaml.write_text(
+            "test_provider:\n"
+            "  broken-model:\n"
+            "    output: 20.00\n"
+            "    currency: USD\n",
+            encoding="utf-8",
+        )
+        result = pricing._load_pricing_yaml()
+        # The broken entry is skipped, provider has no valid models.
+        assert "test_provider" not in result
+
+    def test_dict_format_non_numeric_input_skipped(self, _mock_yaml_path):
+        """A dict-format entry with non-numeric ``input`` raises
+        ``TypeError``/``ValueError`` and is skipped."""
+        pricing_yaml = _mock_yaml_path
+        pricing_yaml.write_text(
+            "test_provider:\n"
+            "  broken-model:\n"
+            "    input: not-a-number\n"
+            "    output: 20.00\n"
+            "    currency: USD\n",
+            encoding="utf-8",
+        )
+        result = pricing._load_pricing_yaml()
+        assert "test_provider" not in result
+
 
 # ---- _write_default_pricing_yaml -----------------------------------------
 

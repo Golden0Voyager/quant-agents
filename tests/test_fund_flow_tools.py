@@ -41,6 +41,19 @@ class TestGetFundFlow:
 
         mock_route.assert_called_once_with("get_fund_flow", "MSFT")
 
+    def test_with_curr_date_includes_date_arg(self):
+        from tradingagents.agents.utils.fund_flow_tools import get_fund_flow
+
+        with _make_mock_vendor("fund flow dated") as mock_route:
+            result = get_fund_flow.invoke({
+                "ticker": "AAPL", "curr_date": "2026-07-03"
+            })
+
+        mock_route.assert_called_once_with(
+            "get_fund_flow", "AAPL", "2026-07-03"
+        )
+        assert result == "fund flow dated"
+
 
 # ===================================================================
 # get_northbound_hold
@@ -66,6 +79,19 @@ class TestGetNorthboundHold:
 
         mock_route.assert_called_once_with("get_northbound_hold", "000858.SZ")
 
+    def test_with_curr_date_includes_date_arg(self):
+        from tradingagents.agents.utils.fund_flow_tools import get_northbound_hold
+
+        with _make_mock_vendor("northbound dated") as mock_route:
+            result = get_northbound_hold.invoke({
+                "ticker": "600519.SS", "curr_date": "2026-07-03"
+            })
+
+        mock_route.assert_called_once_with(
+            "get_northbound_hold", "600519.SS", "2026-07-03"
+        )
+        assert result == "northbound dated"
+
 
 # ===================================================================
 # get_margin_trading
@@ -90,6 +116,19 @@ class TestGetMarginTrading:
             get_margin_trading.invoke({"ticker": "TSLA"})
 
         mock_route.assert_called_once_with("get_margin_trading", "TSLA")
+
+    def test_with_curr_date_includes_date_arg(self):
+        from tradingagents.agents.utils.fund_flow_tools import get_margin_trading
+
+        with _make_mock_vendor("margin dated") as mock_route:
+            result = get_margin_trading.invoke({
+                "ticker": "AAPL", "curr_date": "2026-07-03"
+            })
+
+        mock_route.assert_called_once_with(
+            "get_margin_trading", "AAPL", "2026-07-03"
+        )
+        assert result == "margin dated"
 
 
 # ===================================================================

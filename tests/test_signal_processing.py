@@ -37,6 +37,20 @@ class SignalProcessorTests(unittest.TestCase):
         result = sp.process_signal("**Rating**: Buy\nGood setup")
         self.assertEqual(result, "Buy")
 
+    def test_stores_quick_thinking_llm(self):
+        """The constructor stores quick_thinking_llm as an attribute."""
+        sp = SignalProcessor(quick_thinking_llm="my-llm")
+        self.assertEqual(sp.quick_thinking_llm, "my-llm")
+
+    def test_quick_thinking_llm_defaults_to_none(self):
+        sp = SignalProcessor()
+        self.assertIsNone(sp.quick_thinking_llm)
+
+    def test_handles_empty_string(self):
+        sp = SignalProcessor()
+        result = sp.process_signal("")
+        self.assertIn(result, ["Buy", "Sell", "Hold", "Overweight", "Underweight"])
+
 
 if __name__ == "__main__":
     unittest.main()

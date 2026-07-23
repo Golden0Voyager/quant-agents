@@ -251,5 +251,113 @@ class GoogleRetryTests(unittest.TestCase):
         self.assertEqual(llm._retry_config, retry_config)
 
 
+class GoogleClientGetLlmTests(unittest.TestCase):
+    """Cover remaining branches in GoogleClient.get_llm()."""
+
+    @patch("tradingagents.llm_clients.google_client.NormalizedChatGoogleGenerativeAI")
+    def test_get_llm_forwards_common_kwargs(self, mock_chat):
+        """Line 38-39: timeout, temperature etc. are forwarded to the LLM."""
+        from tradingagents.llm_clients.google_client import GoogleClient
+
+        client = GoogleClient(
+            "gemini-3-pro",
+            timeout=30,
+            temperature=0.5,
+            max_retries=3,
+            api_key="test",
+        )
+        client.get_llm()
+        call_kwargs = mock_chat.call_args[1]
+        self.assertEqual(call_kwargs["timeout"], 30)
+        self.assertEqual(call_kwargs["temperature"], 0.5)
+        self.assertEqual(call_kwargs["max_retries"], 3)
+
+    @patch("tradingagents.llm_clients.google_client.NormalizedChatGoogleGenerativeAI")
+    def test_get_llm_omits_kwargs_not_in_forwarding_list(self, mock_chat):
+        """Line 38-39: unknown kwargs are NOT forwarded."""
+        from tradingagents.llm_clients.google_client import GoogleClient
+
+        client = GoogleClient(
+            "gemini-3-pro",
+            unknown_param="should-not-appear",
+            api_key="test",
+        )
+        client.get_llm()
+        call_kwargs = mock_chat.call_args[1]
+        self.assertNotIn("unknown_param", call_kwargs)
+
+    @patch("tradingagents.llm_clients.google_client.NormalizedChatGoogleGenerativeAI")
+    def test_get_llm_without_api_key(self, mock_chat):
+        """Branch 43->50: when no api_key is provided, google_api_key is not
+        added to llm_kwargs and the code falls through to thinking_level."""
+        from tradingagents.llm_clients.google_client import GoogleClient
+
+        client = GoogleClient("gemini-3-pro")  # no api_key
+        client.get_llm()
+        call_kwargs = mock_chat.call_args[1]
+        self.assertNotIn("google_api_key", call_kwargs)
+
+    @patch("tradingagents.llm_clients.google_client.NormalizedChatGoogleGenerativeAI")
+    def test_get_llm_with_http_client(self, mock_chat):
+        """Line 38-39: http_client and http_async_client are forwarded."""
+        from tradingagents.llm_clients.google_client import GoogleClient
+
+        http_client = MagicMock()
+        http_async_client = MagicMock()
+        client = GoogleClient(
+            "gemini-3-pro",
+            http_client=http_client,
+            http_async_client=http_async_client,
+            api_key="test",
+        )
+        client.get_llm()
+        call_kwargs = mock_chat.call_args[1]
+        self.assertIs(call_kwargs["http_client"], http_client)
+        self.assertIs(call_kwargs["http_async_client"], http_async_client)
+
+
+class NormalizedInvokeTests(unittest.TestCase):
+    """Cover line 19: normalize_content is called on super().invoke()."""
+
+    @patch("tradingagents.llm_clients.google_client.normalize_content")
+    def test_invoke_calls_normalize_on_super_result(self, mock_normalize):
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        from tradingagents.llm_clients.google_client import (
+            NormalizedChatGoogleGenerativeAI,
+        )
+
+        mock_normalize.return_value = "normalized"
+
+        # Patch __init__ to avoid httpx SOCKS proxy setup which requires
+        # the optional ``socksio`` package (#1024).
+        with patch.object(ChatGoogleGenerativeAI, "__init__", return_value=None):
+            client = NormalizedChatGoogleGenerativeAI(
+                model="gemini-3-pro", google_api_key="test",
+            )
+
+        with patch(
+            "langchain_google_genai.ChatGoogleGenerativeAI.invoke",
+            return_value="raw_response",
+        ) as mock_super:
+            result = client.invoke("hello")
+
+        mock_super.assert_called_once()
+        mock_normalize.assert_called_once_with("raw_response")
+        self.assertEqual(result, "normalized")
+
+
+class WarnUnknownModelTests(unittest.TestCase):
+    """Test warn_if_unknown_model is called from get_llm()."""
+
+    @patch("tradingagents.llm_clients.google_client.NormalizedChatGoogleGenerativeAI")
+    def test_unknown_model_triggers_warning(self, mock_chat):
+        from tradingagents.llm_clients.google_client import GoogleClient
+
+        client = GoogleClient("totally-fake-model", api_key="test")
+        with self.assertWarns(RuntimeWarning) as ctx:
+            client.get_llm()
+        self.assertIn("not in the known model list", str(ctx.warning).lower())
+
+
 if __name__ == "__main__":
     unittest.main()

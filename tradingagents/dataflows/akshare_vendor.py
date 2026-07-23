@@ -261,7 +261,9 @@ def get_balance_sheet(
     """Fetch A-share balance sheet (latest report period) via akshare."""
     code = to_akshare_symbol(symbol, "upper_prefix")
     with _akshare_task_context(f"📊 {symbol} 资产负债表"), no_proxy():
-        df = ak.stock_balance_sheet_by_report_em(symbol=code)
+        df = _akshare_retry(
+            lambda: ak.stock_balance_sheet_by_report_em(symbol=code)
+        )
 
     if df is None or df.empty:
         raise NoMarketDataError(
@@ -286,7 +288,9 @@ def get_cashflow(
     """Fetch A-share cash flow statement (latest report period) via akshare."""
     code = to_akshare_symbol(symbol, "upper_prefix")
     with _akshare_task_context(f"📊 {symbol} 现金流量表"), no_proxy():
-        df = ak.stock_cash_flow_sheet_by_report_em(symbol=code)
+        df = _akshare_retry(
+            lambda: ak.stock_cash_flow_sheet_by_report_em(symbol=code)
+        )
 
     if df is None or df.empty:
         raise NoMarketDataError(
@@ -351,7 +355,9 @@ def get_income_statement(
     """Fetch A-share income statement (latest report period) via akshare."""
     code = to_akshare_symbol(symbol, "upper_prefix")
     with _akshare_task_context(f"📊 {symbol} 利润表"), no_proxy():
-        df = ak.stock_profit_sheet_by_report_em(symbol=code)
+        df = _akshare_retry(
+            lambda: ak.stock_profit_sheet_by_report_em(symbol=code)
+        )
 
     if df is None or df.empty:
         raise NoMarketDataError(

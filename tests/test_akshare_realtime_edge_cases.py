@@ -101,7 +101,7 @@ class TestRealtimeSnapshotEdgeCases:
         assert snap["company_name"] == "贵州茅台"
 
     def test_xq_token_reads_from_env(self):
-        """XQ_TOKEN from env var is used when xq_token=None."""
+        """XUEQIU_TOKEN from env var is used when xq_token=None."""
         spot_df = pd.DataFrame({
             "item": ["名称", "现价"],
             "value": ["茅台", 1700.0],
@@ -118,3 +118,22 @@ class TestRealtimeSnapshotEdgeCases:
             snap = fetch_realtime_snapshot("600519.SS", xq_token=None)
         assert snap is not None
         mock_ak.stock_individual_spot_xq.assert_called_once()
+
+    def test_no_token_no_env_falls_to_eastmoney_only(self):
+        """
+        When no XQ token and no env var, skip Xueqiu entirely and use Eastmoney only.
+        Covers partial branch 75->93 (if token: False).
+        """
+        info_df = pd.DataFrame({
+            "item": ["股票简称", "总市值"],
+            "value": ["贵州茅台", 2_108_000_000_000.0],
+        })
+        with patch("tradingagents.dataflows.akshare_realtime.ak") as mock_ak, \
+             patch.dict("os.environ", {}, clear=True):
+            mock_ak.stock_individual_info_em.return_value = info_df
+            snap = fetch_realtime_snapshot("600519.SS", xq_token=None)
+        assert snap is not None
+        assert snap["company_name"] == "贵州茅台"
+        assert snap["market_cap_yi"] == pytest.approx(21080.0, rel=1e-3)
+        assert snap["sources"] == ["eastmoney_info"]
+        mock_ak.stock_individual_spot_xq.assert_not_called()
