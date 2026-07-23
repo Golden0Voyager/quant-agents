@@ -2,10 +2,11 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
+    get_block_trade,
     get_company_announcements,
     get_dragon_tiger,
     get_insider_transactions,
-    get_institutional_holdings,
+    get_institutional_intelligence,
     get_language_instruction,
     get_margin_trading,
     get_news,
@@ -23,21 +24,17 @@ def create_governance_analyst(llm):
             state["company_of_interest"], state.get("company_name", "")
         )
 
-        # NOTE: 9 tools is the largest analyst tool-set in the framework.
-        # Each extra tool increases tool_choice latency and LLM reasoning
-        # cost. If latency becomes an issue, consider trimming to the 5-6
-        # most impactful tools (e.g. insider_transactions, company_announcements,
-        # institutional_holdings, margin_trading, pledge_ratio).
         tools = [
             get_company_announcements,
             get_insider_transactions,
             get_news,
             get_restricted_release,
-            get_institutional_holdings,
+            get_institutional_intelligence,
             get_northbound_hold,
             get_margin_trading,
             get_pledge_ratio,
             get_dragon_tiger,
+            get_block_trade,
         ]
 
         company_name = state.get("company_name", "")
@@ -51,15 +48,21 @@ def create_governance_analyst(llm):
             "and major corporate events for the target company over the past week. "
             "Your objective is to write a comprehensive long report detailing your "
             "analysis, insights, and implications for traders and investors. "
+            "TERMINOLOGY MANDATE: Reserve '公司总市值' strictly for total company market cap. "
+            "For institutional or northbound position value, explicitly write '机构持股市值' or '北向持股市值' to avoid ambiguity. "
+            "Do NOT use plain '市值' for position values. "
             "Use the get_company_announcements tool for regulatory filings and notices, "
             "get_insider_transactions for shareholder change data, get_news "
             "for related news coverage, get_restricted_release to identify upcoming "
             "share unlock events and their potential supply pressure, "
-            "get_institutional_holdings to track top shareholder and fund positioning, "
+            "get_institutional_intelligence to track top shareholder positioning, fund holdings, "
+            "institutional survey frequency, and key focus topics (merged indicator), "
             "get_northbound_hold to monitor foreign investor sentiment, "
             "get_margin_trading to assess leverage and speculative sentiment, "
             "get_pledge_ratio to evaluate equity pledge risk and liquidation pressure, "
-            "and get_dragon_tiger to track hot-money and institutional trading activity. "
+            "get_dragon_tiger to track hot-money and institutional trading activity, "
+            "and get_block_trade to monitor off-exchange large-block transactions "
+            "that may signal institutional accumulation (premium) or distribution (discount). "
             "Provide specific, actionable insights on governance risks, capital structure "
             "changes, management signals, and any red flags that could impact investment decisions."
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""

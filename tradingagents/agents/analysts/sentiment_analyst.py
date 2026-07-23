@@ -49,6 +49,7 @@ from tradingagents.agents.utils.structured import (
 )
 from tradingagents.dataflows.eastmoney_sentiment import (
     fetch_eastmoney_guba_sentiment,
+    fetch_eastmoney_hot_keywords,
     fetch_eastmoney_hot_rank,
 )
 
@@ -104,6 +105,10 @@ def create_sentiment_analyst(llm):
             "Eastmoney Guba sentiment",
             lambda: fetch_eastmoney_guba_sentiment(ticker),
         )
+        hot_keywords_block = _safe_prefetch(
+            "Eastmoney market hot keywords",
+            lambda: fetch_eastmoney_hot_keywords(),
+        )
 
         system_message = _build_system_message(
             ticker=ticker,
@@ -113,6 +118,7 @@ def create_sentiment_analyst(llm):
             news_block=news_block,
             hot_rank_block=hot_rank_block,
             guba_block=guba_block,
+            hot_keywords_block=hot_keywords_block,
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -170,6 +176,7 @@ def _build_system_message(
     news_block: str,
     hot_rank_block: str,
     guba_block: str,
+    hot_keywords_block: str,
 ) -> str:
     """Assemble the sentiment-analyst system message with structured data blocks."""
     ticker_guard = (
@@ -205,6 +212,13 @@ Three quantitative sentiment signals from the Eastmoney 股吧 (stock bar) commu
 {guba_block}
 <end_of_guba>
 
+### Eastmoney 市场热点概念 — real-time trending concept keywords with heat scores
+Market-wide signal: which concepts (板块/概念) are attracting the most attention right now. High heat scores on a concept containing the target stock's sector signal sector rotation; low heat on the target's concept may indicate it's out of favor.
+
+<start_of_hot_keywords>
+{hot_keywords_block}
+<end_of_hot_keywords>
+
 ## How to analyze this data (best practices)
 
 1. **Read the 人气排名 trend as a retail-attention signal.** A stock rising in rank (lower number = better) with increasing 铁杆粉丝 ratio suggests growing retail conviction. A sudden spike into the top 10 without a news catalyst may indicate coordinated retail attention (contrarian risk).
@@ -227,10 +241,10 @@ Three quantitative sentiment signals from the Eastmoney 股吧 (stock bar) commu
 
 Fill the following fields:
 
-- **overall_band**: Exactly one of Bullish / Mildly Bullish / Neutral / Mixed / Mildly Bearish / Bearish. Use Mixed when sources point in clearly different directions; Neutral only when all sources are genuinely silent.
-- **overall_score**: A number from 0 (maximally bearish) to 10 (maximally bullish); 5 is neutral. Keep it consistent with overall_band.
-- **confidence**: low / medium / high, based on data quality and sample size.
-- **narrative**: Full source-by-source breakdown (news + Eastmoney hot rank + Guba sentiment indicators), divergences, dominant narrative themes, catalysts and risks, and a markdown summary table of key sentiment signals (direction, source, supporting evidence).
+  - **overall_band**: Exactly one of Bullish / Mildly Bullish / Neutral / Mixed / Mildly Bearish / Bearish. Use Mixed when sources point in clearly different directions; Neutral only when all sources are genuinely silent.
+  - **overall_score**: A number from 0 (maximally bearish) to 10 (maximally bullish); 5 is neutral. Keep it consistent with overall_band.
+  - **confidence**: low / medium / high, based on data quality and sample size.
+  - **narrative**: Full source-by-source breakdown (news + Eastmoney hot rank + Guba sentiment + market hot keywords), divergences, dominant narrative themes, catalysts and risks, and a markdown summary table of key sentiment signals (direction, source, supporting evidence).
 
 {get_language_instruction()}"""
 

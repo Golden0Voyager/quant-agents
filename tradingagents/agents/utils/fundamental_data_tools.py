@@ -134,3 +134,35 @@ def get_dividend_history(
         str: A formatted report of dividend history
     """
     return route_to_vendor("get_dividend_history", ticker)
+
+
+@tool
+def get_historical_valuation(
+    ticker: Annotated[str, "Ticker symbol of the company e.g. 600519.SS"],
+    curr_date: Annotated[str, "Current date you are trading at, yyyy-mm-dd"] = None,
+) -> str:
+    """
+    Retrieve 3-year historical PE/PB valuation percentile rank and ROE matching.
+    Helps identify deep value (PE percentile < 20% + solid ROE) vs value trap risks.
+    """
+    from tradingagents.dataflows.smartmoney_vendor import get_historical_valuation as _get_val
+    try:
+        return _get_val(ticker, curr_date)
+    except Exception as exc:
+        return f"NO_DATA_AVAILABLE: Historical valuation percentile unavailable for {ticker} ({exc})"
+
+
+@tool
+def get_earnings_forecast(
+    ticker: Annotated[str, "Ticker symbol of the company e.g. 600519.SS"],
+) -> str:
+    """
+    Retrieve earnings pre-announcement and profit forecast data for a ticker.
+    Provides YoY net profit change expectations and performance pre-announcements.
+    """
+    from tradingagents.dataflows.smartmoney_vendor import get_earnings_forecast as _get_ef
+    try:
+        return _get_ef(ticker)
+    except Exception as exc:
+        return f"NO_DATA_AVAILABLE: Earnings forecast unavailable for {ticker} ({exc})"
+

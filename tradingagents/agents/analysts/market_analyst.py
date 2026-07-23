@@ -1,6 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
+    get_chip_distribution,
     get_fund_flow,
     get_index_daily,
     get_indicators,
@@ -25,6 +26,7 @@ def create_market_analyst(llm):
         tools = [
             get_stock_data,
             get_indicators,
+            get_chip_distribution,
             get_fund_flow,
             get_sector_fund_flow,
             get_limit_up_down,
@@ -63,7 +65,7 @@ Volatility Indicators:
 Volume-Based Indicators:
 - vwma: VWMA: A moving average weighted by volume. Usage: Confirm trends by integrating price action with volume data. Tips: Watch for skewed results from volume spikes; use in combination with other volume analyses.
 
-- Select indicators that provide diverse and complementary information. Avoid redundancy (e.g., do not select both rsi and stochrsi). Also briefly explain why they are suitable for the given market context. When you tool call, please use the exact name of the indicators provided above as they are defined parameters, otherwise your call will fail. Please make sure to call get_stock_data first to retrieve the CSV that is needed to generate indicators. Then use get_indicators with the specific indicator names. Also call the standalone tool get_fund_flow directly (do not pass it to get_indicators) to analyze capital flow trends. "
+- Select indicators that provide diverse and complementary information. Avoid redundancy (e.g., do not select both rsi and stochrsi). Also briefly explain why they are suitable for the given market context. When you tool call, please use the exact name of the indicators provided above as they are defined parameters, otherwise your call will fail. Please make sure to call get_stock_data first to retrieve the CSV that is needed to generate indicators. Then use get_indicators with the specific indicator names. Call get_chip_distribution for A-share tickers to assess profit ratios, average holder costs, chip concentration, and price-to-cost bias at key support/resistance levels. Also call the standalone tool get_fund_flow directly (do not pass it to get_indicators) to analyze capital flow trends. "
             "Use get_sector_fund_flow to analyze sector-level fund flow and identify industry rotation patterns. "
             "Call get_limit_up_down with the current date to gauge short-term market sentiment via the daily limit-up/limit-down count; compare the stock's own price action against this market-breadth backdrop. "
             "Call get_index_daily for major indices (e.g. 000001.SS for Shanghai Composite, 399001.SZ for Shenzhen Component, 399006.SZ for ChiNext, 000688.SS for STAR Market) to compare the stock's trend against its home market or board. "

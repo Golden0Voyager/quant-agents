@@ -493,20 +493,20 @@ class TestCheckDataReadinessIntegration:
         """Governance analyst data sources are all realtime."""
         mock_load.return_value = pd.DataFrame({"Date": ["2026-07-03"], "Close": [10.0]})
         report = check_data_readiness("AAPL", "2026-07-03", ["governance"])
-        # governance has: dragon_tiger, margin_trading, shareholders, pledge, northbound
-        expected_labels = {"龙虎榜", "融资融券", "股东户数", "股权质押", "北向资金"}
+        # governance has: dragon_tiger, margin_trading, shareholders, pledge, northbound, inst_intel
+        expected_labels = {"龙虎榜", "融资融券", "股东户数", "股权质押", "北向资金", "机构综合情报"}
         actual_labels = {i.label for i in report.items}
         assert actual_labels == expected_labels
         for item in report.items:
             assert item.status == "available"
-            assert item.category == "realtime"
+            assert item.category in ("realtime", "cacheable")
 
     @patch("tradingagents.agents.utils.data_readiness.load_ohlcv")
     def test_industry_analyst_all_realtime(self, mock_load):
         """Industry analyst data sources are all realtime."""
         mock_load.return_value = pd.DataFrame({"Date": ["2026-07-03"], "Close": [10.0]})
         report = check_data_readiness("AAPL", "2026-07-03", ["industry"])
-        expected_labels = {"行业估值", "宏观数据"}
+        expected_labels = {"行业估值", "宏观数据", "概念题材"}
         actual_labels = {i.label for i in report.items}
         assert actual_labels == expected_labels
 
@@ -531,8 +531,8 @@ class TestCheckDataReadinessIntegration:
         mock_load.return_value = pd.DataFrame({"Date": ["2026-07-03"], "Close": [10.0]})
         report = check_data_readiness("000001.SZ", "2026-07-03", ["market", "market"])
         # "market" analyst listed twice but deduplicated:
-        # ohlcv, indicators, fund_flow, limit_up_down, index_daily
-        assert len(report.items) == 5
+        # ohlcv, indicators, chip_distribution, fund_flow, limit_up_down, index_daily (6 items)
+        assert len(report.items) == 6
 
     @patch("tradingagents.agents.utils.data_readiness.load_ohlcv")
     def test_warning_count_unavailable_item(self, mock_load):

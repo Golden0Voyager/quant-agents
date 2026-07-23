@@ -1101,7 +1101,188 @@ def get_macro_indicators(
     curr_date: str | None = None,
     look_back_days: int | None = None,
 ) -> str:
-    raise RuntimeError("Macro indicators not available in quant_core.db")
+    """Read China macro indicators from quant_core.db.
+
+    Reads from local tables:
+      - macro_monthly → CPI, PMI, M2, retail sales, industrial production, LPR
+      - macro_quarterly → GDP
+      - money_market → SHIBOR, repo rates, PBOC policy rate
+      - market_valuation → equity-bond spread (股债利差), market PE/PB median
+      - us_treasury → US & China treasury yields, 10y-2y spread
+
+    Raises RuntimeError for unsupported indicators so route_to_vendor can
+    fall back to akshare or FRED.
+    """
+    indicator = indicator.lower().strip()
+    max_rows = _resolve_lookback(look_back_days) if look_back_days else 12
+
+    # ------------------------------------------------------------------
+    # macro_monthly table — monthly China macro (CPI, PMI, M2, etc.)
+    # ------------------------------------------------------------------
+    monthly_dispatch: dict[str, dict] = {
+        "cpi": {
+            "cols": ["cpi_yoy", "cpi_mom", "cpi_core_yoy", "ppi_yoy", "ppi_mom"],
+            "title": "China CPI & PPI",
+        },
+        "pmi": {
+            "cols": ["pmi", "pmi_yoy", "pmi_caixin", "pmi_mom", "pmi_monthly_change"],
+            "title": "China PMI (Manufacturing)",
+        },
+        "m2": {
+            "cols": ["m2", "m2_yoy", "m1_yoy", "m0_yoy", "new_loans", "new_loans_yoy"],
+            "title": "China Money Supply (M2)",
+        },
+        "retail_sales": {
+            "cols": ["retail_sales_yoy", "retail_sales_ytd_yoy"],
+            "title": "China Retail Sales",
+        },
+        "fixed_asset_investment": {
+            "cols": ["fixed_asset_investment_yoy", "fixed_asset_investment_ytd_yoy"],
+            "title": "China Fixed Asset Investment",
+        },
+        "industrial_production": {
+            "cols": ["industrial_production_yoy", "industrial_production_ytd_yoy"],
+            "title": "China Industrial Production",
+        },
+        "consumer_confidence": {
+            "cols": ["consumer_confidence", "consumer_satisfaction", "consumer_expectation"],
+            "title": "China Consumer Confidence",
+        },
+        "lpr": {
+            "cols": ["lpr_1y", "lpr_5y"],
+            "title": "China Loan Prime Rate (LPR)",
+        },
+    }
+
+    if indicator in monthly_dispatch:
+        return _macro_from_table(
+            "macro_monthly", monthly_dispatch[indicator], max_rows
+        )
+
+    if indicator in ("social_finance", "社融"):
+        # social_finance not directly in macro_monthly; fall through to akshare
+        raise RuntimeError(
+            "Social financing not available in quant_core.db as a standalone column."
+        )
+
+    # ------------------------------------------------------------------
+    # macro_quarterly table — GDP
+    # ------------------------------------------------------------------
+    if indicator == "gdp":
+        return _macro_from_table(
+            "macro_quarterly",
+            {
+                "cols": ["gdp", "gdp_yoy", "gdp_qoq", "gdp_primary", "gdp_secondary", "gdp_tertiary"],
+                "title": "China GDP",
+            },
+            12 if look_back_days is None else max_rows,
+        )
+
+    # ------------------------------------------------------------------
+    # money_market table — SHIBOR, repo rates, PBOC policy rate
+    # ------------------------------------------------------------------
+    if indicator in ("shibor", "interbank"):
+        return _macro_from_table(
+            "money_market",
+            {
+                "cols": [
+                    "shibor_on", "shibor_1w", "shibor_2w", "shibor_1m",
+                    "shibor_3m", "shibor_6m", "shibor_1y",
+                    "fr001", "fr007", "pboc_policy_rate",
+                ],
+                "title": "China Money Market Rates (SHIBOR & Repo)",
+            },
+            _resolve_lookback(look_back_days) if look_back_days else 60,
+        )
+
+    # ------------------------------------------------------------------
+    # market_valuation table — equity-bond spread, market PE/PB median
+    # ------------------------------------------------------------------
+    if indicator in ("equity_bond_spread", "ebs"):
+        return _macro_from_table(
+            "market_valuation",
+            {
+                "cols": [
+                    "pe_median", "pe_quantile", "pb_median", "pb_quantile",
+                    "equity_bond_spread", "ebs_ma", "csi300_close",
+                ],
+                "title": "A-Share Market Valuation & Equity-Bond Spread (股债利差)",
+            },
+            _resolve_lookback(look_back_days) if look_back_days else 60,
+        )
+
+    # ------------------------------------------------------------------
+    # us_treasury table — US & China yield curves
+    # ------------------------------------------------------------------
+    if indicator in ("10y_treasury", "yield_curve", "cn_10y", "treasury_yield"):
+        return _macro_from_table(
+            "us_treasury",
+            {
+                "cols": [
+                    "us_2y", "us_5y", "us_10y", "us_30y",
+                    "cn_2y", "cn_5y", "cn_10y", "cn_30y",
+                    "spread_10y_2y",
+                ],
+                "title": "US & China Treasury Yields",
+                "date_col": "trade_date",
+            },
+            _resolve_lookback(look_back_days) if look_back_days else 60,
+        )
+
+    # Unsupported — let fallback chain try akshare / FRED.
+    raise RuntimeError(
+        f"Indicator '{indicator}' not available in quant_core.db. "
+        "route_to_vendor will fall back to akshare or FRED."
+    )
+
+
+def _resolve_lookback(look_back_days: int | None) -> int:
+    if look_back_days is None:
+        return 12
+    if look_back_days >= 365 * 5:
+        return 60
+    if look_back_days >= 365:
+        return 24
+    if look_back_days >= 180:
+        return 12
+    return max(6, look_back_days // 30)
+
+
+def _macro_from_table(table: str, spec: dict, limit: int) -> str:
+    """Read *limit* rows and format as markdown. spec keys: cols, title, date_col."""
+    date_col = spec.get("date_col", "date")
+    col_list = ", ".join(spec["cols"])
+    df = _df_from_sql(
+        f"SELECT {date_col} AS date, {col_list} FROM \"{table}\" ORDER BY {date_col} DESC LIMIT ?",
+        (limit,),
+    )
+
+    if df is None or df.empty:
+        raise RuntimeError(
+            f"No macro data in quant_core.db for table '{table}'."
+        )
+
+    lines = [
+        f"## {spec['title']} (source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)}",
+        "---",
+        "",
+    ]
+
+    for _, row in df.iterrows():
+        date_val = row.get("date", "")
+        parts = [f"**{date_val}**"]
+        for col in spec["cols"]:
+            v = row.get(col)
+            if pd.notna(v):
+                if isinstance(v, (float, int)):
+                    parts.append(f"  {col}: {v:.2f}")
+                else:
+                    parts.append(f"  {col}: {v}")
+        lines.append("  \n".join(parts))
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 # ===========================================================================
@@ -1469,3 +1650,366 @@ def get_pledge_ratio(symbol: str) -> str:
         lines.append("")
 
     return "\n".join(lines)
+
+
+def _check_stale_warning(latest_date: str | None, curr_date: str | None, max_days: int = 2) -> str:
+    """Return a warning string if latest_date is more than max_days behind curr_date."""
+    if not latest_date or not curr_date:
+        return ""
+    try:
+        dt_latest = pd.to_datetime(str(latest_date).split(" ")[0])
+        dt_curr = pd.to_datetime(str(curr_date).split(" ")[0])
+        days_behind = (dt_curr - dt_latest).days
+        if days_behind > max_days:
+            return (
+                f"> ⚠️ [数据时效性预警]: 数据库记录最新日期为 {dt_latest.strftime('%Y-%m-%d')}，"
+                f"距当前分析日期 ({dt_curr.strftime('%Y-%m-%d')}) 已滞后 {days_behind} 天。"
+                f"请将以下数据视为历史参考背景，并适当降低决策置信度。\n\n"
+            )
+    except Exception:
+        pass
+    return ""
+
+
+# ===========================================================================
+# Chip Distribution & Cost Bias (筹码分布与成本偏离度) — High Alpha
+# ===========================================================================
+
+def get_chip_distribution(symbol: str, curr_date: str | None = None) -> str:
+    """Fetch A-share chip distribution and cost bias from quant_core.db.
+
+    Reads ``chip_distribution_em`` / ``chip_distribution`` and ``daily_bars``
+    to compute profit ratio, average cost, 90%/70% concentration, and price-to-cost bias.
+    """
+    code = _to_smartmoney_symbol(symbol)
+    params = [code]
+    date_filter = ""
+    if curr_date:
+        date_filter = " AND trade_date <= ?"
+        params.append(curr_date)
+
+    # Try chip_distribution_em first, then chip_distribution
+    df = _df_from_sql(
+        f"""
+        SELECT trade_date, profit_ratio, avg_cost, cost_90_low, cost_90_high,
+               concentration_90, cost_70_low, cost_70_high, concentration_70, chip_concentration
+        FROM chip_distribution_em
+        WHERE ts_code = ?{date_filter} AND profit_ratio IS NOT NULL
+        ORDER BY trade_date DESC
+        LIMIT 5
+        """,
+        tuple(params),
+    )
+
+    if df is None or df.empty:
+        df = _df_from_sql(
+            f"""
+            SELECT trade_date, profit_ratio, avg_cost, cost_90_low, cost_90_high,
+                   concentration_90, cost_70_low, cost_70_high, concentration_70, chip_concentration
+            FROM chip_distribution
+            WHERE ts_code = ?{date_filter} AND profit_ratio IS NOT NULL
+            ORDER BY trade_date DESC
+            LIMIT 5
+            """,
+            tuple(params),
+        )
+
+    if df is None or df.empty:
+        raise RuntimeError(f"No chip distribution data in quant_core.db for {symbol}")
+
+    latest = df.iloc[0]
+    stale_warn = _check_stale_warning(latest["trade_date"], curr_date)
+
+    # Fetch latest close price to calculate cost bias
+    bar_df = _df_from_sql(
+        f"SELECT close FROM daily_bars WHERE ts_code = ?{date_filter} ORDER BY trade_date DESC LIMIT 1",
+        tuple(params),
+    )
+    latest_close = bar_df.iloc[0]["close"] if bar_df is not None and not bar_df.empty else None
+
+    p_ratio = latest["profit_ratio"]
+    if p_ratio is not None and p_ratio <= 1.0:
+        p_ratio_pct = p_ratio * 100.0
+    elif p_ratio is not None:
+        p_ratio_pct = float(p_ratio)
+    else:
+        p_ratio_pct = 0.0
+
+    avg_cost = latest["avg_cost"]
+    c_90 = latest["concentration_90"]
+    c_90_pct = (c_90 * 100.0) if (c_90 is not None and c_90 <= 1.0) else (c_90 or 0.0)
+
+    # Cost bias
+    bias_str = "N/A"
+    synthesis = "筹码分布中性"
+    if latest_close is not None and avg_cost is not None and avg_cost > 0:
+        cost_bias = ((latest_close - avg_cost) / avg_cost) * 100.0
+        bias_str = f"{cost_bias:+.2f}%"
+        if p_ratio_pct > 80.0 and cost_bias < 5.0:
+            synthesis = "🔥 获利盘高且处于成本密集区上方 (突破主升浪前兆/高获利沉淀)"
+        elif p_ratio_pct > 85.0:
+            synthesis = "⚠️ 获利盘极高 (>85%)，需防范上方短线获利回吐压力"
+        elif p_ratio_pct < 15.0:
+            synthesis = "🛡️ 获利盘极低 (<15%)，深幅超跌/筹码沉淀筑底区"
+
+    lines = [
+        stale_warn + f"## {symbol.upper()} Chip Distribution (筹码分布与成本偏离度)",
+        f"Source: quant_core.db (Date: {latest['trade_date']})",
+        f"- 获利盘比例: {p_ratio_pct:.2f}%",
+        f"- 筹码平均成本: {avg_cost if avg_cost else 'N/A'} 元" + (f" (最新股价: {latest_close:.2f}元)" if latest_close else ""),
+        f"- 股价相对于平均成本偏离度: {bias_str}",
+        f"- 90%筹码集中度: {c_90_pct:.2f}%",
+        f"- 90%筹码价格区间: {latest['cost_90_low']} ~ {latest['cost_90_high']} 元",
+        f"- 量化因子综合判定: {synthesis}",
+        "",
+        "### 近5日筹码动态:",
+    ]
+    for _, row in df.iterrows():
+        pr = (row['profit_ratio'] * 100.0) if row['profit_ratio'] and row['profit_ratio'] <= 1.0 else (row['profit_ratio'] or 0)
+        lines.append(f"- **{row['trade_date']}**: 获利盘 {pr:.1f}%, 平均成本 {row['avg_cost']}元, 集中度 {row['concentration_90']}")
+
+    return "\n".join(lines)
+
+
+# ===========================================================================
+# Historical Valuation Percentile (历史估值分位数) — High Alpha
+# ===========================================================================
+
+def get_historical_valuation(symbol: str, curr_date: str | None = None) -> str:
+    """Fetch A-share 3-year historical valuation percentile rank and ROE from quant_core.db."""
+    code = _to_smartmoney_symbol(symbol)
+    params = [code]
+    date_filter = ""
+    if curr_date:
+        date_filter = " AND trade_date <= ?"
+        params.append(curr_date)
+
+    df = _df_from_sql(
+        f"""
+        SELECT trade_date, pe_ttm, pb, ps_ttm, dividend_yield
+        FROM historical_valuation
+        WHERE ts_code = ?{date_filter} AND pe_ttm IS NOT NULL
+        ORDER BY trade_date DESC
+        LIMIT 720
+        """,
+        tuple(params),
+    )
+
+    if df is None or df.empty:
+        # Fallback to fundamentals table
+        df = _df_from_sql(
+            f"""
+            SELECT trade_date, pe_ttm, pb, ps_ttm, dividend_yield
+            FROM fundamentals
+            WHERE ts_code = ?{date_filter} AND pe_ttm IS NOT NULL
+            ORDER BY trade_date DESC
+            LIMIT 720
+            """,
+            tuple(params),
+        )
+
+    if df is None or df.empty:
+        raise RuntimeError(f"No historical valuation data in quant_core.db for {symbol}")
+
+    latest = df.iloc[0]
+    stale_warn = _check_stale_warning(latest["trade_date"], curr_date)
+
+    curr_pe = latest["pe_ttm"]
+    curr_pb = latest["pb"]
+
+    # Sample Size Guard
+    sample_notice = ""
+    if len(df) < 120:
+        sample_notice = (
+            f"\n> ⚠️ [次新股/小样本警示]: 本标的历史交易日仅 {len(df)} 条 (不足6个月)，"
+            f"估值分位数仅反映上市以来的短期分位数，不代表长期历史高低位，请谨慎参考。\n"
+        )
+
+    # Calculate percentile
+    valid_pes = df["pe_ttm"].dropna()
+    valid_pbs = df["pb"].dropna()
+
+    pe_pct = ((valid_pes <= curr_pe).sum() / len(valid_pes)) * 100.0 if len(valid_pes) > 0 else 50.0
+    pb_pct = ((valid_pbs <= curr_pb).sum() / len(valid_pbs)) * 100.0 if len(valid_pbs) > 0 else 50.0
+
+    # Fetch ROE from fundamentals for value trap verification
+    f_df = _df_from_sql(
+        f"SELECT roe, gross_margin, net_margin FROM fundamentals WHERE ts_code = ?{date_filter} AND roe IS NOT NULL ORDER BY trade_date DESC LIMIT 1",
+        tuple(params),
+    )
+    latest_roe = f_df.iloc[0]["roe"] if f_df is not None and not f_df.empty else None
+
+    # Sector Relative & Cyclical Stock Guard
+    sector_info = "N/A"
+    cyclical_warning = ""
+    ind_df = _df_from_sql("SELECT industry FROM stock_list WHERE code = ?", (code,))
+    if ind_df is not None and not ind_df.empty:
+        ind_name = ind_df.iloc[0]["industry"]
+        if ind_name:
+            sec_df = _df_from_sql(
+                "SELECT avg_pe FROM sector_industry WHERE industry_name = ? ORDER BY trade_date DESC LIMIT 1",
+                (ind_name,),
+            )
+            if sec_df is not None and not sec_df.empty and pd.notna(sec_df.iloc[0]["avg_pe"]):
+                avg_pe = sec_df.iloc[0]["avg_pe"]
+                diff_pct = ((curr_pe - avg_pe) / avg_pe) * 100.0 if avg_pe > 0 else 0.0
+                sector_info = f"{ind_name} (行业均值PE: {avg_pe:.2f}, 相对行业折溢价: {diff_pct:+.1f}%)"
+
+            CYCLICAL_INDUSTRIES = {"钢铁", "煤炭", "煤炭开采", "航运", "海运", "化工", "基础化工", "有色金属", "猪肉", "养殖业"}
+            if ind_name in CYCLICAL_INDUSTRIES and curr_pe < 8.0:
+                cyclical_warning = (
+                    "\n> ⚠️ [周期股景气顶点预警]: 周期性行业 (如钢铁/煤炭/航运/化工) 极低PE (<8) 常出现在盈利顶点 (周期顶部)，"
+                    "极低PE并不等于便宜，必须结合产品大宗价格与ROE变动趋势进行防爆判定。\n"
+                )
+
+    # Quant valuation synthesis
+    synthesis = "估值处于合理区间"
+    if pe_pct < 20.0:
+        if latest_roe is not None and latest_roe > 10.0:
+            synthesis = "🟢 深度价值区 (Deep Value): PE处于近3年底部的20%以内，且ROE>10%维持高盈利，具有强安全边际"
+        elif latest_roe is not None and latest_roe < 5.0:
+            synthesis = "⚠️ 警惕价值陷阱 (Value Trap Alert): 低PE但ROE持续走低(<5%)，基本面承压"
+        else:
+            synthesis = "🟢 低估值区: PE处于近3年底部20%分位"
+    elif pe_pct > 80.0:
+        synthesis = "🔴 极高估值区: PE处于近3年顶部的80%以上分位，溢价过高"
+
+    lines = [
+        stale_warn + sample_notice + cyclical_warning + f"## {symbol.upper()} Historical Valuation Percentile (近3年估值分位数)",
+        f"Source: quant_core.db (Latest Date: {latest['trade_date']}, Total Bars: {len(df)})",
+        f"- PE (TTM): {curr_pe:.2f} (处于近3年 {pe_pct:.1f}% 分位数)",
+        f"- PB: {curr_pb:.2f} (处于近3年 {pb_pct:.1f}% 分位数)",
+        f"- 所属行业对比: {sector_info}",
+        f"- 股息率 (Dividend Yield): {latest['dividend_yield'] if latest['dividend_yield'] is not None else 'N/A'}%",
+        f"- 最新 ROE: {f'{latest_roe:.2f}%' if latest_roe is not None else 'N/A'}",
+        f"- 估值因子综合判定: {synthesis}",
+    ]
+    return "\n".join(lines)
+
+
+# ===========================================================================
+# Institutional Intelligence (机构综合情报 - 调研与持仓合并) — High Alpha
+# ===========================================================================
+
+def get_institutional_intelligence(symbol: str, curr_date: str | None = None) -> str:
+    """Fetch merged institutional survey & holdings intelligence from quant_core.db."""
+    code = _to_smartmoney_symbol(symbol)
+
+    df_survey = _df_from_sql(
+        """
+        SELECT trade_date, survey_org, survey_type, survey_count
+        FROM institution_survey
+        WHERE stock_code = ? OR stock_code = ?
+        ORDER BY trade_date DESC
+        LIMIT 10
+        """,
+        (code, symbol),
+    )
+
+    df_holdings = _df_from_sql(
+        """
+        SELECT report_date, institution_count, top10_holder_ratio, type_counts
+        FROM institutional_holdings
+        WHERE ts_code = ? OR ts_code = ?
+        ORDER BY report_date DESC
+        LIMIT 4
+        """,
+        (code, symbol),
+    )
+
+    if (df_survey is None or df_survey.empty) and (df_holdings is None or df_holdings.empty):
+        raise RuntimeError(f"No institutional intelligence (survey/holdings) in quant_core.db for {symbol}")
+
+    latest_dt = None
+    if df_survey is not None and not df_survey.empty:
+        latest_dt = df_survey.iloc[0]["trade_date"]
+    elif df_holdings is not None and not df_holdings.empty:
+        latest_dt = df_holdings.iloc[0]["report_date"]
+
+    stale_warn = _check_stale_warning(latest_dt, curr_date)
+
+    lines = [
+        stale_warn + f"## {symbol.upper()} Institutional Intelligence (机构综合情报)",
+        "Source: quant_core.db",
+    ]
+
+    if df_survey is not None and not df_survey.empty:
+        lines.append(f"### 近期机构调研动向 ({len(df_survey)} 项记录):")
+        for _, row in df_survey.iterrows():
+            lines.append(f"- **{row.get('trade_date', 'N/A')}**: 机构 {row.get('survey_org', 'N/A')}, 调研类型 {row.get('survey_type', 'N/A')}, 频次 {row.get('survey_count', 1)}")
+        lines.append("")
+
+    if df_holdings is not None and not df_holdings.empty:
+        lines.append("### 机构持仓与筹码结构:")
+        for _, row in df_holdings.iterrows():
+            lines.append(f"- **报告期 {row['report_date']}**: 持仓机构总数 {row['institution_count']} 家, 前十名持仓集中度 {row['top10_holder_ratio'] if row['top10_holder_ratio'] else 'N/A'}%, 机构分类: {row['type_counts']}")
+
+    return "\n".join(lines)
+
+
+# Backward compatibility alias
+get_institution_survey = get_institutional_intelligence
+
+
+
+
+# ===========================================================================
+# Earnings Forecast (业绩预告) — High Alpha
+# ===========================================================================
+
+def get_earnings_forecast(symbol: str) -> str:
+    """Fetch earnings pre-announcement & forecast from quant_core.db."""
+    code = _to_smartmoney_symbol(symbol)
+    df = _df_from_sql(
+        """
+        SELECT name, end_date, forecast_type, net_profit_change, previous_profit
+        FROM earnings_forecast
+        WHERE ts_code = ?
+        ORDER BY end_date DESC
+        LIMIT 5
+        """,
+        (code,),
+    )
+
+    if df is None or df.empty:
+        raise RuntimeError(f"No earnings forecast data in quant_core.db for {symbol}")
+
+    lines = [
+        f"## {symbol.upper()} Earnings Forecast (业绩预告)",
+        "Source: quant_core.db",
+        "",
+    ]
+    for _, row in df.iterrows():
+        change_str = f"{row['net_profit_change']:+.2f}%" if pd.notna(row['net_profit_change']) else "N/A"
+        lines.append(f"- **报告期 {row['end_date']}**: 类型 [{row['forecast_type']}], 预计净利润同比变动 {change_str}")
+
+    return "\n".join(lines)
+
+
+# ===========================================================================
+# Concept Board (概念板块归属) — High Alpha
+# ===========================================================================
+
+def get_concept_board(symbol: str) -> str:
+    """Fetch belonging concept boards from quant_core.db."""
+    code = _to_smartmoney_symbol(symbol)
+    df = _df_from_sql(
+        """
+        SELECT concept_code, concept_name
+        FROM concept_member
+        WHERE ts_code = ?
+        """,
+        (code,),
+    )
+
+    if df is None or df.empty:
+        raise RuntimeError(f"No concept board data in quant_core.db for {symbol}")
+
+    concepts = [f"{row['concept_name']} ({row['concept_code']})" for _, row in df.iterrows()]
+    lines = [
+        f"## {symbol.upper()} Belonging Concept Boards (归属概念题材)",
+        f"Source: quant_core.db (共 {len(concepts)} 个概念板块)",
+        "- 概念标签: " + ", ".join(concepts[:15]),
+    ]
+    return "\n".join(lines)
+

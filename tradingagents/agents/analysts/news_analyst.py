@@ -1,6 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
+    get_cailianpress_telegrams,
     get_global_news,
     get_instrument_context_from_state,
     get_language_instruction,
@@ -25,6 +26,7 @@ def create_news_analyst(llm):
             get_global_news,
             get_macro_indicators,
             get_research_reports,
+            get_cailianpress_telegrams,
         ]
 
         ticker_guard = (
@@ -34,7 +36,7 @@ def create_news_analyst(llm):
         ) if company_name else ""
 
         system_message = ticker_guard + (
-            f"You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(query, start_date, end_date) for {asset_label}-specific or targeted news searches, get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news, get_macro_indicators(indicator, curr_date, look_back_days) for quantitative macro data (pmi, cpi, m2, social_finance, or FRED series like 'fed_funds_rate', '10y_treasury', 'unemployment'), get_research_reports(ticker) for broker analyst ratings, target prices, and institutional opinions. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
+            f"You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(query, start_date, end_date) for {asset_label}-specific or targeted news searches, get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news, get_macro_indicators(indicator, curr_date, look_back_days) for quantitative macro data (pmi, cpi, m2, social_finance, or FRED series like 'fed_funds_rate', '10y_treasury', 'unemployment'), get_research_reports(ticker) for broker analyst ratings, target prices, and institutional opinions, get_cailianpress_telegrams(limit) for real-time Chinese market flash news and announcements from Cailianpress (财联社). Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
             + (
                 "\n\n## Missing Data Protocol\n"

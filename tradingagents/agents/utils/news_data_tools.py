@@ -234,3 +234,53 @@ def get_research_reports(
     if curr_date is None:
         return route_to_vendor("get_research_reports", ticker)
     return route_to_vendor("get_research_reports", ticker, curr_date)
+
+
+@tool
+def get_institutional_intelligence(
+    ticker: Annotated[str, "Ticker symbol of the company e.g. 600519.SS"],
+    curr_date: Annotated[str, "Current date you are trading at, yyyy-mm-dd"] = None,
+) -> str:
+    """
+    Retrieve merged institutional intelligence (survey frequency, visiting funds/brokers, and shareholder positioning).
+    Shows institutional attention, communication trends, and top holder structure.
+    """
+    from tradingagents.dataflows.smartmoney_vendor import get_institutional_intelligence as _get_intel
+    try:
+        return _get_intel(ticker, curr_date)
+    except Exception as exc:
+        return f"NO_DATA_AVAILABLE: Institutional intelligence unavailable for {ticker} ({exc})"
+
+
+get_institution_survey = get_institutional_intelligence
+
+
+@tool
+def get_cailianpress_telegrams(
+    limit: Annotated[int, "Maximum number of telegrams to fetch (default 20)"] = 20,
+    look_back_days: Annotated[int | None, "Days to look back; omit for latest only"] = None,
+) -> str:
+    """
+    Retrieve real-time flash news telegrams from Cailianpress (财联社快讯).
+
+    Provides event-driven financial news and company announcements across A-shares,
+    including major policy changes, corporate events, and market-moving headlines.
+
+    Unlike general news feeds, Cailianpress telegrams are time-sensitive flash
+    announcements optimized for immediate market impact assessment.
+
+    Args:
+        limit: Maximum number of telegrams to fetch (default 20).
+        look_back_days: Optional days to look back for historical telegrams.
+
+    Returns:
+        str: Formatted markdown report of Cailianpress telegrams.
+    """
+    from tradingagents.dataflows.cailianpress_vendor import fetch_cailianpress_telegrams
+
+    try:
+        return fetch_cailianpress_telegrams(limit=limit)
+    except Exception as exc:
+        return f"NO_DATA_AVAILABLE: Cailianpress telegrams unavailable ({type(exc).__name__}: {exc})"
+
+

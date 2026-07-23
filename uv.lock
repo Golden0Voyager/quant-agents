@@ -2246,6 +2246,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "coverage" },
     { name = "mypy" },
     { name = "pytest-cov" },
     { name = "ruff" },
@@ -2275,6 +2276,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "coverage", specifier = ">=7.14.1" },
     { name = "mypy", specifier = ">=1.10.0" },
     { name = "pytest-cov", specifier = ">=5.0" },
     { name = "ruff", specifier = ">=0.5.0" },

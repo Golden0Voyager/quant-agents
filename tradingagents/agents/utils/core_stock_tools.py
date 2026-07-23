@@ -27,3 +27,20 @@ def get_stock_data(
         (data["Date"] >= start_date) & (data["Date"] <= end_date)
     ]
     return filtered.to_csv(index=False)
+
+
+@tool
+def get_chip_distribution(
+    symbol: Annotated[str, "A-share ticker symbol e.g. 600519.SS or 000001.SZ"],
+    curr_date: Annotated[str, "Current date you are trading at, yyyy-mm-dd"] = None,
+) -> str:
+    """
+    Retrieve chip distribution (筹码分布), average holder cost, concentration, and cost bias.
+    Provides key insights into profit ratio and dynamic cost support/resistance zones.
+    """
+    from tradingagents.dataflows.smartmoney_vendor import get_chip_distribution as _get_chip
+    try:
+        return _get_chip(symbol, curr_date)
+    except Exception as exc:
+        return f"NO_DATA_AVAILABLE: Chip distribution unavailable for {symbol} ({exc})"
+

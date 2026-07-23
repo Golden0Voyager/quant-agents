@@ -154,6 +154,19 @@ class CleanDataframeTests(unittest.TestCase):
         self.assertEqual(result["Volume"].iloc[0], 0)
         self.assertEqual(result["Volume"].iloc[1], 12000)
 
+    def test_no_volume_column_skips_fillna(self):
+        """DataFrame without Volume column skips fillna. Covers branch 87->91."""
+        df = pd.DataFrame({
+            "Date": ["2026-01-02", "2026-01-03"],
+            "Open": [100.0, 101.0],
+            "High": [102.0, 103.0],
+            "Low": [99.0, 100.0],
+            "Close": [100.5, 101.5],
+        })
+        result = _clean_dataframe(df)
+        self.assertEqual(len(result), 2)
+        self.assertNotIn("Volume", result.columns)
+
 
 @pytest.mark.unit
 class FilterFinancialsByDateTests(unittest.TestCase):

@@ -120,3 +120,104 @@ class TestNewsDataTools:
         result = get_research_reports.func("AAPL")
         mock_route.assert_called_once_with("get_research_reports", "AAPL")
         assert result == "research_result"
+
+    # ---- curr_date branches (if None / else) ----
+
+    @patch("tradingagents.agents.utils.news_data_tools.route_to_vendor")
+    def test_get_institutional_holdings_with_curr_date(self, mock_route):
+        mock_route.return_value = "holdings_dated"
+        from tradingagents.agents.utils.news_data_tools import get_institutional_holdings
+
+        result = get_institutional_holdings.func("AAPL", curr_date="2026-07-03")
+        mock_route.assert_called_once_with(
+            "get_institutional_holdings", "AAPL", "2026-07-03"
+        )
+        assert result == "holdings_dated"
+
+    @patch("tradingagents.agents.utils.news_data_tools.route_to_vendor")
+    def test_get_northbound_hold_with_curr_date(self, mock_route):
+        mock_route.return_value = "northbound_dated"
+        from tradingagents.agents.utils.news_data_tools import get_northbound_hold
+
+        result = get_northbound_hold.func("600519.SS", curr_date="2026-07-03")
+        mock_route.assert_called_once_with(
+            "get_northbound_hold", "600519.SS", "2026-07-03"
+        )
+        assert result == "northbound_dated"
+
+    @patch("tradingagents.agents.utils.news_data_tools.route_to_vendor")
+    def test_get_dragon_tiger_with_curr_date(self, mock_route):
+        mock_route.return_value = "dragon_dated"
+        from tradingagents.agents.utils.news_data_tools import get_dragon_tiger
+
+        result = get_dragon_tiger.func("300750.SZ", curr_date="2026-07-03")
+        mock_route.assert_called_once_with(
+            "get_dragon_tiger", "300750.SZ", "2026-07-03"
+        )
+        assert result == "dragon_dated"
+
+    @patch("tradingagents.agents.utils.news_data_tools.route_to_vendor")
+    def test_get_block_trade_with_curr_date(self, mock_route):
+        mock_route.return_value = "block_dated"
+        from tradingagents.agents.utils.news_data_tools import get_block_trade
+
+        result = get_block_trade.func("000001.SZ", curr_date="2026-07-03")
+        mock_route.assert_called_once_with(
+            "get_block_trade", "000001.SZ", "2026-07-03"
+        )
+        assert result == "block_dated"
+
+    @patch("tradingagents.agents.utils.news_data_tools.route_to_vendor")
+    def test_get_research_reports_with_curr_date(self, mock_route):
+        mock_route.return_value = "research_dated"
+        from tradingagents.agents.utils.news_data_tools import get_research_reports
+
+        result = get_research_reports.func("AAPL", curr_date="2026-07-03")
+        mock_route.assert_called_once_with(
+            "get_research_reports", "AAPL", "2026-07-03"
+        )
+        assert result == "research_dated"
+
+
+# ===================================================================
+# get_institutional_intelligence (local import from smartmoney_vendor)
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestGetInstitutionalIntelligence:
+    @patch(
+        "tradingagents.dataflows.smartmoney_vendor.get_institutional_intelligence",
+        return_value="survey: 10 institutions visited in Q2",
+    )
+    def test_returns_intelligence(self, mock_intel):
+        from tradingagents.agents.utils.news_data_tools import get_institutional_intelligence
+
+        result = get_institutional_intelligence.func("600519.SS")
+        mock_intel.assert_called_once_with("600519.SS", None)
+        assert "survey" in result
+
+    @patch(
+        "tradingagents.dataflows.smartmoney_vendor.get_institutional_intelligence",
+        side_effect=ConnectionError("timeout"),
+    )
+    def test_error_returns_no_data_message(self, mock_intel):
+        from tradingagents.agents.utils.news_data_tools import get_institutional_intelligence
+
+        result = get_institutional_intelligence.func("000001.SZ")
+        assert "NO_DATA_AVAILABLE" in result
+        assert "000001.SZ" in result
+
+    def test_is_structured_tool(self):
+        from tradingagents.agents.utils.news_data_tools import get_institutional_intelligence
+
+        assert hasattr(get_institutional_intelligence, "name")
+        assert get_institutional_intelligence.name == "get_institutional_intelligence"
+
+    def test_alias_get_institution_survey(self):
+        from tradingagents.agents.utils.news_data_tools import (
+            get_institution_survey,
+            get_institutional_intelligence,
+        )
+
+        assert get_institution_survey is get_institutional_intelligence

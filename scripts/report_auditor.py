@@ -162,7 +162,7 @@ class MetricsExtractor:
             r"Current\s+Price[:：\s]*[\(（]?([\d.]+)[\)）]?",
         ],
         "market_cap": [
-            r"市值[:：\s]*(?:约|约为|about)?\s*([\d.]+)\s*(?:亿元|亿)",
+            r"(?<!持股)(?<!板块)(?<!行业)公司?总?市值[:：\s]*(?:约|约为|about)?\s*([\d.]+)\s*(?:亿元|亿)",
             r"market\s+cap[:：\s]*(?:about)?\s*([\d.]+)\s*(?:billion|B)",
         ],
         "gross_margin": [

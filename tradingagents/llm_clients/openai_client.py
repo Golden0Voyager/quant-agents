@@ -116,7 +116,7 @@ class DeepSeekChatOpenAI(NormalizedChatOpenAI):
                 message_dict["reasoning_content"] = self._reasoning_cache[msg_id]
                 continue
             # 2) original AIMessage additional_kwargs (direct invoke path)
-            if isinstance(message, AIMessage):
+            if isinstance(message, AIMessage):  # pragma: no cover -- dead branch: non-AIMessage filtered above
                 reasoning = message.additional_kwargs.get("reasoning_content")
                 if reasoning is not None:
                     message_dict["reasoning_content"] = reasoning

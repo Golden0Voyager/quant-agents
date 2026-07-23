@@ -108,4 +108,5 @@ Single-context layout — one `CONTEXT.md` + `docs/adr/` at the repo root. See `
 
 ### Git workflow
 
-Three-tier rule for `origin` / `upstream` / local refs with `--force-with-lease` only on `origin`. **Never force-push `upstream`.** See `docs/contributing/git-workflow.md`.
+- **New Feature 流程**: 开发新功能 (new feature) 时，建议走 `/git-feature` 流程（使用 `/git-feature start` 创建分支，完成开发后使用 `/git-feature done` 完成推送/PR/合入/清理全流程）。
+- **推送准则**: Three-tier rule for `origin` / `upstream` / local refs with `--force-with-lease` only on `origin`. **Never force-push `upstream`.** See `docs/contributing/git-workflow.md`.

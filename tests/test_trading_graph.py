@@ -336,8 +336,12 @@ class CreateToolNodesTests(unittest.TestCase):
         g = self._make_graph()
         nodes = g._create_tool_nodes()
         tool_names = list(nodes["market"].tools_by_name.keys())
-        self.assertIn("get_stock_data", tool_names)
-        self.assertIn("get_indicators", tool_names)
+        for name in ("get_stock_data", "get_indicators", "get_fund_flow",
+                      "get_sector_fund_flow", "get_chip_distribution",
+                      "get_limit_up_down", "get_index_daily",
+                      "get_verified_market_snapshot"):
+            with self.subTest(tool=name):
+                self.assertIn(name, tool_names)
 
     def test_social_node_has_news(self):
         g = self._make_graph()
@@ -349,7 +353,9 @@ class CreateToolNodesTests(unittest.TestCase):
         g = self._make_graph()
         nodes = g._create_tool_nodes()
         tool_names = list(nodes["news"].tools_by_name.keys())
-        for name in ("get_news", "get_global_news", "get_insider_transactions", "get_company_announcements"):
+        for name in ("get_news", "get_global_news", "get_insider_transactions",
+                      "get_company_announcements", "get_macro_indicators",
+                      "get_research_reports", "get_cailianpress_telegrams"):
             with self.subTest(tool=name):
                 self.assertIn(name, tool_names)
 
@@ -366,21 +372,29 @@ class CreateToolNodesTests(unittest.TestCase):
         tool_names = list(nodes["governance"].tools_by_name.keys())
         for name in ("get_company_announcements", "get_insider_transactions",
                       "get_news", "get_restricted_release",
-                      "get_institutional_holdings", "get_northbound_hold"):
+                      "get_institutional_intelligence", "get_northbound_hold",
+                      "get_margin_trading", "get_pledge_ratio", "get_dragon_tiger",
+                      "get_block_trade"):
             with self.subTest(tool=name):
                 self.assertIn(name, tool_names)
 
-    def test_industry_node_has_industry_valuation(self):
+    def test_industry_node_has_industry_tools(self):
         g = self._make_graph()
         nodes = g._create_tool_nodes()
         tool_names = list(nodes["industry"].tools_by_name.keys())
-        self.assertIn("get_industry_valuation", tool_names)
+        for name in ("get_industry_valuation", "get_concept_board",
+                      "get_macro_indicators", "get_sector_fund_flow"):
+            with self.subTest(tool=name):
+                self.assertIn(name, tool_names)
 
     def test_fundamentals_node_has_fundamental_tools(self):
         g = self._make_graph()
         nodes = g._create_tool_nodes()
         tool_names = list(nodes["fundamentals"].tools_by_name.keys())
-        for name in ("get_fundamentals", "get_balance_sheet", "get_cashflow", "get_income_statement"):
+        for name in ("get_fundamentals", "get_balance_sheet", "get_cashflow",
+                      "get_income_statement", "get_historical_valuation",
+                      "get_earnings_forecast", "get_earnings_estimates",
+                      "get_shareholder_count", "get_dividend_history"):
             with self.subTest(tool=name):
                 self.assertIn(name, tool_names)
 

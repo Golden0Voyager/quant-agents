@@ -19,3 +19,19 @@ def get_industry_valuation(
         str: A formatted report of industry valuation comparison
     """
     return route_to_vendor("get_industry_valuation", ticker)
+
+
+@tool
+def get_concept_board(
+    ticker: Annotated[str, "Ticker symbol of the company e.g. 600519.SS"],
+) -> str:
+    """
+    Retrieve belonging concept boards (归属概念题材) and sector themes for a given ticker.
+    Useful for sector rotation and theme momentum analysis.
+    """
+    from tradingagents.dataflows.smartmoney_vendor import get_concept_board as _get_cb
+    try:
+        return _get_cb(ticker)
+    except Exception as exc:
+        return f"NO_DATA_AVAILABLE: Concept board unavailable for {ticker} ({exc})"
+

@@ -633,3 +633,342 @@ class TestGetResearchReportsRouting:
         assert "DATA_UNAVAILABLE" in result
         fake_sm.assert_called_once_with("600519.SS")
         fake_ak.assert_called_once_with("600519.SS")
+
+
+# ===========================================================================
+# _is_stale_research_data helper function
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestIsStaleResearchData:
+    """Test _is_stale_research_data edge cases."""
+
+    def test_no_parseable_dates_returns_false(self):
+        """When no '日期:' pattern is found, return False."""
+        from tradingagents.dataflows.interface import _is_stale_research_data
+
+        assert _is_stale_research_data("some research text without dates") is False
+
+    def test_invalid_date_format_continues(self):
+        """Invalid date strings in the pattern trigger except ValueError: continue."""
+        from tradingagents.dataflows.interface import _is_stale_research_data
+
+        # One valid, one invalid date -> valid is collected, invalid is skipped
+        result = (
+            "日期: 2026-07-01\n"
+            "日期: not-a-date\n"
+            "日期: 2026-07-21\n"
+        )
+        assert _is_stale_research_data(result) is False  # latest=2026-07-21 is < 90 days
+
+    def test_stale_data_returns_true(self):
+        """Dates older than 90 days from today return True."""
+        from tradingagents.dataflows.interface import _is_stale_research_data
+
+        result = "日期: 2025-01-01\n日期: 2025-06-15\n"
+        assert _is_stale_research_data(result) is True
+
+    def test_fresh_data_returns_false(self):
+        """Dates within 90 days return False."""
+        from tradingagents.dataflows.interface import _is_stale_research_data
+
+        result = "日期: 2026-07-01\n日期: 2026-07-15\n"
+        assert _is_stale_research_data(result) is False
+
+
+# ===========================================================================
+# _is_failure_sentinel helper function
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestIsFailureSentinel:
+    """Test _is_failure_sentinel edge cases."""
+
+    def test_detects_error_prefix(self):
+        from tradingagents.dataflows.interface import _is_failure_sentinel
+
+        assert _is_failure_sentinel("Error: something failed") is True
+
+    def test_detects_no_data_found(self):
+        from tradingagents.dataflows.interface import _is_failure_sentinel
+
+        assert _is_failure_sentinel("No data found") is True
+
+    def test_detects_data_unavailable(self):
+        from tradingagents.dataflows.interface import _is_failure_sentinel
+
+        assert _is_failure_sentinel("DATA_UNAVAILABLE: service down") is True
+
+    def test_detects_no_data_available(self):
+        from tradingagents.dataflows.interface import _is_failure_sentinel
+
+        assert _is_failure_sentinel("NO_DATA_AVAILABLE: no rows") is True
+
+    def test_leading_whitespace_still_detected(self):
+        """Leading whitespace is stripped before matching."""
+        from tradingagents.dataflows.interface import _is_failure_sentinel
+
+        assert _is_failure_sentinel("  Error: failed") is True
+
+    def test_normal_data_not_failure(self):
+        from tradingagents.dataflows.interface import _is_failure_sentinel
+
+        assert _is_failure_sentinel("Here is the data you requested") is False
+
+    def test_empty_string_not_failure(self):
+        from tradingagents.dataflows.interface import _is_failure_sentinel
+
+        assert _is_failure_sentinel("") is False
+
+
+# ===========================================================================
+# Additional get_vendor edge cases (method=None branch)
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestGetVendorNoMethod:
+    """Test get_vendor when method is None (branch 355->361)."""
+
+    def test_no_method_falls_to_category_level(self):
+        """get_vendor without method (method=None) falls back to category-level config."""
+        from tradingagents.dataflows import interface
+
+        with patch("tradingagents.dataflows.interface.get_config") as mock_cfg:
+            mock_cfg.return_value = {
+                "tool_vendors": {"get_fundamentals": "alpha_vantage"},
+                "data_vendors": {"fundamental_data": "smartmoney_db"},
+            }
+            # No method argument -> skips tool-level check, goes to category-level
+            result = interface.get_vendor("fundamental_data")
+        assert result == "smartmoney_db"
+
+    def test_no_method_with_missing_category_returns_default(self):
+        """get_vendor without method and missing category returns 'default'."""
+        from tradingagents.dataflows import interface
+
+        with patch("tradingagents.dataflows.interface.get_config") as mock_cfg:
+            mock_cfg.return_value = {
+                "tool_vendors": {},
+                "data_vendors": {},
+            }
+            result = interface.get_vendor("nonexistent_category")
+        assert result == "default"
+
+
+# ===========================================================================
+# route_to_vendor: failure sentinel fallthrough
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestRouteToVendorFailureSentinel:
+    """When a vendor returns a failure sentinel string, the router falls through."""
+
+    def test_failure_sentinel_falls_through_to_next_vendor(self):
+        """Failure sentinel from first vendor triggers fallthrough to second vendor."""
+        from tradingagents.dataflows import interface
+
+        fake_sm = MagicMock(return_value="Error: no data in smartmoney_db")
+        fake_ak = MagicMock(return_value="AKSHARE_RESULT")
+        with patch(
+            "tradingagents.dataflows.interface.get_vendor",
+            return_value="smartmoney_db,akshare",
+        ), patch.dict(
+            interface.VENDOR_METHODS["get_research_reports"],
+            {"smartmoney_db": fake_sm, "akshare": fake_ak},
+            clear=False,
+        ):
+            result = interface.route_to_vendor(
+                "get_research_reports", "600519.SS"
+            )
+        assert result == "AKSHARE_RESULT"
+        fake_sm.assert_called_once_with("600519.SS")
+        fake_ak.assert_called_once_with("600519.SS")
+
+    def test_all_vendors_return_failure_sentinel_returns_no_data(self):
+        """When all vendors return failure sentinels, return NO_DATA_AVAILABLE."""
+        from tradingagents.dataflows import interface
+
+        fake_sm = MagicMock(return_value="NO_DATA_AVAILABLE: not found")
+        fake_ak = MagicMock(return_value="NO_DATA_AVAILABLE: not found either")
+        with patch(
+            "tradingagents.dataflows.interface.get_vendor",
+            return_value="smartmoney_db,akshare",
+        ), patch.dict(
+            interface.VENDOR_METHODS["get_research_reports"],
+            {"smartmoney_db": fake_sm, "akshare": fake_ak},
+            clear=False,
+        ):
+            result = interface.route_to_vendor(
+                "get_research_reports", "600519.SS"
+            )
+        assert "NO_DATA_AVAILABLE" in result
+        assert "600519.SS" in result
+
+
+# ===========================================================================
+# route_to_vendor: stale research data fallthrough
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestRouteToVendorStaleResearch:
+    """Stale smartmoney_db research reports fall through to akshare."""
+
+    def test_stale_research_falls_through_to_akshare(self):
+        """When smartmoney_db returns research with only old dates, fall through to akshare."""
+        from tradingagents.dataflows import interface
+
+        # Data with dates older than 90 days
+        stale_data = "日期: 2025-01-15\n日期: 2025-06-20\nSome old research"
+        fake_sm = MagicMock(return_value=stale_data)
+        fake_ak = MagicMock(return_value="AKSHARE_FRESH_RESEARCH")
+        with patch(
+            "tradingagents.dataflows.interface.get_vendor",
+            return_value="smartmoney_db,akshare",
+        ), patch.dict(
+            interface.VENDOR_METHODS["get_research_reports"],
+            {"smartmoney_db": fake_sm, "akshare": fake_ak},
+            clear=False,
+        ):
+            result = interface.route_to_vendor(
+                "get_research_reports", "600519.SS"
+            )
+        assert result == "AKSHARE_FRESH_RESEARCH"
+        fake_sm.assert_called_once_with("600519.SS")
+        fake_ak.assert_called_once_with("600519.SS")
+
+    def test_fresh_research_from_smartmoney_used_directly(self):
+        """Fresh research from smartmoney_db is returned without fallthrough."""
+        from tradingagents.dataflows import interface
+
+        fresh_data = "日期: 2026-07-15\nSome recent research"
+        fake_sm = MagicMock(return_value=fresh_data)
+        fake_ak = MagicMock(return_value="AKSHARE_RESEARCH")
+        with patch(
+            "tradingagents.dataflows.interface.get_vendor",
+            return_value="smartmoney_db,akshare",
+        ), patch.dict(
+            interface.VENDOR_METHODS["get_research_reports"],
+            {"smartmoney_db": fake_sm, "akshare": fake_ak},
+            clear=False,
+        ):
+            result = interface.route_to_vendor(
+                "get_research_reports", "600519.SS"
+            )
+        assert result == fresh_data
+        fake_sm.assert_called_once_with("600519.SS")
+        fake_ak.assert_not_called()
+
+
+# ===========================================================================
+# Additional route_to_vendor edge cases
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestRouteToVendorAdditionalEdgeCases:
+
+    def test_ashare_without_smartmoney_db_in_chain_promotes_akshare(self):
+        """
+        A-share ticker with method that has no smartmoney_db in VENDOR_METHODS
+        still routes to akshare. Covers line 438 else branch.
+        """
+        from tradingagents.dataflows import interface
+
+        fake_ak = MagicMock(return_value="AKSHARE_DIVIDEND")
+        with patch.dict(
+            interface.VENDOR_METHODS["get_dividend_history"],
+            {"akshare": fake_ak},
+            clear=False,
+        ):
+            result = interface.route_to_vendor(
+                "get_dividend_history", "600519.SS"
+            )
+        assert result == "AKSHARE_DIVIDEND"
+        fake_ak.assert_called_once_with("600519.SS")
+
+    def test_prediction_markets_returns_data_unavailable(self):
+        """
+        get_prediction_markets is not in VENDOR_METHODS but is categorized
+        under prediction_markets (which is in OPTIONAL_CATEGORIES).
+        Covers lines 508-514 (optional method with no vendor) and line 494
+        (_format_optional_unavailable with first_error=None).
+        """
+        from tradingagents.dataflows import interface
+
+        result = interface.route_to_vendor("get_prediction_markets", "AAPL")
+        assert "DATA_UNAVAILABLE" in result
+        assert "get_prediction_markets" in result
+        assert "no available data source" in result
+
+    def test_method_not_in_vendor_methods_non_optional_raises(self):
+        """
+        A method that IS categorized but NOT in VENDOR_METHODS, and whose
+        category is NOT optional, raises ValueError.
+        Covers lines 508-513 (raise ValueError branch).
+        """
+        from tradingagents.dataflows import interface
+
+        with patch.dict(
+            interface.TOOLS_CATEGORIES,
+            {
+                "governance_risk": {
+                    "description": "governance",
+                    "tools": [
+                        "get_pledge_ratio",
+                        "get_company_announcements",
+                        "get_margin_trading",
+                        "get_dragon_tiger",
+                        "get_block_trade",
+                        "nonexistent_governance_method",
+                    ],
+                }
+            },
+        ), pytest.raises(ValueError, match="not supported"):
+            interface.route_to_vendor(
+                "nonexistent_governance_method", "AAPL"
+            )
+
+    def test_multiple_rate_limits_first_error_stored(self):
+        """
+        When two vendors both raise VendorRateLimitError, the first error
+        is stored and the second skips the 'if first_error is None' branch.
+        Covers partial branch 598->600.
+        """
+        from tradingagents.dataflows import interface
+        from tradingagents.dataflows.errors import VendorRateLimitError
+
+        def first_limited(*a, **kw):
+            raise VendorRateLimitError("first vendor rate-limited")
+
+        def second_limited(*a, **kw):
+            raise VendorRateLimitError("second vendor rate-limited")
+
+        with patch.dict(
+            interface.VENDOR_METHODS["get_indicators"],
+            {"akshare": first_limited, "yfinance": second_limited},
+            clear=True,
+        ), patch.object(interface, "get_vendor", return_value="akshare,yfinance"), \
+            pytest.raises(VendorRateLimitError, match="first vendor rate-limited"):
+            interface.route_to_vendor(
+                "get_indicators", "600519.SS", "rsi", "2026-05-14", 30
+            )
+
+
+# ===========================================================================
+# Additional route_to_vendor_with_source edge cases
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestRouteToVendorWithSourceEdgeCases:
+    def test_unsupported_method_via_with_source(self):
+        """route_to_vendor_with_source raises ValueError for unsupported methods."""
+        from tradingagents.dataflows import interface
+
+        with pytest.raises(ValueError, match="not found in any category"):
+            interface.route_to_vendor_with_source("nonexistent_method", "AAPL")

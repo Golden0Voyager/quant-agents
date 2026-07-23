@@ -250,3 +250,5 @@ tests/_tmp_cache/
 # Agent planning artifacts
 .omo/
 .scratch/
+*.py,cover
+*.py,cover

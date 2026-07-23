@@ -173,6 +173,19 @@ class TestGetShareholderCount:
         mock_route.assert_called_once_with("get_shareholder_count", "AAPL")
         assert result == "10000 shareholders"
 
+    def test_with_curr_date_includes_date_arg(self):
+        from tradingagents.agents.utils.fundamental_data_tools import get_shareholder_count
+
+        with _make_mock_vendor("data with date") as mock_route:
+            result = get_shareholder_count.invoke({
+                "ticker": "AAPL", "curr_date": "2026-07-03"
+            })
+
+        mock_route.assert_called_once_with(
+            "get_shareholder_count", "AAPL", "2026-07-03"
+        )
+        assert result == "data with date"
+
 
 # ===================================================================
 # get_dividend_history
@@ -189,6 +202,82 @@ class TestGetDividendHistory:
 
         mock_route.assert_called_once_with("get_dividend_history", "AAPL")
         assert result == "dividend history"
+
+
+# ===================================================================
+# get_historical_valuation
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestGetHistoricalValuation:
+    def test_returns_historical_valuation(self):
+        from tradingagents.agents.utils.fundamental_data_tools import get_historical_valuation
+
+        with patch(
+            "tradingagents.dataflows.smartmoney_vendor.get_historical_valuation",
+            return_value="PE percentile: 25%",
+        ) as mock_val:
+            result = get_historical_valuation.invoke({"ticker": "600519.SS"})
+
+        mock_val.assert_called_once_with("600519.SS", None)
+        assert "PE percentile" in result
+
+    def test_error_returns_no_data_message(self):
+        from tradingagents.agents.utils.fundamental_data_tools import get_historical_valuation
+
+        with patch(
+            "tradingagents.dataflows.smartmoney_vendor.get_historical_valuation",
+            side_effect=ValueError("API error"),
+        ):
+            result = get_historical_valuation.invoke({"ticker": "000001.SZ"})
+
+        assert "NO_DATA_AVAILABLE" in result
+        assert "000001.SZ" in result
+
+    def test_is_structured_tool(self):
+        from tradingagents.agents.utils.fundamental_data_tools import get_historical_valuation
+
+        assert hasattr(get_historical_valuation, "name")
+        assert get_historical_valuation.name == "get_historical_valuation"
+
+
+# ===================================================================
+# get_earnings_forecast
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestGetEarningsForecast:
+    def test_returns_earnings_forecast(self):
+        from tradingagents.agents.utils.fundamental_data_tools import get_earnings_forecast
+
+        with patch(
+            "tradingagents.dataflows.smartmoney_vendor.get_earnings_forecast",
+            return_value="EPS growth: 15% YoY",
+        ) as mock_ef:
+            result = get_earnings_forecast.invoke({"ticker": "600519.SS"})
+
+        mock_ef.assert_called_once_with("600519.SS")
+        assert "EPS growth" in result
+
+    def test_error_returns_no_data_message(self):
+        from tradingagents.agents.utils.fundamental_data_tools import get_earnings_forecast
+
+        with patch(
+            "tradingagents.dataflows.smartmoney_vendor.get_earnings_forecast",
+            side_effect=RuntimeError("timeout"),
+        ):
+            result = get_earnings_forecast.invoke({"ticker": "TSLA"})
+
+        assert "NO_DATA_AVAILABLE" in result
+        assert "TSLA" in result
+
+    def test_is_structured_tool(self):
+        from tradingagents.agents.utils.fundamental_data_tools import get_earnings_forecast
+
+        assert hasattr(get_earnings_forecast, "name")
+        assert get_earnings_forecast.name == "get_earnings_forecast"
 
 
 # ===================================================================

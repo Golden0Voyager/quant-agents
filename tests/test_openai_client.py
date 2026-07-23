@@ -136,6 +136,24 @@ class OpenAIClientGetLlmTests(unittest.TestCase):
         _, kwargs = mock_chat.call_args
         self.assertNotIn("rate_limiter", kwargs)
 
+    @patch.dict(os.environ, {"SENSENOVA_API_KEY": "ss-test"}, clear=True)
+    @patch("tradingagents.llm_clients.openai_client.NormalizedChatOpenAI")
+    def test_invalid_requests_per_minute_falls_back_to_zero(self, mock_chat):
+        """Lines 322-329: invalid requests_per_minute triggers the exception
+        handler, logs a warning, and sets rpm=0 (no rate limiter attached)."""
+        import logging
+        with self.assertLogs("tradingagents.llm_clients.openai_client", level=logging.WARNING) as cm:
+            client = OpenAIClient(
+                "sensenova-6.7-flash-lite",
+                provider="sensenova",
+                requests_per_minute="not-a-number",
+            )
+            client.get_llm()
+        self.assertTrue(any("Ignoring invalid" in msg for msg in cm.output))
+        self.assertTrue(any("sensenova" in msg for msg in cm.output))
+        _, kwargs = mock_chat.call_args
+        self.assertNotIn("rate_limiter", kwargs)
+
 
 @pytest.mark.unit
 class NormalizedChatOpenAITests(unittest.TestCase):
@@ -151,19 +169,26 @@ class NormalizedChatOpenAITests(unittest.TestCase):
                 client.with_structured_output(dict)
 
     def test_with_structured_output_suppresses_tool_choice(self):
+        """Cover line 53: tool_choice is set to None for models that
+        don't support it."""
         with patch(
             "tradingagents.llm_clients.openai_client.get_capabilities"
         ) as mock_caps, patch(
-            "tradingagents.llm_clients.openai_client.NormalizedChatOpenAI.with_structured_output",
+            "langchain_openai.ChatOpenAI.with_structured_output",
             return_value="mock_result",
-        ):
+        ) as mock_super:
             caps = MagicMock()
             caps.preferred_structured_method = "function_calling"
             caps.supports_tool_choice = False
             mock_caps.return_value = caps
             client = NormalizedChatOpenAI(model="test-model")
             result = client.with_structured_output(dict)
-            self.assertIsNotNone(result)
+            self.assertEqual(result, "mock_result")
+            # Verify super().with_structured_output was called with
+            # tool_choice=None in kwargs.
+            _, so_kwargs = mock_super.call_args
+            self.assertIn("tool_choice", so_kwargs)
+            self.assertIsNone(so_kwargs["tool_choice"])
 
 
 # =========================================================================
@@ -254,6 +279,20 @@ class DeepSeekPayloadEdgeCases(unittest.TestCase):
             result = self.client._get_request_payload("test")
         # No reasoning_content added since none of the branches fired.
         self.assertNotIn("reasoning_content", result["messages"][0])
+
+    def test_additional_kwargs_reasoning_content(self):
+        """Lines 122-123: when the cache misses but AIMessage has
+        reasoning_content in additional_kwargs, it is forwarded to the
+        outgoing message dict."""
+        self.client._reasoning_cache.clear()
+        mock_payload = {"messages": [{"role": "assistant", "content": "thinking..."}]}
+        mock_msg = AIMessage(content="thinking...")
+        mock_msg.id = None  # no id -> cache miss
+        mock_msg.additional_kwargs = {"reasoning_content": "deep thinking"}
+        with patch.object(NormalizedChatOpenAI, "_get_request_payload", return_value=mock_payload), \
+             patch("tradingagents.llm_clients.openai_client._input_to_messages", return_value=[mock_msg]):
+            result = self.client._get_request_payload("test")
+        self.assertEqual(result["messages"][0]["reasoning_content"], "deep thinking")
 
 
 @pytest.mark.unit
