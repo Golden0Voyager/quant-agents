@@ -703,6 +703,89 @@ def display_complete_report(final_state):
             )
 
 
+def _sync_portfolio_for_my_list() -> None:
+    """Sync holdings and transactions from Google Sheet for the 'my' watchlist.
+
+    Uses the default portfolio configuration (``portfolio.sheet_id`` and
+    ``portfolio.transaction_sheet_id``). The merged ``Portfolio`` is persisted
+    to the local cache so the batch runner can use it as a reference.
+    """
+    from tradingagents.portfolio import (
+        Portfolio,
+        PortfolioRepository,
+        PortfolioSyncService,
+        TransactionSyncService,
+    )
+
+    portfolio_cfg = DEFAULT_CONFIG.get("portfolio", {})
+    sheet_id = portfolio_cfg.get("sheet_id")
+    worksheet = portfolio_cfg.get("worksheet", "total")
+    transaction_sheet_id = portfolio_cfg.get("transaction_sheet_id")
+    transaction_worksheet = portfolio_cfg.get("transaction_worksheet", "stock transitions")
+
+    if not sheet_id and not transaction_sheet_id:
+        console.print(
+            "[yellow]\u26a0 portfolio.sheet_id / transaction_sheet_id 都未配置，"
+            "跳过 'my' watchlist 的 Google Sheet 同步[/yellow]"
+        )
+        return
+
+    repo = PortfolioRepository()
+    # Start from the existing local cache so a failed sync doesn't wipe data.
+    try:
+        portfolio = repo.load() if repo.exists() else Portfolio()
+    except Exception:
+        portfolio = Portfolio()
+
+    # Track whether every configured sync source succeeded. If any source
+    # fails we keep the old local cache intact rather than persisting a
+    # partially-updated (and therefore inconsistent) portfolio.
+    all_syncs_ok = True
+
+    if sheet_id:
+        try:
+            sync_service = PortfolioSyncService(sheet_id=sheet_id, worksheet=worksheet)
+            synced = sync_service.sync()
+            # Merge into the existing portfolio so previously cached
+            # transactions (or transactions from a separate sheet) are not
+            # accidentally wiped when the holdings sheet is refreshed.
+            portfolio.holdings = synced.holdings
+            portfolio.metadata = synced.metadata
+            portfolio.summary = synced.summary
+            console.print(
+                f"[green]\u2713 已从 Google Sheet 同步 {len(portfolio.holdings)} 条持仓[/green]"
+            )
+        except Exception as exc:
+            all_syncs_ok = False
+            console.print(f"[yellow]\u26a0 同步持仓失败：{exc}[/yellow]")
+
+    if transaction_sheet_id:
+        try:
+            tx_sync_service = TransactionSyncService(
+                sheet_id=transaction_sheet_id, worksheet=transaction_worksheet
+            )
+            portfolio.transactions = tx_sync_service.sync()
+            console.print(
+                f"[green]\u2713 已从 Google Sheet 同步 {len(portfolio.transactions)} 条交易记录[/green]"
+            )
+        except Exception as exc:
+            all_syncs_ok = False
+            console.print(f"[yellow]\u26a0 同步交易记录失败：{exc}[/yellow]")
+
+    if not all_syncs_ok:
+        console.print(
+            "[yellow]\u26a0 \u90e8\u5206\u540c\u6b65\u5931\u8d25\uff0c\u672c\u6b21\u4e0d\u4f1a"
+            "\u66f4\u65b0\u672c\u5730\u7f13\u5b58\u4ee5\u514d\u4fdd\u5b58\u4e0d\u4e00\u81f4\u7684\u6570\u636e[/yellow]"
+        )
+        return
+
+    try:
+        repo.save(portfolio)
+        console.print(f"[green]\u2713 已保存到本地缓存：{repo.path}[/green]")
+    except Exception as exc:
+        console.print(f"[yellow]\u26a0 保存本地缓存失败：{exc}[/yellow]")
+
+
 def _resolve_holdings(
     holdings_sheet: str | None,
     holdings_worksheet: str,
@@ -1058,6 +1141,20 @@ def run_batch_analysis(
     function can run in CI/CD pipelines (e.g. GitHub Actions).
     When *force* is True, existing reports are re-generated even if they exist.
     """
+    # For the special 'my' watchlist, always pull the latest holdings and
+    # transactions from Google Sheet so the batch runs against fresh data.
+    # This intentionally overrides any holdings dict already resolved from the
+    # stale local cache; callers that need a custom holdings sheet should use
+    # another watchlist.
+    if watchlist_name == "my":
+        console.print(
+            "[bold cyan]\u68c0\u6d4b\u5230 'my' watchlist\uff0c\u6b63\u5728\u4ece Google Sheet "
+            "\u540c\u6b65\u6700\u65b0\u6301\u4ed3\u548c\u4ea4\u6613\u8bb0\u5f55...[/bold cyan]"
+        )
+        _sync_portfolio_for_my_list()
+        # Force the runner to reload holdings from the freshly synced cache.
+        holdings = None
+
     date_stamp = __import__("datetime").datetime.now().strftime("%Y%m%d")
     timestamp = __import__("datetime").datetime.now().strftime("%Y%m%d_%H%M%S")
     if output_dir is None:
