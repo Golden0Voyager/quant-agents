@@ -89,5 +89,7 @@ ignore = ["E501", "E402", "F403", "F405", "N802", "N805", "N806", "UP047"]
 combine-as-imports = true
 
 [tool.mypy]
+# Pin to the CI interpreter so local (possibly newer) Pythons and CI agree.
+python_version = "3.12"
 ignore_missing_imports = true
 files = ["tradingagents/", "cli/"]

@@ -73,7 +73,7 @@ class BatchRunner:
         self.dashboard = BatchDashboard(total=len(tickers), profile_name=profile_config.get("name", "default"))
         # Set by run() once the Live context owns these — _refresh_display() reads
         # them. When unset (e.g. tests calling _run_single directly), refresh is a no-op.
-        self._layout = None
+        self._layout: Any = None
         self._start_time: float | None = None
         # Protect shared mutable state across worker threads
         self._lock = threading.RLock()
