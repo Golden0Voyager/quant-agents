@@ -4,7 +4,7 @@ from typing import Annotated
 
 import pandas as pd
 
-SavePathType = Annotated[str, "File path to save data. If None, data is not saved."]
+SavePathType = Annotated[str | None, "File path to save data. If None, data is not saved."]
 
 # Tickers can contain letters, digits, dot, dash, underscore, caret
 # (index symbols like ^GSPC), equals (futures like GC=F), and plus

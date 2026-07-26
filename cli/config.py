@@ -1,4 +1,7 @@
-CLI_CONFIG = {
+from typing import Any
+
+# Heterogeneous str/float values — keep Any so callers can assign without casts.
+CLI_CONFIG: dict[str, Any] = {
     # Announcements
     "announcements_url": "https://api.tauric.ai/v1/announcements",
     "announcements_timeout": 1.0,

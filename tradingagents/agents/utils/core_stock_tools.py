@@ -32,7 +32,7 @@ def get_stock_data(
 @tool
 def get_chip_distribution(
     symbol: Annotated[str, "A-share ticker symbol e.g. 600519.SS or 000001.SZ"],
-    curr_date: Annotated[str, "Current date you are trading at, yyyy-mm-dd"] = None,
+    curr_date: Annotated[str | None, "Current date you are trading at, yyyy-mm-dd"] = None,
 ) -> str:
     """
     Retrieve chip distribution (筹码分布), average holder cost, concentration, and cost bias.

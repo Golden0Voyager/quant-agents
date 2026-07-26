@@ -10,6 +10,7 @@ import sqlite3
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 from langgraph.checkpoint.base import get_serializable_checkpoint_metadata
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -102,7 +103,7 @@ def checkpoint_step(data_dir: str | Path, ticker: str, date: str) -> int | None:
         return None
     tid = thread_id(ticker, date)
     with get_checkpointer(data_dir, ticker) as saver:
-        config = {"configurable": {"thread_id": tid}}
+        config: Any = {"configurable": {"thread_id": tid}}
         cp = saver.get_tuple(config)
         if cp is None:
             return None

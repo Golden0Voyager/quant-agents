@@ -27,6 +27,7 @@ without manual conversion work.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 Price = tuple[float, float]
 
@@ -35,7 +36,9 @@ Price = tuple[float, float]
 # After that, all edits go through pricing.yaml — this dict is never consulted
 # at lookup time.
 
-_DEFAULT_PRICING: dict[str, dict[str, Price]] = {
+# Values are either a ``(input, output)`` USD tuple or a dict-format entry
+# with an explicit native currency (converted to USD/M by _load_pricing_yaml).
+_DEFAULT_PRICING: dict[str, dict[str, Price | dict[str, Any]]] = {
     # Agnes AI: free tier (rate-limited but unlimited in duration).
     # https://agnes-ai.com — see also docs/api/Agnes_AI_API_Report.md
     "agnes": {

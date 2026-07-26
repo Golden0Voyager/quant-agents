@@ -153,6 +153,7 @@ def _akshare_retry(
                 time.sleep(delay)
             else:
                 raise
+    raise RuntimeError("unreachable: retry loop always returns or raises")  # pragma: no cover
 
 
 @contextmanager

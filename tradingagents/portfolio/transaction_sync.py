@@ -19,7 +19,7 @@ _COLUMN_MAP = {
     "date": "交易时间",
     "ticker": "代码",
     "name": "名称",
-    "price": "成本单价",
+    "price": ("成本单价", "成交单价"),
     "action": "动作",
     "shares": "份额变动",
     "fee": "手续费",
@@ -61,10 +61,18 @@ def _resolve_column_indices(headers: list[str]) -> dict[str, int]:
     """Map field names to column indices based on header row."""
     indices: dict[str, int] = {}
     for field, header_name in _COLUMN_MAP.items():
-        try:
-            indices[field] = headers.index(header_name)
-        except ValueError:
-            logger.warning("Column '%s' not found in headers: %s", header_name, headers)
+        aliases = header_name if isinstance(header_name, tuple) else (header_name,)
+        for alias in aliases:
+            try:
+                indices[field] = headers.index(alias)
+                break
+            except ValueError:
+                continue
+        else:
+            logger.warning(
+                "Column for field '%s' (aliases: %s) not found in headers: %s",
+                field, aliases, headers,
+            )
     return indices
 
 

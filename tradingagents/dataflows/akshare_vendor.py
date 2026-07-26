@@ -11,7 +11,7 @@ import logging
 import math
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 
 import akshare as ak
 import pandas as pd
@@ -36,7 +36,8 @@ _original_get_tqdm = ak.utils.tqdm.get_tqdm
 
 
 def _patched_get_tqdm(enable: bool = True):
-    tqdm_cls = _original_get_tqdm(enable)
+    # Any: the real base class is resolved at runtime by akshare's get_tqdm.
+    tqdm_cls: Any = _original_get_tqdm(enable)
     if not enable:
         return tqdm_cls
 
@@ -168,8 +169,8 @@ def _yjbb_report_date_for(curr_date: str | None) -> str:
     so we lag by ~one month relative to the period-end.
     """
     if curr_date:
-        y, m, _ = curr_date.split("-")
-        y, m = int(y), int(m)
+        y_str, m_str, _ = curr_date.split("-")
+        y, m = int(y_str), int(m_str)
     else:
         now = datetime.now()
         y, m = now.year, now.month

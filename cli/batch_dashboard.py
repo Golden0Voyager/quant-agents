@@ -24,7 +24,7 @@ class BatchDashboard(AnalysisDashboard):
         self.readiness_total: int = 0
         self.per_ticker_meta: dict[str, dict] = {}  # ticker -> {stage, progress, agent}
 
-    def update_progress(self, current_ticker: str, completed: int, failed: int) -> None:
+    def update_progress(self, current_ticker: str | None, completed: int, failed: int) -> None:
         self.current_ticker = current_ticker
         self.completed = completed
         self.failed = failed

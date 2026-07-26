@@ -22,7 +22,9 @@ class ConditionalLogic:
     def _continue_tool_or_clear(state: AgentState, tool_node: str, clear_node: str) -> str:
         """Common helper: return ``tool_node`` if the last message has tool_calls, else ``clear_node``."""
         last_message = state["messages"][-1]
-        return tool_node if last_message.tool_calls else clear_node
+        # getattr: only AIMessage carries tool_calls; other message types in the
+        # union (Human/System/Tool...) simply route to the clear node.
+        return tool_node if getattr(last_message, "tool_calls", None) else clear_node
 
     def should_continue_market(self, state: AgentState):
         return self._continue_tool_or_clear(state, "tools_market", "Msg Clear Market")

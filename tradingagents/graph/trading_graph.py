@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import yfinance as yf
 
 logger = logging.getLogger(__name__)
@@ -80,7 +81,7 @@ class TradingAgentsGraph:
         self,
         selected_analysts=None,
         debug=False,
-        config: dict[str, Any] = None,
+        config: dict[str, Any] | None = None,
         callbacks: list | None = None,
     ):
         """Initialize the trading agents graph and components.
@@ -139,15 +140,16 @@ class TradingAgentsGraph:
         self.signal_processor = SignalProcessor(self.quick_thinking_llm)
 
         # State tracking
-        self.curr_state = None
-        self.ticker = None
-        self.log_states_dict = {}  # date to full state dict
+        self.curr_state: dict[str, Any] | None = None
+        self.ticker: str | None = None
+        self.log_states_dict: dict[str, dict[str, Any]] = {}  # date to full state dict
 
         # Set up the graph: keep the workflow for recompilation with a checkpointer.
         self.selected_analysts = selected_analysts
         self.workflow = self.graph_setup.setup_graph(selected_analysts)
         self.graph = self.workflow.compile()
-        self._checkpointer_ctx = None
+        # Any: _GeneratorContextManager generics aren't worth spelling out here.
+        self._checkpointer_ctx: Any = None
 
     def _get_provider_kwargs(self) -> dict[str, Any]:
         """Get provider-specific kwargs for LLM client creation."""
@@ -383,7 +385,20 @@ class TradingAgentsGraph:
 
         try:
             start = datetime.strptime(trade_date, "%Y-%m-%d")
+            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+            # If the required holding period hasn't fully elapsed yet, skip
+            # resolving this outcome — we can't fetch data from the future.
+            if start + timedelta(days=holding_days) > today:
+                return None, None, None
+
             end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays
+
+            # Cap the requested end date at today to avoid load_ohlcv's
+            # stale-data check comparing real data against a future date.
+            if end > today:
+                end = today
+
             end_str = end.strftime("%Y-%m-%d")
 
             if asset_type == "crypto":
@@ -514,7 +529,7 @@ class TradingAgentsGraph:
             raw, alpha, days = self._fetch_returns(
                 ticker, entry["date"], benchmark=benchmark, asset_type=asset_type,
             )
-            if raw is None:
+            if raw is None or alpha is None:
                 continue  # price not available yet — try again next run
             reflection = self.reflector.reflect_on_final_decision(
                 final_decision=entry.get("decision", ""),

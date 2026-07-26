@@ -239,7 +239,7 @@ def get_research_reports(
 @tool
 def get_institutional_intelligence(
     ticker: Annotated[str, "Ticker symbol of the company e.g. 600519.SS"],
-    curr_date: Annotated[str, "Current date you are trading at, yyyy-mm-dd"] = None,
+    curr_date: Annotated[str | None, "Current date you are trading at, yyyy-mm-dd"] = None,
 ) -> str:
     """
     Retrieve merged institutional intelligence (survey frequency, visiting funds/brokers, and shareholder positioning).

@@ -136,7 +136,7 @@ def _fetch_subreddit_rss(
             "created_utc": _iso_to_timestamp(
                 published_el.text if published_el is not None else None
             ),
-            "selftext": _strip_html(content_el.text if content_el is not None else ""),
+            "selftext": _strip_html((content_el.text if content_el is not None else "") or ""),
             "source": "rss",
         })
     return posts
