@@ -383,7 +383,20 @@ class TradingAgentsGraph:
 
         try:
             start = datetime.strptime(trade_date, "%Y-%m-%d")
+            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+            # If the required holding period hasn't fully elapsed yet, skip
+            # resolving this outcome — we can't fetch data from the future.
+            if start + timedelta(days=holding_days) > today:
+                return None, None, None
+
             end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays
+
+            # Cap the requested end date at today to avoid load_ohlcv's
+            # stale-data check comparing real data against a future date.
+            if end > today:
+                end = today
+
             end_str = end.strftime("%Y-%m-%d")
 
             if asset_type == "crypto":

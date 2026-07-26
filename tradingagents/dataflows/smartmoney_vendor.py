@@ -88,6 +88,13 @@ def get_stock_data(
     )
 
     if df is None or df.empty:
+        # Benchmark indices (e.g. 399001.SZ) may be requested as tickers.
+        # Try the index table before giving up on the local DB fallback layer.
+        try:
+            return get_index_daily(symbol, start_date, end_date)
+        except (NoMarketDataError, RuntimeError):
+            pass
+
         raise RuntimeError(
             f"No data in quant_core.db for {symbol} between {start_date} and {end_date}"
         )
@@ -1689,12 +1696,14 @@ def get_chip_distribution(symbol: str, curr_date: str | None = None) -> str:
         params.append(curr_date)
 
     # Try chip_distribution_em first, then chip_distribution
+    # avg_cost > 0 过滤采集端历史上写入的全零伪数据（2026-07-21 起换手率缺失
+    # 导致筹码计算静默输出全 0 行），自动回退到最近一批有效数据
     df = _df_from_sql(
         f"""
         SELECT trade_date, profit_ratio, avg_cost, cost_90_low, cost_90_high,
                concentration_90, cost_70_low, cost_70_high, concentration_70, chip_concentration
         FROM chip_distribution_em
-        WHERE ts_code = ?{date_filter} AND profit_ratio IS NOT NULL
+        WHERE ts_code = ?{date_filter} AND profit_ratio IS NOT NULL AND avg_cost > 0
         ORDER BY trade_date DESC
         LIMIT 5
         """,
@@ -1707,7 +1716,7 @@ def get_chip_distribution(symbol: str, curr_date: str | None = None) -> str:
             SELECT trade_date, profit_ratio, avg_cost, cost_90_low, cost_90_high,
                    concentration_90, cost_70_low, cost_70_high, concentration_70, chip_concentration
             FROM chip_distribution
-            WHERE ts_code = ?{date_filter} AND profit_ratio IS NOT NULL
+            WHERE ts_code = ?{date_filter} AND profit_ratio IS NOT NULL AND avg_cost > 0
             ORDER BY trade_date DESC
             LIMIT 5
             """,
@@ -1874,13 +1883,23 @@ def get_historical_valuation(symbol: str, curr_date: str | None = None) -> str:
     elif pe_pct > 80.0:
         synthesis = "🔴 极高估值区: PE处于近3年顶部的80%以上分位，溢价过高"
 
+    # 股息率可能在最新行缺失（采集端雪球 token 失效时整日为 NULL），
+    # 向前回退取最近非空值并标注数据日期
+    div_yield_str = "N/A"
+    dy_series = df["dividend_yield"].dropna() if "dividend_yield" in df.columns else None
+    if dy_series is not None and not dy_series.empty:
+        dy_idx = dy_series.index[0]
+        dy_val = dy_series.iloc[0]
+        dy_date = df.loc[dy_idx, "trade_date"]
+        div_yield_str = f"{dy_val}%" if dy_date == latest["trade_date"] else f"{dy_val}% (截至 {dy_date})"
+
     lines = [
         stale_warn + sample_notice + cyclical_warning + f"## {symbol.upper()} Historical Valuation Percentile (近3年估值分位数)",
         f"Source: quant_core.db (Latest Date: {latest['trade_date']}, Total Bars: {len(df)})",
         f"- PE (TTM): {curr_pe:.2f} (处于近3年 {pe_pct:.1f}% 分位数)",
         f"- PB: {curr_pb:.2f} (处于近3年 {pb_pct:.1f}% 分位数)",
         f"- 所属行业对比: {sector_info}",
-        f"- 股息率 (Dividend Yield): {latest['dividend_yield'] if latest['dividend_yield'] is not None else 'N/A'}%",
+        f"- 股息率 (Dividend Yield): {div_yield_str}",
         f"- 最新 ROE: {f'{latest_roe:.2f}%' if latest_roe is not None else 'N/A'}",
         f"- 估值因子综合判定: {synthesis}",
     ]
