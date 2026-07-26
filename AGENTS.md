@@ -17,6 +17,7 @@ uv run python -m cli.main batch my-list     # Batch run (Rich TUI)
 uv run python -m cli.main batch my-list --output-dir ./reports
 uv run python -m pytest -m unit             # Unit tests (~2500 total)
 uv run python -m pytest -m integration      # Needs API keys
+uv run python scripts/doctor.py             # Environment self-check (add --network for akshare probe)
 ```
 
 ## Architecture
@@ -79,7 +80,7 @@ Market data validation via `market_data_validator.py` (grounding numerical claim
 - `batch_summary.md` + `batch_summary.json`
 - `failures.log`
 
-Audit: `python scripts/report_auditor.py reports/YYYYMMDD_batch_<list>`
+Audit: `uv run python scripts/report_auditor.py reports/YYYYMMDD_batch_<list>`
 
 ## Critical Implementation Notes
 

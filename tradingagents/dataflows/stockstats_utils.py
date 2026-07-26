@@ -3,6 +3,7 @@ import io
 import logging
 import os
 import time
+from functools import partial
 from typing import Annotated
 
 import pandas as pd
@@ -258,7 +259,7 @@ def _load_ohlcv_from_akshare(
 
             with no_proxy():
                 df = _akshare_retry(
-                    lambda f=fetch, c=code: f(c),
+                    partial(fetch, code),
                     max_retries=2,
                     base_delay=1.0,
                 )

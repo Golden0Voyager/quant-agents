@@ -36,7 +36,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv sync
-      - run: uv run mypy tradingagents cli --ignore-missing-imports || true
+      - run: uv run mypy tradingagents cli --ignore-missing-imports
 
   test-unit:
     runs-on: ubuntu-latest
@@ -88,7 +88,7 @@ jobs:
       - name: Run integration tests
         run: |
           if [ -z "$OPENAI_API_KEY" ]; then
-            echo "Skipping integration tests: OPENAI_API_KEY not set"
+            echo "::warning::Integration tests skipped: OPENAI_API_KEY not set"
             exit 0
           fi
           uv run pytest -m integration --no-header -q

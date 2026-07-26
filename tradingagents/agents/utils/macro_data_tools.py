@@ -14,7 +14,7 @@ def get_macro_indicators(
         "'real_gdp', 'vix', 'pmi', 'm2', 'social_finance', or a raw FRED "
         "series ID such as 'CPIAUCSL'.",
     ],
-    curr_date: Annotated[str, "Current date in yyyy-mm-dd format; the end of the window"] = None,
+    curr_date: Annotated[str | None, "Current date in yyyy-mm-dd format; the end of the window"] = None,
     look_back_days: Annotated[
         int | None, "Trailing window length in days; omit for a 1-year window"
     ] = None,

@@ -2,6 +2,7 @@ import json
 import os
 from datetime import datetime
 from io import StringIO
+from typing import Literal, overload
 
 import pandas as pd
 import requests
@@ -58,6 +59,17 @@ def format_datetime_for_api(date_input) -> str:
 class AlphaVantageRateLimitError(VendorRateLimitError):
     """Raised when the Alpha Vantage API rate limit is exceeded."""
     pass
+
+# ``parse_json=False`` always returns the raw response text; only the
+# ``parse_json=True`` branch can yield a dict. Overloads let call sites that
+# request CSV keep a plain ``str`` without isinstance narrowing.
+@overload
+def _make_api_request(function_name: str, params: dict, parse_json: Literal[False] = ...) -> str: ...
+
+
+@overload
+def _make_api_request(function_name: str, params: dict, parse_json: Literal[True]) -> dict | str: ...
+
 
 def _make_api_request(function_name: str, params: dict, parse_json: bool = False) -> dict | str:
     """Helper function to make API requests and handle responses.
