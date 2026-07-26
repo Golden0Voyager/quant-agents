@@ -26,7 +26,7 @@ class TradingMemoryLog:
     _path_locks: dict[str, threading.Lock] = {}
     _path_locks_guard = threading.Lock()
 
-    def __init__(self, config: dict = None):
+    def __init__(self, config: dict | None = None):
         cfg = config or {}
         self._log_path = None
         path = cfg.get("memory_log_path")
@@ -104,7 +104,8 @@ class TradingMemoryLog:
         if not entries:
             return ""
 
-        same, cross = [], []
+        same: list[dict] = []
+        cross: list[dict] = []
         for e in reversed(entries):
             if len(same) >= n_same and len(cross) >= n_cross:
                 # Path is exercised by

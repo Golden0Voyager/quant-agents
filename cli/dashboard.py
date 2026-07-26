@@ -206,17 +206,17 @@ class AnalysisDashboard:
                 if self.report_sections.get(s):
                     parts.append(f"### {SECTION_TITLES.get(s, s)}\n{self.report_sections[s]}")
 
-        if self.report_sections.get("investment_plan"):
+        if investment_plan := self.report_sections.get("investment_plan"):
             parts.append("## Research Team Decision")
-            parts.append(self.report_sections["investment_plan"])
+            parts.append(investment_plan)
 
-        if self.report_sections.get("trader_investment_plan"):
+        if trader_plan := self.report_sections.get("trader_investment_plan"):
             parts.append("## Trading Team Plan")
-            parts.append(self.report_sections["trader_investment_plan"])
+            parts.append(trader_plan)
 
-        if self.report_sections.get("final_trade_decision"):
+        if final_decision := self.report_sections.get("final_trade_decision"):
             parts.append("## Portfolio Management Decision")
-            parts.append(self.report_sections["final_trade_decision"])
+            parts.append(final_decision)
 
         self.final_report = "\n\n".join(parts) if parts else None
 

@@ -13,6 +13,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from rich.console import Console
 from rich.live import Live
@@ -1017,7 +1018,7 @@ class BatchRunner:
             lines.append("|--------|---------|--------|-------|------|------|------------|--------|---------|")
 
         all_tickers = sorted(set(self.tickers) | set(self.summaries.keys()) | set(self.failures.keys()))
-        json_rows = []
+        json_rows: list[dict[str, Any]] = []
         for ticker in all_tickers:
             per_ticker_stats = self.batch_stats["per_ticker"].get(ticker, {})
             tokens_cell, cost_cell = self._format_token_cost_cells(per_ticker_stats)
@@ -1155,7 +1156,7 @@ class BatchRunner:
 
         # Write JSON summary for downstream processing
         json_path = self.output_dir / "batch_summary.json"
-        json_output = {
+        json_output: dict[str, Any] = {
             "rows": json_rows,
             "totals": {
                 "tokens_in": self.batch_stats.get("tokens_in", 0),

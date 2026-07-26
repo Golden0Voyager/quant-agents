@@ -91,23 +91,3 @@ combine-as-imports = true
 [tool.mypy]
 ignore_missing_imports = true
 files = ["tradingagents/", "cli/"]
-
-# Legacy-error ratchet: these modules had pre-existing mypy errors when the CI
-# typecheck gate was made blocking. Fix a module, then remove it from this list.
-# Do NOT add new modules here.
-[[tool.mypy.overrides]]
-module = [
-    "cli.announcements",
-    "cli.batch_runner",
-    "cli.dashboard",
-    "cli.main",
-    "tradingagents.agents.utils.fundamental_data_tools",
-    "tradingagents.agents.utils.memory",
-    "tradingagents.dataflows.akshare_vendor",
-    "tradingagents.dataflows.alpha_vantage_fundamentals",
-    "tradingagents.dataflows.config",
-    "tradingagents.dataflows.interface",
-    "tradingagents.dataflows.y_finance",
-    "tradingagents.graph.trading_graph",
-]
-ignore_errors = true

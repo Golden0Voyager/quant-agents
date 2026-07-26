@@ -253,7 +253,7 @@ def get_user_selections(preselected_tickers: list[str] | None = None) -> dict | 
 
         # For Ollama, surface the resolved endpoint (OLLAMA_BASE_URL vs default)
         # before model selection so it's obvious where we're connecting.
-        if selected_llm_provider == "ollama":
+        if selected_llm_provider == "ollama" and backend_url:
             confirm_ollama_endpoint(backend_url)
 
         # Confirm the provider's API key is present; prompt the user to paste
@@ -321,7 +321,10 @@ def get_user_selections(preselected_tickers: list[str] | None = None) -> dict | 
     }
 
 
-def get_analysis_date():
+# Intentionally shadows cli.utils.get_analysis_date (pulled in by the star
+# import above): the CLI flow uses this prompt-based variant, and tests patch
+# it by this module-level name.
+def get_analysis_date():  # type: ignore[no-redef]
     """Get the analysis date from user input."""
     while True:
         date_str = typer.prompt("", default=datetime.datetime.now().strftime("%Y-%m-%d"))
@@ -432,7 +435,7 @@ def select_watchlist_interactive() -> tuple[str, list[str]]:
     return name, tickers
 
 
-def select_profile_interactive() -> dict:
+def select_profile_interactive() -> dict | None:
     """Let user pick a saved profile or create a new one. Returns profile config dict."""
     existing = list_profiles()
     if existing:
@@ -995,9 +998,9 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
 
         return wrapper
 
-    dashboard.add_message = save_message_decorator(dashboard, "add_message")
-    dashboard.add_tool_call = save_tool_call_decorator(dashboard, "add_tool_call")
-    dashboard.update_report_section = save_report_section_decorator(dashboard, "update_report_section")
+    dashboard.add_message = save_message_decorator(dashboard, "add_message")  # type: ignore[method-assign]
+    dashboard.add_tool_call = save_tool_call_decorator(dashboard, "add_tool_call")  # type: ignore[method-assign]
+    dashboard.update_report_section = save_report_section_decorator(dashboard, "update_report_section")  # type: ignore[method-assign]
 
     # Now start the display layout
     layout = create_dashboard_layout()
@@ -1330,6 +1333,10 @@ def analyze(
         help="Number of concurrent workers for batch analysis (default: 1). Values > 1 degrade the dashboard to a batch summary view.",
     ),
 ):
+    # Declared up front: headless/direct branches assign a dict, while the
+    # interactive branch may hold None until a profile is selected or created.
+    profile_config: dict | None
+
     if clear_checkpoints:
         from tradingagents.graph.checkpointer import clear_all_checkpoints
 
@@ -1363,12 +1370,12 @@ def analyze(
             raise typer.Exit(1)
 
         # Merge config file settings with defaults
-        profile_config = default_config()
-        profile_config.update({k: v for k, v in cfg.get("config", {}).items() if v is not None})
+        headless_config = default_config()
+        headless_config.update({k: v for k, v in cfg.get("config", {}).items() if v is not None})
 
         run_batch_analysis(
             ticker_list,
-            profile_config,
+            headless_config,
             checkpoint=cfg.get("checkpoint", checkpoint),
             output_dir=Path(cfg["output_dir"]) if cfg.get("output_dir") else (Path(output_dir) if output_dir else None),
             holdings=holdings,
@@ -1506,12 +1513,12 @@ def analyze(
                 default_date = datetime.datetime.now().strftime("%Y-%m-%d")
                 console.print("\n[bold cyan]Step 2: Analysis Date[/bold cyan]")
                 console.print(f"[dim]Using default date: {default_date}[/dim]")
-                tickers = parsed_tickers
-                if len(tickers) > 1:
+                tickers_list = parsed_tickers
+                if len(tickers_list) > 1:
                     if workers <= 1:
                         workers = ask_workers()
                     run_batch_analysis(
-                        tickers,
+                        tickers_list,
                         profile_config,
                         checkpoint=checkpoint,
                         output_dir=Path(output_dir) if output_dir else None,
@@ -1520,7 +1527,7 @@ def analyze(
                     )
                 else:
                     run_batch_analysis(
-                        tickers,
+                        tickers_list,
                         profile_config,
                         checkpoint=checkpoint,
                         output_dir=Path(output_dir) if output_dir else None,
@@ -1532,8 +1539,8 @@ def analyze(
         selections = get_user_selections()
         if selections is None:
             return
-        tickers = selections.get("tickers", [selections["ticker"]])
-        if len(tickers) > 1:
+        tickers_list = selections.get("tickers", [selections["ticker"]])
+        if len(tickers_list) > 1:
             # Batch mode for multiple custom tickers
             profile_config = {
                 "analysts": [a.value for a in selections["analysts"]],
@@ -1551,7 +1558,7 @@ def analyze(
             if workers <= 1:
                 workers = ask_workers()
             run_batch_analysis(
-                tickers,
+                tickers_list,
                 profile_config,
                 checkpoint=checkpoint,
                 output_dir=Path(output_dir) if output_dir else None,

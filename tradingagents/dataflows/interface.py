@@ -198,7 +198,9 @@ class VendorRouteResult:
     vendor: str | None
 
 # Mapping of methods to their vendor-specific implementations
-VENDOR_METHODS = {
+# method -> vendor -> implementation (a callable, or a list of callables
+# tried in order). Any keeps the heterogeneous vendor signatures assignable.
+VENDOR_METHODS: dict[str, dict[str, Any]] = {
     # core_stock_apis
     "get_stock_data": {
         "smartmoney_db": get_smartmoney_stock_data,
@@ -339,7 +341,7 @@ def get_category_for_method(method: str) -> str:
             return category
     raise ValueError(f"Method '{method}' not found in any category")
 
-def get_vendor(category: str, method: str = None) -> str:
+def get_vendor(category: str, method: str | None = None) -> str:
     """Get the configured vendor for a data category or specific tool method.
     Tool-level configuration takes precedence over category-level.
     """

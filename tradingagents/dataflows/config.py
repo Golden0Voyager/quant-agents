@@ -6,11 +6,12 @@ import tradingagents.default_config as default_config
 _config: dict | None = None
 
 
-def initialize_config():
+def initialize_config() -> dict:
     """Initialize the configuration with default values."""
     global _config
     if _config is None:
         _config = deepcopy(default_config.DEFAULT_CONFIG)
+    return _config
 
 
 def set_config(config: dict):
@@ -21,20 +22,18 @@ def set_config(config: dict):
     keeps the other nested keys from the default; scalar keys are replaced.
     """
     global _config
-    initialize_config()
+    cfg = initialize_config()
     incoming = deepcopy(config)
     for key, value in incoming.items():
-        if isinstance(value, dict) and isinstance(_config.get(key), dict):
-            _config[key].update(value)
+        if isinstance(value, dict) and isinstance(cfg.get(key), dict):
+            cfg[key].update(value)
         else:
-            _config[key] = value
+            cfg[key] = value
 
 
 def get_config() -> dict:
     """Get the current configuration."""
-    if _config is None:
-        initialize_config()
-    return deepcopy(_config)
+    return deepcopy(initialize_config())
 
 
 # Initialize with default config
