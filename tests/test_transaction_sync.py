@@ -157,6 +157,20 @@ class ResolveColumnIndicesTests(unittest.TestCase):
         indices = _resolve_column_indices(headers)
         self.assertEqual(indices["date"], 0)
 
+    def test_price_alias_cheng_jiao_dan_jia_resolves(self):
+        """成交单价 must resolve to the 'price' field (alias added in 3ab5923)."""
+        headers = ["交易时间", "代码", "名称", "成交单价", "动作", "份额变动", "手续费", "资金变动", "网格建仓"]
+        indices = _resolve_column_indices(headers)
+        self.assertIn("price", indices)
+        self.assertEqual(indices["price"], 3)
+
+    def test_cheng_ben_dan_jia_takes_priority_over_cheng_jiao(self):
+        """If both aliases are present, the first one found (成本单价) wins."""
+        headers = ["交易时间", "代码", "名称", "成本单价", "成交单价", "动作", "份额变动", "手续费", "资金变动", "网格建仓"]
+        indices = _resolve_column_indices(headers)
+        # 成本单价 is at index 3, 成交单价 at 4; first alias wins.
+        self.assertEqual(indices["price"], 3)
+
 
 @pytest.mark.unit
 class TransformRowTests(unittest.TestCase):
@@ -167,6 +181,16 @@ class TransformRowTests(unittest.TestCase):
             "交易时间", "代码", "名称", "成本单价", "动作", "份额变动", "手续费", "资金变动", "网格建仓"
         ]
         self.full_indices = _resolve_column_indices(self.full_headers)
+
+    def test_price_parsed_via_cheng_jiao_dan_jia_alias(self):
+        """成交单价 header alias (added in 3ab5923) must produce correct price."""
+        headers = ["交易时间", "代码", "名称", "成交单价", "动作", "份额变动", "手续费", "资金变动", "网格建仓"]
+        indices = _resolve_column_indices(headers)
+        row = ["2024-06-01", "600519", "贵州茅台", "1850.00", "买入", "50", "4.50", "-92500.00", ""]
+        tx = _transform_row(row, indices)
+        self.assertIsNotNone(tx)
+        self.assertEqual(tx.price, 1850.0)
+        self.assertEqual(tx.ticker, "600519")
 
     def test_transforms_full_valid_row(self):
         row = ["2024-01-15", "600519", "贵州茅台", "150.50", "买入", "100", "5.00", "-15050.00", ""]

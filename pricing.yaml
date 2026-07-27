@@ -32,6 +32,7 @@ openrouter:
   nvidia/nemotron-3-super-120b-a12b:free: [0.0, 0.0]
 
 sensenova:
-  deepseek-v4-flash: [0.14, 0.28]     # input(cache hit ¥0.02, miss ¥1) / output ¥2
+  # SenseNova also routes DeepSeek V4-Flash (same USD rate as deepseek: section above).
+  deepseek-v4-flash: [0.14, 0.28]
   sensenova-6.7-flash-lite: [0.22, 0.66]  # input ¥1.5 / output ¥4.5
 

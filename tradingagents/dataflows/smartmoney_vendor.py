@@ -29,6 +29,17 @@ logger = logging.getLogger(__name__)
 DEFAULT_DB_PATH = os.path.expanduser("~/Code/quant_data/quant_core.db")
 _DB_PATH = os.getenv("QUANT_DB_PATH", DEFAULT_DB_PATH)
 
+# ---------------------------------------------------------------------------
+# Domain constants
+# ---------------------------------------------------------------------------
+# Industries known for the "low-PE trap" at cyclical peaks: very low PE
+# (< 8) in these sectors often signals a profit top, NOT cheap valuation.
+# Used by get_historical_valuation() to inject a guard warning.
+CYCLICAL_INDUSTRIES: frozenset[str] = frozenset({
+    "钢铁", "煤炭", "煤炭开采", "航运", "海运",
+    "化工", "基础化工", "有色金属", "猪肉", "养殖业",
+})
+
 
 def _to_smartmoney_symbol(symbol: str) -> str:
     """Convert TradingAgents ticker format to quant_core.db ts_code format.
@@ -1864,7 +1875,6 @@ def get_historical_valuation(symbol: str, curr_date: str | None = None) -> str:
                 diff_pct = ((curr_pe - avg_pe) / avg_pe) * 100.0 if avg_pe > 0 else 0.0
                 sector_info = f"{ind_name} (行业均值PE: {avg_pe:.2f}, 相对行业折溢价: {diff_pct:+.1f}%)"
 
-            CYCLICAL_INDUSTRIES = {"钢铁", "煤炭", "煤炭开采", "航运", "海运", "化工", "基础化工", "有色金属", "猪肉", "养殖业"}
             if ind_name in CYCLICAL_INDUSTRIES and curr_pe < 8.0:
                 cyclical_warning = (
                     "\n> ⚠️ [周期股景气顶点预警]: 周期性行业 (如钢铁/煤炭/航运/化工) 极低PE (<8) 常出现在盈利顶点 (周期顶部)，"
