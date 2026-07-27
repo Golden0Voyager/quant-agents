@@ -201,11 +201,15 @@ MODEL_OPTIONS: ProviderModeOptions = {
         "quick": [
             ("DeepSeek-V4-Flash - Latest V4, 1M ctx", "deepseek-ai/DeepSeek-V4-Flash"),
             ("Qwen3.5-397B-A17B - Alibaba MoE flagship", "Qwen/Qwen3.5-397B-A17B"),
+            ("Step-3.7-Flash - StepFun 128K ctx", "stepfun-ai/Step-3.7-Flash"),
+            ("MiniMax-M3 - MiniMax flagship", "MiniMax/MiniMax-M3"),
             ("Custom model ID", "custom"),
         ],
         "deep": [
+            ("DeepSeek-V4-Pro - Full capacity reasoning", "deepseek-ai/DeepSeek-V4-Pro"),
             ("DeepSeek-V4-Flash - Latest V4, 1M ctx", "deepseek-ai/DeepSeek-V4-Flash"),
-            ("GLM-5.1 - Zhipu AI latest", "ZhipuAI/GLM-5.1"),
+            ("GLM-5.2 - Zhipu AI flagship", "ZhipuAI/GLM-5.2"),
+            ("Qwen3.5-397B-A17B - Alibaba MoE flagship", "Qwen/Qwen3.5-397B-A17B"),
             ("Custom model ID", "custom"),
         ],
     },
