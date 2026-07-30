@@ -223,7 +223,38 @@ def _hit_pct(rows: list[dict], pred) -> str:
     return f"{100.0 * sum(1 for o in rows if pred(o)) / len(rows):.1f}%"
 
 
-def render_report(outcomes: list[dict]) -> str:
+def compute_regime_context(outcomes: list[dict]) -> str:
+    """样本窗口的市况上下文：基准在窗口内的累计涨跌幅。
+
+    防止把单一市况下的方向命中率误读为系统能力：反弹市里看空天然全错，
+    下跌市里看多天然全错，跨市况结论需要更长样本。
+    """
+    if not outcomes:
+        return ""
+    start = min(o["base_date"] for o in outcomes)
+    end = max(o["base_date"] for o in outcomes)
+    try:
+        conn = sqlite3.connect(f"file:{QUANT_DB}?mode=ro", uri=True, timeout=15)
+        rows = conn.execute(
+            "SELECT trade_date, close FROM etf_daily WHERE ts_code = ?"
+            " AND trade_date >= ? ORDER BY trade_date",
+            (BENCHMARK_ETF, start),
+        ).fetchall()
+        conn.close()
+    except sqlite3.Error:
+        return ""
+    if len(rows) < 2 or not rows[0][1]:
+        return ""
+    bench_ret = (rows[-1][1] - rows[0][1]) / rows[0][1] * 100.0
+    return (
+        f"- ⚠️ 市况上下文: 样本评级日分布于 {start} ~ {end}，期间至今沪深300 ETF 累计 {bench_ret:+.1f}%。"
+        f"单一市况下看{'空' if bench_ret > 0 else '多'}类命中率天然偏低，"
+        "方向性结论受市况混杂影响，不应据此对系统看多/看空倾向做永久性矫正；"
+        "机制性结论 (如 stop 触发/whipsaw 率) 不受此限。"
+    )
+
+
+def render_report(outcomes: list[dict], regime_note: str = "") -> str:
     n_stop = sum(1 for o in outcomes if o.get("stop") is not None)
     lines = [
         "# 评级准确率基线报告 (Rating Accuracy Baseline)",
@@ -233,8 +264,10 @@ def render_report(outcomes: list[dict]) -> str:
         "- L2 绝对命中: 看空判对 = 绝对收益 < 0；看多判对 = 绝对收益 > 0 (实盘盈亏视角)",
         "- L3 论点存活: 窗口内未触及报告自己给的 stop 价 (系统自定义的未被证伪率，Hold 也适用)",
         "- 基准价: batch 日后首个交易日收盘价",
-        "",
     ]
+    if regime_note:
+        lines.append(regime_note)
+    lines.append("")
 
     for h in HORIZONS:
         lines.append(f"## {h} 个交易日窗口")
@@ -324,6 +357,10 @@ def render_report(outcomes: list[dict]) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="评级准确率回测")
     parser.add_argument("--md", default=str(REPORTS_DIR / "rating_accuracy_baseline.md"))
+    parser.add_argument(
+        "--quiet", action="store_true",
+        help="静默模式：只刷新 outcomes 库与报告文件，不打印报告正文 (供 batch 末自动调用)",
+    )
     args = parser.parse_args()
 
     ratings = load_ratings(REPORTS_DIR)
@@ -333,11 +370,12 @@ def main() -> None:
     save_outcomes(outcomes)
     print(f"已落库: {OUTCOME_DB} (rating_outcomes 表)")
 
-    report = render_report(outcomes)
+    report = render_report(outcomes, compute_regime_context(outcomes))
     Path(args.md).write_text(report, encoding="utf-8")
     print(f"基线报告: {args.md}")
-    print()
-    print(report)
+    if not args.quiet:
+        print()
+        print(report)
 
 
 if __name__ == "__main__":

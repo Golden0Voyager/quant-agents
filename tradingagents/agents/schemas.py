@@ -222,7 +222,14 @@ class TraderProposal(BaseModel):
     )
     stop_loss: float | None = Field(
         default=None,
-        description="Optional stop-loss price in the instrument's quote currency.",
+        description=(
+            "Optional stop-loss price in the instrument's quote currency. "
+            "Must sit at least 1.5x ATR away from entry_price (ATR from the "
+            "verified snapshot): backtests show stops pinned to moving averages "
+            "or recent lows get swept by normal intraday noise and whipsaw about "
+            "two-thirds of the time. If a 1.5x-ATR stop makes the risk/reward "
+            "unattractive, reduce position_sizing instead of tightening the stop."
+        ),
     )
     position_sizing: str | None = Field(
         default=None,

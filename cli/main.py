@@ -1188,6 +1188,23 @@ def run_batch_analysis(
     console.print(f"[green]Reports:[/green] {output_dir.resolve()}")
     console.print(f"[green]Summary:[/green] {summary_path.name}")
 
+    # 刷新评级准确率回测库（静默、失败容忍）：让 rating_outcomes 随每次 batch
+    # 自动积累，后续的准确率检查点 (如看空校准提示的效果度量) 无需手动跑脚本。
+    try:
+        import subprocess
+        import sys
+
+        backtest_script = Path(__file__).resolve().parent.parent / "scripts" / "rating_backtest.py"
+        if backtest_script.exists():
+            result = subprocess.run(
+                [sys.executable, str(backtest_script), "--quiet"],
+                capture_output=True, text=True, timeout=180,
+            )
+            if result.returncode == 0:
+                console.print("[dim]评级准确率回测库已刷新 (reports/rating_accuracy_baseline.md)[/dim]")
+    except Exception:  # noqa: BLE001 — 回测刷新是附带动作，绝不影响 batch 主流程
+        pass
+
     # Print summary table
     from rich.table import Table
 
