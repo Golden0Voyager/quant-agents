@@ -154,9 +154,16 @@ def get_indicators(
         "rsi_12": "rsi12",
         "rsi_24": "rsi24",
         "rsi_14": None,  # not pre-computed; will fall back
-        "macd": "macd_hist",
+        # MACD naming follows the stockstats/verified-snapshot convention:
+        # macd = DIF line, macds = DEA signal line, macdh = histogram.
+        # ("macd" used to map to macd_hist, which made get_indicators disagree
+        # with the snapshot and triggered spurious data-conflict warnings.)
+        "macd": "macd_dif",
+        "macds": "macd_dea",
+        "macdh": "macd_hist",
         "macd_dif": "macd_dif",
         "macd_dea": "macd_dea",
+        "macd_hist": "macd_hist",
         "kdj_k": "kdj_k",
         "kdj_d": "kdj_d",
         "kdj_j": "kdj_j",
