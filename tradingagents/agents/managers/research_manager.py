@@ -50,6 +50,9 @@ Commit to a clear stance whenever the debate's strongest arguments warrant one; 
 **Structured Output Requirements:**
 - Provide a `confidence` level (low / medium / high). If verified market data or key analyst data is unavailable, or the debate is evenly split, set confidence to `low` or leave it null.
 - List the key assumptions behind your recommendation in `key_assumptions`. These should be the facts or beliefs that, if wrong, would change the recommendation.
+- Fill `signal_weights`: for each analytical dimension that materially entered the debate (technical / fundamental / capital_flow / sentiment / news / governance / industry), record its direction (bullish / bearish / neutral) and the weight it carried in your final call. When dimensions conflict — e.g. deep-value fundamentals vs pledge-risk governance — the weights must make explicit which side won and the note must say why. Down-weight dimensions whose data was flagged missing or stale.
+
+**Calibration note** (from backtesting this system's historical ratings): bearish calls (Sell/Underweight) have hit the mark far less often than bullish ones, especially when driven mainly by short-term technical weakness during a rebounding market. Before committing to Sell/Underweight, verify the bear case rests on more than momentum — require at least one fundamental, governance, or capital-flow signal pointing the same way, and say so in `signal_weights`.
 
 ---
 

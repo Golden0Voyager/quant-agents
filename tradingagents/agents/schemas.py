@@ -70,6 +70,38 @@ class TraderAction(StrEnum):
 # ---------------------------------------------------------------------------
 
 
+class SignalWeight(BaseModel):
+    """One analytical dimension's contribution to the final recommendation.
+
+    Makes the bull/bear adjudication auditable: when e.g. valuation screams
+    cheap but governance screams pledge-risk, the weights record which side
+    carried the decision and why — the raw material for accuracy attribution
+    in the rating-outcome backtest.
+    """
+
+    dimension: Literal[
+        "technical", "fundamental", "capital_flow", "sentiment",
+        "news", "governance", "industry",
+    ] = Field(description="The analytical dimension this signal comes from.")
+    direction: Literal["bullish", "bearish", "neutral"] = Field(
+        description="The direction this dimension's evidence points to.",
+    )
+    weight: float = Field(
+        ge=0.0,
+        le=1.0,
+        description=(
+            "How much this dimension influenced the final recommendation, "
+            "0.0-1.0. Weights across all listed dimensions should roughly "
+            "sum to 1. Give low weight to dimensions whose data was flagged "
+            "missing or stale."
+        ),
+    )
+    note: str = Field(
+        default="",
+        description="One-line justification for this direction and weight.",
+    )
+
+
 class ResearchPlan(BaseModel):
     """Structured investment plan produced by the Research Manager.
 
@@ -116,6 +148,32 @@ class ResearchPlan(BaseModel):
             "If a critical assumption fails, the recommendation may no longer hold."
         ),
     )
+    signal_weights: list[SignalWeight] = Field(
+        default_factory=list,
+        description=(
+            "Per-dimension signal breakdown behind the recommendation: for each "
+            "analytical dimension that materially entered the debate (technical, "
+            "fundamental, capital_flow, sentiment, news, governance, industry), "
+            "state its direction and the weight it carried in the final call. "
+            "When dimensions conflict, the weights must show which side won and "
+            "the notes must say why."
+        ),
+    )
+
+
+def render_signal_weights(weights: list[SignalWeight]) -> str:
+    """Render signal weights as a markdown table for reports and audit."""
+    if not weights:
+        return ""
+    lines = [
+        "**Signal Weights**:",
+        "",
+        "| Dimension | Direction | Weight | Note |",
+        "|---|---|---:|---|",
+    ]
+    for w in sorted(weights, key=lambda x: -x.weight):
+        lines.append(f"| {w.dimension} | {w.direction} | {w.weight:.2f} | {w.note} |")
+    return "\n".join(lines)
 
 
 def render_research_plan(plan: ResearchPlan) -> str:
@@ -130,6 +188,8 @@ def render_research_plan(plan: ResearchPlan) -> str:
     parts.extend(["", f"**Confidence**: {plan.confidence or 'N/A'}"])
     if plan.key_assumptions:
         parts.extend(["", f"**Key Assumptions**: {', '.join(plan.key_assumptions)}"])
+    if plan.signal_weights:
+        parts.extend(["", render_signal_weights(plan.signal_weights)])
     return "\n".join(parts)
 
 

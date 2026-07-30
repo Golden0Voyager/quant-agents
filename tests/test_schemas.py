@@ -59,6 +59,46 @@ class TestResearchPlanSchema:
         assert "**Confidence**: medium" in md
         assert "**Key Assumptions**: A, B" in md
 
+    def test_signal_weights_default_empty_and_render_omitted(self):
+        plan = ResearchPlan(
+            recommendation=PortfolioRating.HOLD,
+            rationale="r",
+            strategic_actions="s",
+        )
+        assert plan.signal_weights == []
+        assert "Signal Weights" not in render_research_plan(plan)
+
+    def test_signal_weights_serialize_and_render(self):
+        from tradingagents.agents.schemas import SignalWeight
+
+        plan = ResearchPlan(
+            recommendation=PortfolioRating.SELL,
+            rationale="governance outweighs valuation",
+            strategic_actions="exit",
+            signal_weights=[
+                SignalWeight(dimension="fundamental", direction="bullish", weight=0.3, note="PEG 0.44 低估"),
+                SignalWeight(dimension="governance", direction="bearish", weight=0.5, note="控股股东 100% 质押"),
+                SignalWeight(dimension="capital_flow", direction="bearish", weight=0.2, note="龙虎榜机构净卖出"),
+            ],
+        )
+        md = render_research_plan(plan)
+        assert "**Signal Weights**:" in md
+        # 按权重降序: governance 行在 fundamental 之前
+        assert md.index("governance") < md.index("fundamental")
+        assert "0.50" in md
+
+    def test_signal_weight_out_of_range_rejected(self):
+        from tradingagents.agents.schemas import SignalWeight
+
+        with pytest.raises(ValidationError):
+            SignalWeight(dimension="technical", direction="bearish", weight=1.5)
+
+    def test_signal_weight_invalid_dimension_rejected(self):
+        from tradingagents.agents.schemas import SignalWeight
+
+        with pytest.raises(ValidationError):
+            SignalWeight(dimension="astrology", direction="bullish", weight=0.5)
+
 
 @pytest.mark.unit
 class TestTraderProposalSchema:
