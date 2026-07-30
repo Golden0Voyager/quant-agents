@@ -763,37 +763,38 @@ class TestGetNorthboundHold(TestCase):
 @pytest.mark.unit
 class TestGetRestrictedRelease(TestCase):
     def setUp(self):
+        # stock_restricted_release_queue_em 按个股返回，列名与 detail 版不同：
+        # 使用 实际解禁数量市值 / 占流通市值比例，且不含 股票代码 列。
         self.release_df = pd.DataFrame([{
-            "股票代码": "600519",
             "解禁时间": "2026-06-15",
             "限售股类型": "首发原股东限售股份",
             "解禁数量": 10_000_000,
-            "实际解禁市值": 16_800_000_000.0,
-            "占解禁前流通市值比例": 1.5,
+            "实际解禁数量市值": 16_800_000_000.0,
+            "占流通市值比例": 1.5,
             "解禁前一交易日收盘价": 1680.00,
         }])
 
     def test_returns_formatted_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
-            mock_ak.stock_restricted_release_detail_em.return_value = self.release_df
+            mock_ak.stock_restricted_release_queue_em.return_value = self.release_df
             result = akshare_vendor.get_restricted_release("600519.SS", "2026-06-01", "2026-06-30")
         assert "Restricted Share Release" in result
         assert "2026-06-15" in result
         assert "首发原股东限售股份" in result
 
-    def test_no_match_raises_no_market_data(self):
+    def test_out_of_window_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
-        df_other = pd.DataFrame([{"股票代码": "999999", "解禁时间": "2026-06-15"}])
+        # 事件落在窗口外（2026-06-15 不在 2027 窗口内）应视为无事件
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
-            mock_ak.stock_restricted_release_detail_em.return_value = df_other
+            mock_ak.stock_restricted_release_queue_em.return_value = self.release_df
             with pytest.raises(NoMarketDataError, match="600519.SS"):
-                akshare_vendor.get_restricted_release("600519.SS", "2026-06-01", "2026-06-30")
+                akshare_vendor.get_restricted_release("600519.SS", "2027-01-01", "2027-12-31")
 
     def test_empty_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
-            mock_ak.stock_restricted_release_detail_em.return_value = pd.DataFrame()
+            mock_ak.stock_restricted_release_queue_em.return_value = pd.DataFrame()
             with pytest.raises(NoMarketDataError, match="600519.SS"):
                 akshare_vendor.get_restricted_release("600519.SS", "2026-06-01", "2026-06-30")
 

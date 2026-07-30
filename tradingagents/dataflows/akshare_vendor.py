@@ -710,25 +710,32 @@ def get_restricted_release(
     start_date: Annotated[str, "Start date YYYY-MM-DD"],
     end_date: Annotated[str, "End date YYYY-MM-DD"],
 ) -> str:
-    """Fetch A-share restricted share release (限售解禁) details."""
+    """Fetch A-share restricted share release (限售解禁) details.
+
+    Uses the per-stock queue endpoint ``stock_restricted_release_queue_em``.
+    The former market-wide ``stock_restricted_release_detail_em`` endpoint
+    broke upstream (returns None → TypeError), taking down 限售解禁 for every
+    ticker; the queue endpoint is queried by symbol and also carries the
+    unlock-share type and post-unlock 20d move for context.
+    """
     code = to_akshare_symbol(symbol, "bare")
 
     with _akshare_task_context(f"🔓 {symbol} 限售解禁"), no_proxy():
         df = _safe_call(
-            ak.stock_restricted_release_detail_em,
-            start_date=start_date,
-            end_date=end_date,
+            ak.stock_restricted_release_queue_em,
+            symbol=code,
         )
 
     if df is None or df.empty:
         raise NoMarketDataError(
             symbol,
-            detail=f"no restricted share release data found for {symbol} between {start_date} and {end_date} via akshare",
+            detail=f"no restricted share release data found for {symbol} via akshare",
         )
 
-    # Client-side filter by stock code
-    if "股票代码" in df.columns:
-        df = df[df["股票代码"].astype(str).str.strip() == code]
+    # Filter to the requested window (解禁时间 is 'YYYY-MM-DD'; lexical compare works)
+    if "解禁时间" in df.columns:
+        release_col = df["解禁时间"].astype(str).str.strip()
+        df = df[(release_col >= start_date) & (release_col <= end_date)]
 
     if df.empty:
         raise NoMarketDataError(
@@ -745,8 +752,8 @@ def get_restricted_release(
         lines.append(f"**Release Date**: {row.get('解禁时间', 'N/A')}")
         lines.append(f"- Type: {row.get('限售股类型', 'N/A')}")
         lines.append(f"- Release Quantity: {row.get('解禁数量', 'N/A')}")
-        lines.append(f"- Actual Release Market Value: {row.get('实际解禁市值', 'N/A')}")
-        lines.append(f"- % of Pre-release Float Cap: {row.get('占解禁前流通市值比例', 'N/A')}")
+        lines.append(f"- Actual Release Market Value: {row.get('实际解禁数量市值', 'N/A')}")
+        lines.append(f"- % of Float Cap: {row.get('占流通市值比例', 'N/A')}")
         lines.append(f"- Pre-release Close Price: {row.get('解禁前一交易日收盘价', 'N/A')}")
         lines.append("")
 
