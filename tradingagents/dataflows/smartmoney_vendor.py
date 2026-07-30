@@ -1533,7 +1533,43 @@ def get_block_trade(
 # ===========================================================================
 
 def get_sector_fund_flow(sector_name: str) -> str:
-    """Fetch sector fund-flow (板块资金流向) from quant_core.db."""
+    """Fetch sector fund-flow (板块资金流向) from quant_core.db.
+
+    The DB stores Shenwan-style industry names (如 "军工电子"、"元件") while LLM
+    analysts ask with colloquial names (如 "军工"、"电子元件"), so an exact match
+    frequently misses even though the data exists. Resolution order:
+    exact → bidirectional substring; a unique fuzzy hit is used automatically,
+    ambiguous/zero hits raise with the candidate/available names so the LLM
+    can retry with a valid one.
+    """
+    requested = (sector_name or "").strip()
+    resolved = requested
+    note = ""
+
+    all_df = _df_from_sql("SELECT DISTINCT sector_name FROM sector_fund_flow", ())
+    if all_df is not None and not all_df.empty:
+        names = [str(n) for n in all_df["sector_name"].dropna()]
+        if requested not in names:
+            # 双向包含："军工"→军工电子/军工装备；"电子元件"→元件
+            candidates = [
+                n for n in names
+                if requested and (requested in n or n in requested)
+            ]
+            if len(candidates) == 1:
+                resolved = candidates[0]
+                note = f"（请求 '{requested}' 自动匹配到板块 '{resolved}'）"
+            elif len(candidates) > 1:
+                raise RuntimeError(
+                    f"Sector '{requested}' is ambiguous in quant_core.db; "
+                    f"matching sectors: {', '.join(sorted(candidates))}. "
+                    "Retry with one exact sector name."
+                )
+            else:
+                raise RuntimeError(
+                    f"No sector named '{requested}' in quant_core.db. "
+                    f"Available sectors: {', '.join(sorted(names))}"
+                )
+
     df = _df_from_sql(
         """
         SELECT trade_date AS Date, main_net_inflow, main_net_inflow_pct,
@@ -1544,17 +1580,17 @@ def get_sector_fund_flow(sector_name: str) -> str:
         ORDER BY trade_date DESC
         LIMIT 5
         """,
-        (sector_name,),
+        (resolved,),
     )
 
     if df is None or df.empty:
         raise RuntimeError(
-            f"No sector fund-flow data in quant_core.db for '{sector_name}'"
+            f"No sector fund-flow data in quant_core.db for '{resolved}'"
         )
 
     lines = [
-        f"## {sector_name} Sector Fund Flow (板块资金流向) "
-        f"(source: quant_core.db / local SQLite)",
+        f"## {resolved} Sector Fund Flow (板块资金流向) "
+        f"(source: quant_core.db / local SQLite){note}",
         f"Total records: {len(df)} trading days",
         "",
     ]

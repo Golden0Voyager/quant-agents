@@ -125,6 +125,9 @@ def _create_full_test_db(path):
             PRIMARY KEY (trade_date, sector_name)
         );
         INSERT INTO sector_fund_flow VALUES ('2026-06-19','白酒',2.0e8,0.03,1.0e8,5.0e7,2.0e7,-1.0e7);
+        INSERT INTO sector_fund_flow VALUES ('2026-06-19','军工电子',1.0e8,0.02,5.0e7,3.0e7,1.0e7,-5.0e6);
+        INSERT INTO sector_fund_flow VALUES ('2026-06-19','军工装备',1.5e8,0.02,6.0e7,4.0e7,1.0e7,-6.0e6);
+        INSERT INTO sector_fund_flow VALUES ('2026-06-19','元件',3.0e8,0.04,1.5e8,8.0e7,3.0e7,-2.0e7);
 
         CREATE TABLE shareholder_count (
             ts_code TEXT, report_date TEXT,
@@ -668,6 +671,53 @@ class GetSectorFundFlowTests(unittest.TestCase):
         finally:
             os.unlink(db_path)
 
+    def test_fuzzy_unique_match_auto_resolves(self):
+        """唯一模糊命中自动采用："电子元件" → 板块 "元件"，并在输出中标注。"""
+        from tradingagents.dataflows.smartmoney_vendor import get_sector_fund_flow
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = get_sector_fund_flow("电子元件")
+                self.assertIn("元件 Sector Fund Flow", result)
+                self.assertIn("自动匹配到板块", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_fuzzy_ambiguous_raises_with_candidates(self):
+        """歧义命中报错并列出候选："军工" → 军工电子/军工装备。"""
+        from tradingagents.dataflows.smartmoney_vendor import get_sector_fund_flow
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                with self.assertRaises(RuntimeError) as ctx:
+                    get_sector_fund_flow("军工")
+                self.assertIn("军工电子", str(ctx.exception))
+                self.assertIn("军工装备", str(ctx.exception))
+        finally:
+            os.unlink(db_path)
+
+    def test_zero_match_lists_available_sectors(self):
+        """零命中报错并回传可用板块名，供 LLM 重试。"""
+        from tradingagents.dataflows.smartmoney_vendor import get_sector_fund_flow
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                with self.assertRaises(RuntimeError) as ctx:
+                    get_sector_fund_flow("元宇宙")
+                self.assertIn("Available sectors", str(ctx.exception))
+                self.assertIn("白酒", str(ctx.exception))
+        finally:
+            os.unlink(db_path)
+
     def test_handles_null_numeric_columns(self):
         # Regression: a row with SQL NULL (None/NaN) numeric cells must render
         # "N/A" rather than crashing with
@@ -687,7 +737,14 @@ class GetSectorFundFlowTests(unittest.TestCase):
                 "small_net_inflow": [None],
             }
         )
-        with patch.object(smartmoney_vendor, "_df_from_sql", return_value=df):
+        # get_sector_fund_flow 现在会先查 DISTINCT sector_name 做模糊匹配，
+        # mock 需按 SQL 分流返回
+        names_df = pd.DataFrame({"sector_name": ["新能源"]})
+
+        def _fake_df_from_sql(sql, params=()):
+            return names_df if "DISTINCT sector_name" in sql else df
+
+        with patch.object(smartmoney_vendor, "_df_from_sql", side_effect=_fake_df_from_sql):
             result = smartmoney_vendor.get_sector_fund_flow("新能源")
         self.assertIn("新能源", result)
         self.assertIn("N/A", result)
