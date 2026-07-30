@@ -531,15 +531,58 @@ class TestGetNews(TestCase):
             "新闻链接": "https://example.com/news/2",
         }])
 
+    @staticmethod
+    def _patch_name(name: str):
+        """Mock resolve_ticker：get_news 的相关性过滤依赖公司简称，
+        测试中必须钉住返回值以确定化且避免真实网络/DB 查询。"""
+        return patch(
+            "tradingagents.ticker_resolver.resolve_ticker",
+            return_value={"ticker": "600519.SS", "company_name": name},
+        )
+
     def test_returns_formatted_news(self):
         from tradingagents.dataflows import akshare_vendor
-        with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
+        with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak, \
+             self._patch_name("贵州茅台"):
             mock_ak.stock_news_em.return_value = self.news_df
             result = akshare_vendor.get_news("600519.SS", "2026-05-10", "2026-05-14")
         assert "贵州茅台业绩超预期" in result
         assert "证券时报" in result
         assert "Published" in result
         assert "Link:" in result
+        # 未提及公司名的文章被降级到"疑似无关"标题区
+        assert "白酒板块走强" in result
+        assert "未提及「贵州茅台」" in result
+
+    def test_all_unrelated_raises_collision(self):
+        """全部检索结果都不含公司名 → 视为代码碰撞（如同号基金），显式报错。"""
+        from tradingagents.dataflows import akshare_vendor
+        df_fund = pd.DataFrame([{
+            "新闻标题": "华安事件驱动量化混合A：二季度利润6.85亿元",
+            "文章来源": "基金资讯",
+            "新闻内容": "基金净值增长...",
+            "发布时间": "2026-05-14 08:30:00",
+            "新闻链接": "https://example.com/fund",
+        }])
+        with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak, \
+             self._patch_name("贵州茅台"):
+            mock_ak.stock_news_em.return_value = df_fund
+            with pytest.raises(NoMarketDataError, match="collision"):
+                akshare_vendor.get_news("600519.SS", "2026-05-10", "2026-05-14")
+
+    def test_name_resolution_failure_skips_filtering(self):
+        """公司名解析失败时保持旧行为：不过滤，全部渲染。"""
+        from tradingagents.dataflows import akshare_vendor
+        with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak, \
+             patch(
+                 "tradingagents.ticker_resolver.resolve_ticker",
+                 side_effect=RuntimeError("resolver down"),
+             ):
+            mock_ak.stock_news_em.return_value = self.news_df
+            result = akshare_vendor.get_news("600519.SS", "2026-05-10", "2026-05-14")
+        assert "贵州茅台业绩超预期" in result
+        assert "白酒板块走强" in result
+        assert "疑为代码碰撞" not in result
 
     def test_empty_df_raises_no_market_data(self):
         from tradingagents.dataflows import akshare_vendor
@@ -564,7 +607,8 @@ class TestGetNews(TestCase):
             "发布时间": "2026-05-14 08:30:00",
             "新闻链接": "https://example.com",
         }])
-        with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
+        with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak, \
+             self._patch_name(""):
             mock_ak.stock_news_em.return_value = df_missing
             result = akshare_vendor.get_news("600519.SS", "2026-05-10", "2026-05-15")
         assert "Test Headline" in result

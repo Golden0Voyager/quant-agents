@@ -441,7 +441,14 @@ def get_news(
     start_date: Annotated[str, "Start date YYYY-MM-DD"],
     end_date: Annotated[str, "End date YYYY-MM-DD"],
 ) -> str:
-    """Fetch A-share company-specific news from Eastmoney via akshare."""
+    """Fetch A-share company-specific news from Eastmoney via akshare.
+
+    ``ak.stock_news_em`` is a keyword search on the numeric code, so results
+    can include unrelated instruments sharing the digits (e.g. fund 002179 vs
+    stock 中航光电 002179.SZ). Articles that never mention the company short
+    name are demoted to a title-only "possibly unrelated" section instead of
+    being rendered as company news.
+    """
     code = to_akshare_symbol(symbol, "bare")
     start_dt = datetime.strptime(start_date, "%Y-%m-%d")
     end_dt = datetime.strptime(end_date, "%Y-%m-%d")
@@ -466,6 +473,38 @@ def get_news(
             detail=f"no news found for {symbol} between {start_date} and {end_date} via akshare",
         )
 
+    # Relevance split: an article counts as related only when the company
+    # short name appears in its title or body. Name resolution is best-effort;
+    # when it fails we keep the old behavior (no filtering).
+    company_name = ""
+    try:
+        from tradingagents.ticker_resolver import resolve_ticker
+
+        company_name = (resolve_ticker(symbol).get("company_name") or "").strip()
+    except Exception:  # noqa: BLE001 — name lookup must never break the news tool
+        company_name = ""
+
+    unrelated_rows = []
+    if company_name:
+        text = (
+            df["新闻标题"].fillna("").astype(str)
+            + " "
+            + df["新闻内容"].fillna("").astype(str)
+        )
+        related_mask = text.str.contains(company_name, regex=False)
+        unrelated_rows = list(df[~related_mask].iterrows())
+        df = df[related_mask]
+
+    if df.empty and unrelated_rows:
+        raise NoMarketDataError(
+            symbol,
+            detail=(
+                f"news search for {symbol} returned {len(unrelated_rows)} articles but none "
+                f"mention 「{company_name}」 — likely a ticker-code collision with another "
+                "instrument (e.g. a fund sharing the same digits)"
+            ),
+        )
+
     lines = [
         f"## {symbol.upper()} News from {start_date} to {end_date} (source: akshare / Eastmoney)\n",
         f"Total articles: {len(df)}\n",
@@ -480,6 +519,15 @@ def get_news(
             lines.append(f"Published: {row['发布时间']}")
         if row.get("新闻链接"):
             lines.append(f"Link: {row['新闻链接']}")
+        lines.append("")
+
+    if unrelated_rows:
+        lines.append(
+            f"### ⚠️ 以下 {len(unrelated_rows)} 条检索结果未提及「{company_name}」，"
+            "疑为代码碰撞（如同号基金）或无关快讯，仅列标题供参考，不应作为本公司新闻引用："
+        )
+        for _, row in unrelated_rows:
+            lines.append(f"- {row.get('新闻标题', 'N/A')} ({row.get('发布时间', 'N/A')})")
         lines.append("")
 
     return "\n".join(lines)
