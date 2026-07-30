@@ -844,6 +844,28 @@ class BatchRunner:
                     self.dashboard.mark_skipped(ticker)
                     self.dashboard.add_message("Copy", f"📋 {ticker} — report exists, copying from previous batch")
 
+        # ── Data health gate: assert quant_core.db field-level invariants ──
+        # 2026-07 事故中管道静默产出垃圾数据，连续 5 天的 batch 都在消费它。
+        # BLOCK 级异常直接中止（TRADINGAGENTS_SKIP_HEALTH_GATE=1 可跳过），
+        # WARN 级写入 dashboard 并注入 batch_summary.md 头部。
+        from tradingagents.dataflows.data_health import check_data_health
+
+        self._health_report = check_data_health(
+            self.profile_config.get("analysis_date") or datetime.now().strftime("%Y-%m-%d")
+        )
+        for msg in self._health_report.blockers + self._health_report.issues:
+            self.dashboard.add_message("Health", f"⚠️ {msg}")
+        if self._health_report.level == "block":
+            if os.getenv("TRADINGAGENTS_SKIP_HEALTH_GATE", "").lower() in ("1", "true", "yes"):
+                self.dashboard.add_message("Health", "🚧 检测到 BLOCK 级异常，但已设置跳过门禁，继续运行")
+            else:
+                for msg in self._health_report.blockers:
+                    print(f"🛑 {msg}")
+                raise SystemExit(
+                    "🛑 数据健康预检发现 BLOCK 级异常，中止 batch 以免基于损坏数据产出报告。"
+                    "修复数据后重试，或设置 TRADINGAGENTS_SKIP_HEALTH_GATE=1 强制继续。"
+                )
+
         # ── Data readiness pre-check: pre-load cacheable data for all tickers ──
         from tradingagents.agents.utils.data_readiness import check_batch_readiness
 
@@ -1010,6 +1032,9 @@ class BatchRunner:
         """Generate batch_summary.md and batch_summary.json. Returns path to markdown."""
         has_stats = bool(self.batch_stats.get("per_ticker"))
         lines = ["# Batch Analysis Report\n"]
+        health = getattr(self, "_health_report", None)
+        if health is not None:
+            lines.extend(health.summary_lines())
         if has_stats:
             lines.append("| Ticker | Company | Rating | Entry | Stop | Size | Confidence | Tokens | Cost | Status | Details |")
             lines.append("|--------|---------|--------|-------|------|------|------------|--------|------|--------|---------|")
