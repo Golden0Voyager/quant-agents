@@ -167,3 +167,49 @@ class TestBatchRunnerSummaryOutput:
         row = data["rows"][0]
         assert row["fallback"] is True
         assert row["confidence"] == "low"
+
+@pytest.mark.unit
+class TestParseSummaryFieldsFallbackFormats:
+    """PM 结构化 fallback 降级为自由文本/表格时，字段仍应被抽出（方案 A）。"""
+
+    def test_markdown_table_row_extraction(self):
+        """降级路径把决策渲染成 ``| 字段 | 值 |`` 表格，需按表格行抽取。"""
+        decision = (
+            "### 最终交易决策\n"
+            "| 项目 | 内容 |\n"
+            "|------|------|\n"
+            "| **评级** | **Hold** |\n"
+            "| **入场价格** | 106.105 |\n"
+            "| **止损价** | 100.00 |\n"
+            "| **仓位规模** | 维持200股（约1.37%仓位） |\n"
+        )
+        fields = BatchRunner._parse_summary_fields(decision, "")
+        assert fields["rating"] == "Hold"
+        assert fields["entry"] == "106.105"
+        assert fields["stop"] == "100.00"
+        assert fields["size"] == "维持200股"
+
+    def test_chinese_bullet_list_extraction(self):
+        """列表项 ``- **入场价**：19.08（...）`` 前导标记与括号注释都要处理。"""
+        decision = (
+            "**评级：卖出**\n"
+            "-   **入场价**：19.08（基于2026-07-29的收盘价）\n"
+            "-   **止损价**：18.32（基于布林带中轨）\n"
+        )
+        fields = BatchRunner._parse_summary_fields(decision, "")
+        assert fields["rating"] == "Sell"
+        assert fields["entry"] == "19.08"
+        assert fields["stop"] == "18.32"
+
+    def test_clean_strips_trailing_unit_punctuation(self):
+        """散文匹配残留的 ``元 。`` 等尾部应被清理，但合法值不受损。"""
+        assert BatchRunner._parse_summary_fields("入场价：23.06元 。", "")["entry"] == "23.06"
+        assert BatchRunner._parse_summary_fields("止损价：100.00", "")["stop"] == "100.00"
+
+    def test_no_numeric_fields_stay_dash(self):
+        """PM 仅给文字方向、无数值时字段应保持占位符，不误抓正文数字。"""
+        decision = "**评级：减持**\n建议在反弹时积极减持，降低仓位，不设硬止损。\n"
+        fields = BatchRunner._parse_summary_fields(decision, "")
+        assert fields["rating"] == "Underweight"
+        assert fields["entry"] == "—"
+        assert fields["stop"] == "—"

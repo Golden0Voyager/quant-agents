@@ -501,10 +501,15 @@ class BatchRunner:
         from tradingagents.agents.utils.rating import parse_rating
 
         def _find_strict_numeric(text: str, names: str) -> str:
-            """Extract numeric/percentage values only, tolerating markdown bold."""
+            """Extract numeric/percentage values only, tolerating markdown bold.
+
+            The leading ``[-*]?`` tolerates markdown list markers so bullet
+            lines like ``- **入场价**：19.08`` (common in the structured-output
+            fallback path) are matched, not just plain ``入场价：19.08`` lines.
+            """
             patterns = [
-                rf"(?:^|\n|\|)\s*\*?\*?(?:{names})\*?\*?\s*[:：]\s*\*?\*?([0-9]+%?(?:\.[0-9]+)?)\s*(?:USD|CNY|元|%)?\*?\*?(?:\s|$|\|)",
-                rf"(?:^|\n|\|)\s*\*?\*?(?:{names})\*?\*?\s*[:：]\s*\*?\*?([0-9]+%?(?:\.[0-9]+)?(?:\s*-\s*[0-9]+%?(?:\.[0-9]+)?)?)\s*(?:USD|CNY|元|%)?\*?\*?(?:\s|$|\|)",
+                rf"(?:^|\n|\|)\s*[-*]?\s*\*?\*?(?:{names})\*?\*?\s*[:：]\s*\*?\*?([0-9]+%?(?:\.[0-9]+)?)\s*(?:USD|CNY|元|%)?\*?\*?(?:\s|$|\||（|\()",
+                rf"(?:^|\n|\|)\s*[-*]?\s*\*?\*?(?:{names})\*?\*?\s*[:：]\s*\*?\*?([0-9]+%?(?:\.[0-9]+)?(?:\s*-\s*[0-9]+%?(?:\.[0-9]+)?)?)\s*(?:USD|CNY|元|%)?\*?\*?(?:\s|$|\||（|\()",
             ]
             for pattern in patterns:
                 m = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
@@ -515,9 +520,24 @@ class BatchRunner:
         def _find_flexible(text: str, names: str) -> str:
             """Fallback: more lenient matching for non-standard formats."""
             m = re.search(
-                rf"(?:^|\n|\|)\s*\*?\*?(?:{names})\*?\*?\s*[:：]\s*\*?\*?([^\n|]+?)(?:\*\*|\n|\||$)",
+                rf"(?:^|\n|\|)\s*[-*]?\s*\*?\*?(?:{names})\*?\*?\s*[:：]\s*\*?\*?([^\n|]+?)(?:\*\*|\n|\||$)",
                 text,
                 re.IGNORECASE | re.MULTILINE,
+            )
+            return m.group(1).strip() if m else ""
+
+        def _find_table_cell(text: str, names: str) -> str:
+            """Extract a value from a markdown table row ``| 字段 | 值 |``.
+
+            The structured-output fallback path renders the PM decision as a
+            markdown table (``| **入场价格** | 106.105 |``) where the field name
+            and value sit in *separate* cells, so the colon-based finders miss
+            them entirely. Match the field-name cell followed by the value cell.
+            """
+            m = re.search(
+                rf"(?:^|\n)\s*\|\s*\*?\*?(?:{names})\*?\*?\s*\|\s*\*?\*?([^|\n]+?)\*?\*?\s*\|",
+                text,
+                re.IGNORECASE,
             )
             return m.group(1).strip() if m else ""
 
@@ -539,6 +559,10 @@ class BatchRunner:
                     val = _find_strict_numeric(text, names)
                     if val:
                         return val
+                for text in (decision, trader):
+                    val = _find_table_cell(text, names)
+                    if val:
+                        return val
                 return ""
             for text in (decision, trader):
                 val = _find_strict_numeric(text, names)
@@ -548,11 +572,25 @@ class BatchRunner:
                 val = _find_flexible(text, names)
                 if val:
                     return val
+            # Markdown-table fallback (structured-output fallback path renders
+            # the decision as a ``| 字段 | 值 |`` table, not ``字段: 值`` lines).
+            for text in (decision, trader):
+                val = _find_table_cell(text, names)
+                if val:
+                    return val
             return ""
 
         def _find_rating_label(text: str) -> str:
             m = re.search(
-                r"(?:\*\*)?(?:Rating|Decision|评级|建议|决策|结论)(?:\*\*)?\s*[:：]\s*(?:\*\*)?([\w一-鿿]+)(?:\*\*)?",
+                r"(?:\*\*)?(?:Rating|Decision|推荐评级|评级|建议|决策|结论)(?:\*\*)?\s*[:：]\s*(?:\*\*)?([\w一-鿿]+)(?:\*\*)?",
+                text,
+                re.IGNORECASE,
+            )
+            if m:
+                return m.group(1)
+            # Markdown-table row: ``| **评级** | **Hold** |``
+            m = re.search(
+                r"(?:^|\n)\s*\|\s*\*?\*?(?:Rating|评级|决策)\*?\*?\s*\|\s*\*?\*?([\w一-鿿]+)\*?\*?\s*\|",
                 text,
                 re.IGNORECASE,
             )
@@ -574,10 +612,10 @@ class BatchRunner:
                 rating_raw = m.group(1)
         rating = parse_rating(rating_raw) if rating_raw else "—"
 
-        entry = _find(r"Entry Price|Entry|entry_price|入场价|买入价|目标价")
+        entry = _find(r"Entry Price|Entry|entry_price|入场价格|入场价|买入价|目标价")
         stop = _find(r"Stop Loss|Stop|stop_loss|止损价|止损线|止损")
         size = _find(
-            r"Position Sizing|Size|position_size|position_sizing|仓位上限|仓位|持仓比例|仓位占比",
+            r"Position Sizing|Size|position_size|position_sizing|仓位规模|仓位上限|仓位|持仓比例|仓位占比",
             prefer_flexible=True,
         )
 
@@ -617,6 +655,10 @@ class BatchRunner:
             )[0]
             # Collapse runs of whitespace (incl. newlines / non-breaking spaces).
             val = re.sub(r"\s+", " ", val)
+            val = val.strip()
+            # Strip trailing non-informative punctuation/units left over from
+            # prose matches (e.g. ``23.06元 。`` -> ``23.06元``).
+            val = re.sub(r"[\s。\.,，;；]+$", "", val)
             return val.strip()
 
         def _ok(val: str) -> bool:
