@@ -92,6 +92,38 @@ def _build_verified_snapshot_block(ticker: str, trade_date: str, market_report: 
         return fallback_block
 
 
+def validate_trader_proposal(
+    proposal: TraderProposal,
+) -> tuple[TraderProposal, str | None]:
+    """Deterministic post-check on the Trader's structured proposal.
+
+    A-share is long-only: a stop-loss must sit BELOW the entry price to
+    protect a long position. The model frequently emits ``entry + 1.5*ATR``
+    for Sell / 减持 proposals — a level ABOVE the entry that offers zero
+    downside protection (it is a take-profit level, not a stop). Such a
+    stop is cleared to ``None`` so the wrong number never propagates into
+    the report or the batch summary; the Portfolio Manager can then
+    re-specify a protective stop (or drop it for a full exit).
+
+    Returns the (possibly corrected) proposal plus an optional markdown
+    note that gets appended to the rendered output. This runs only on the
+    structured path and never triggers the free-text fallback.
+    """
+    if proposal.entry_price is None or proposal.stop_loss is None:
+        return proposal, None
+    if proposal.stop_loss < proposal.entry_price:
+        return proposal, None
+    note = (
+        f"> ⚠️ Trader stop-loss rejected: stop_loss {proposal.stop_loss} is not below "
+        f"entry_price {proposal.entry_price}. A stop at or above the entry offers no "
+        f"protection for a long position (this framework is long-only). Cleared to null "
+        f"— the Portfolio Manager should re-specify a protective stop below the entry "
+        f"or omit it (e.g. for a full exit)."
+    )
+    fixed = proposal.model_copy(update={"stop_loss": None})
+    return fixed, note
+
+
 def create_trader(llm):
     structured_llm = bind_structured(llm, TraderProposal, "Trader")
 
@@ -138,11 +170,15 @@ def create_trader(llm):
                     "you MUST set entry_price and stop_loss to null rather than guessing. Position "
                     "sizing should reflect the volatility implied by the snapshot (ATR) and the "
                     "rating the research plan recommends. "
-                    "Stop-loss placement rule: the stop must sit at least 1.5x ATR away from the "
-                    "entry price — never directly at a moving average or recent swing low/high, "
-                    "which normal intraday noise sweeps through (historical stops placed there "
-                    "whipsawed ~2/3 of the time). If a 1.5x-ATR stop makes the risk/reward "
-                    "unattractive, reduce the position size instead of tightening the stop. "
+                    "Stop-loss placement rule: this framework is LONG-ONLY, so the stop "
+                    "must sit BELOW the entry price (protecting a long position), at least "
+                    "1.5x ATR away from it — never directly at a moving average or recent "
+                    "swing low/high, which normal intraday noise sweeps through (historical "
+                    "stops placed there whipsawed ~2/3 of the time). A level at or above the "
+                    "entry is a take-profit target, NOT a stop-loss — never emit it as "
+                    "stop_loss; if you meant a target, set stop_loss to null instead. If a "
+                    "1.5x-ATR stop makes the risk/reward unattractive, reduce the position "
+                    "size instead of tightening the stop. "
                     "Report a confidence level (low/medium/high) and a price_source that explains "
                     "which verified price or data source was used for entry_price and stop_loss."
                     + get_language_instruction()
@@ -188,6 +224,7 @@ def create_trader(llm):
             messages,
             render_trader_proposal,
             "Trader",
+            validate=validate_trader_proposal,
         )
 
         return {
