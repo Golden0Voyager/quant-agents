@@ -253,3 +253,6 @@ tests/_tmp_cache/
 .scratch/
 *.py,cover
 *.py,cover
+
+# git-feature worktrees
+.worktrees/
