@@ -86,7 +86,7 @@ def check_data_health(
 ) -> HealthReport:
     """Assert field-level data invariants against quant_core.db."""
     report = HealthReport()
-    path = db_path or os.getenv("QUANT_DB_PATH", DEFAULT_DB_PATH)
+    path = db_path or os.getenv("QUANT_DB_PATH") or DEFAULT_DB_PATH
 
     if not os.path.exists(path):
         report.escalate("warn", f"quant_core.db 不存在 ({path})，跳过健康预检")
