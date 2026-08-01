@@ -495,21 +495,22 @@ class BatchRunner:
         ``decision`` is the Portfolio Manager's final decision (authoritative
         for the rating); ``trader`` is the Trader's proposal, used as a fallback
         source for the numeric entry / stop / size levels the PM often omits.
+
+        Returned dict also carries ``*_source`` keys ("pm" / "trader" / "none")
+        so the batch table can tell where each value came from, and a PM
+        statement that explicitly rejects a level (e.g. ``止损价：不适用``)
+        is never overridden by the Trader's number.
         """
         import re
 
-        from tradingagents.agents.utils.rating import parse_rating
+        from tradingagents.agents.utils.rating import normalize_rating_label
 
         def _find_strict_numeric(text: str, names: str) -> str:
-            """Extract numeric/percentage values only, tolerating markdown bold.
-
-            The leading ``[-*]?`` tolerates markdown list markers so bullet
-            lines like ``- **入场价**：19.08`` (common in the structured-output
-            fallback path) are matched, not just plain ``入场价：19.08`` lines.
-            """
+            """Extract numeric/percentage values only, tolerating markdown bold
+            and backtick-quoted values (``**止损位：** `88.57```)."""
             patterns = [
-                rf"(?:^|\n|\|)\s*[-*]?\s*\*?\*?(?:{names})\*?\*?\s*[:：]\s*\*?\*?([0-9]+%?(?:\.[0-9]+)?)\s*(?:USD|CNY|元|%)?\*?\*?(?:\s|$|\||（|\()",
-                rf"(?:^|\n|\|)\s*[-*]?\s*\*?\*?(?:{names})\*?\*?\s*[:：]\s*\*?\*?([0-9]+%?(?:\.[0-9]+)?(?:\s*-\s*[0-9]+%?(?:\.[0-9]+)?)?)\s*(?:USD|CNY|元|%)?\*?\*?(?:\s|$|\||（|\()",
+                rf"(?:^|\n|\|)\s*[-*]?\s*\*?\*?(?:{names})\*?\*?\s*[:：]\s*\*?\*?`?\s*([0-9]+%?(?:\.[0-9]+)?)\s*`?(?:USD|CNY|元|%)?\*?\*?(?:\s|$|\||（|\()",
+                rf"(?:^|\n|\|)\s*[-*]?\s*\*?\*?(?:{names})\*?\*?\s*[:：]\s*\*?\*?`?\s*([0-9]+%?(?:\.[0-9]+)?(?:\s*-\s*[0-9]+%?(?:\.[0-9]+)?)?)\s*`?(?:USD|CNY|元|%)?\*?\*?(?:\s|$|\||（|\()",
             ]
             for pattern in patterns:
                 m = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
@@ -520,7 +521,7 @@ class BatchRunner:
         def _find_flexible(text: str, names: str) -> str:
             """Fallback: more lenient matching for non-standard formats."""
             m = re.search(
-                rf"(?:^|\n|\|)\s*[-*]?\s*\*?\*?(?:{names})\*?\*?\s*[:：]\s*\*?\*?([^\n|]+?)(?:\*\*|\n|\||$)",
+                rf"(?:^|\n|\|)\s*[-*]?\s*\*?\*?(?:{names})\*?\*?\s*[:：]\s*\*?\*?`?\s*([^\n|]+?)\s*`?(?:\*\*|\n|\||$)",
                 text,
                 re.IGNORECASE | re.MULTILINE,
             )
@@ -535,89 +536,11 @@ class BatchRunner:
             them entirely. Match the field-name cell followed by the value cell.
             """
             m = re.search(
-                rf"(?:^|\n)\s*\|\s*\*?\*?(?:{names})\*?\*?\s*\|\s*\*?\*?([^|\n]+?)\*?\*?\s*\|",
+                rf"(?:^|\n)\s*\|\s*\*?\*?(?:{names})\*?\*?\s*\|\s*\*?\*?`?\s*([^|\n]+?)\s*`?\*?\*?\s*\|",
                 text,
                 re.IGNORECASE,
             )
             return m.group(1).strip() if m else ""
-
-        def _find(names: str, prefer_flexible: bool = False) -> str:
-            """Prefer the PM decision, fall back to the Trader's proposal.
-
-            When ``prefer_flexible`` is True (used for the ``Size`` column),
-            the free-text finder is tried first so trailing natural language
-            such as ``5% of portfolio`` is preserved alongside the percentage.
-            Strict numeric is still a fallback so ``5%``-only recommendations
-            resolve the same way as before.
-            """
-            if prefer_flexible:
-                for text in (decision, trader):
-                    val = _find_flexible(text, names)
-                    if val:
-                        return val
-                for text in (decision, trader):
-                    val = _find_strict_numeric(text, names)
-                    if val:
-                        return val
-                for text in (decision, trader):
-                    val = _find_table_cell(text, names)
-                    if val:
-                        return val
-                return ""
-            for text in (decision, trader):
-                val = _find_strict_numeric(text, names)
-                if val:
-                    return val
-            for text in (decision, trader):
-                val = _find_flexible(text, names)
-                if val:
-                    return val
-            # Markdown-table fallback (structured-output fallback path renders
-            # the decision as a ``| 字段 | 值 |`` table, not ``字段: 值`` lines).
-            for text in (decision, trader):
-                val = _find_table_cell(text, names)
-                if val:
-                    return val
-            return ""
-
-        def _find_rating_label(text: str) -> str:
-            m = re.search(
-                r"(?:\*\*)?(?:Rating|Decision|推荐评级|评级|建议|决策|结论)(?:\*\*)?\s*[:：]\s*(?:\*\*)?([\w一-鿿]+)(?:\*\*)?",
-                text,
-                re.IGNORECASE,
-            )
-            if m:
-                return m.group(1)
-            # Markdown-table row: ``| **评级** | **Hold** |``
-            m = re.search(
-                r"(?:^|\n)\s*\|\s*\*?\*?(?:Rating|评级|决策)\*?\*?\s*\|\s*\*?\*?([\w一-鿿]+)\*?\*?\s*\|",
-                text,
-                re.IGNORECASE,
-            )
-            if m:
-                return m.group(1)
-            m = re.search(
-                r"[\"「【]([\w一-鿿]+)[\"」】]\s*(?:评级|建议|决策|结论)",
-                text,
-                re.IGNORECASE,
-            )
-            return m.group(1) if m else ""
-
-        # Rating: PM decision is authoritative; fall back to the Trader's label,
-        # then the Trader's "FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**" line.
-        rating_raw = _find_rating_label(decision) or _find_rating_label(trader)
-        if not rating_raw:
-            m = re.search(r"FINAL TRANSACTION PROPOSAL:\s*\*?\*?([A-Za-z]+)", trader, re.IGNORECASE)
-            if m:
-                rating_raw = m.group(1)
-        rating = parse_rating(rating_raw) if rating_raw else "—"
-
-        entry = _find(r"Entry Price|Entry|entry_price|入场价格|入场价|买入价|目标价")
-        stop = _find(r"Stop Loss|Stop|stop_loss|止损价|止损线|止损")
-        size = _find(
-            r"Position Sizing|Size|position_size|position_sizing|仓位规模|仓位上限|仓位|持仓比例|仓位占比",
-            prefer_flexible=True,
-        )
 
         def _clean(val: str) -> str:
             """Normalize an extracted summary field for display in the batch table.
@@ -641,6 +564,8 @@ class BatchRunner:
             if not val:
                 return val
             val = val.strip()
+            # Remove backtick quoting (``**止损位：** `88.57```) before anything else.
+            val = val.replace("`", "")
             # Remove parenthetical annotations, Chinese 「（...）」 and ASCII 「(...)」
             val = re.sub(r"（[^）]*）", "", val)
             val = re.sub(r"\([^)]*\)", "", val)
@@ -664,12 +589,107 @@ class BatchRunner:
         def _ok(val: str) -> bool:
             return bool(val) and bool(re.search(r"[0-9]", val))
 
-        ce, cs, csz = _clean(entry), _clean(stop), _clean(size)
+        def _find(names: str, prefer_flexible: bool = False) -> tuple[str, str]:
+            """Prefer the PM decision, fall back to the Trader's proposal.
+
+            Returns ``(value, source)`` where source is "pm" / "trader" / "none".
+
+            When ``prefer_flexible`` is True (used for the ``Size`` column),
+            the free-text finder is tried first so trailing natural language
+            such as ``5% of portfolio`` is preserved alongside the percentage.
+            Strict numeric is still a fallback so ``5%``-only recommendations
+            resolve the same way as before.
+
+            A PM line that *mentions* the field but carries no usable value
+            (``止损价：不适用（清仓操作无需设置止损）``) is authoritative: it
+            returns ("—", "pm") and must NOT fall through to the Trader's
+            number, which would contradict the PM's explicit statement.
+            """
+            finders = (
+                [_find_flexible, _find_strict_numeric, _find_table_cell]
+                if prefer_flexible
+                else [_find_strict_numeric, _find_flexible, _find_table_cell]
+            )
+            for text, src in ((decision, "pm"), (trader, "trader")):
+                for finder in finders:
+                    raw = finder(text, names)
+                    if not raw:
+                        continue
+                    clean = _clean(raw)
+                    if _ok(clean):
+                        return clean, src
+                    if src == "pm":
+                        # The PM explicitly named the field (e.g. 止损价：不适用) —
+                        # treat the statement as authoritative, do not fall back.
+                        return "—", src
+            return "", "none"
+
+        def _find_rating_candidates(text: str) -> list[str]:
+            """Collect every rating candidate in order of appearance.
+
+            Accepts colon lines, markdown table rows, and quoted phrases,
+            tolerating bold and backtick wrappers around the value. The
+            caller validates candidates with ``normalize_rating_label`` so a
+            ticker code captured from a heading (``### 最终交易决策：
+            **002594.SZ``) is rejected instead of defaulting to ``Hold``.
+            """
+            cands: list[str] = []
+            m = re.finditer(
+                r"(?:\*\*)?(?:Rating|Decision|推荐评级|评级|建议|决策|结论)(?:\*\*)?\s*[:：]\s*(?:\*\*)?\s*`?\s*([\w一-鿿]+)\s*`?(?:\*\*)?",
+                text,
+                re.IGNORECASE,
+            )
+            cands.extend(g.group(1) for g in m)
+            m = re.finditer(
+                r"(?:^|\n)\s*\|\s*\*?\*?(?:Rating|评级|决策)\*?\*?\s*\|\s*\*?\*?`?([\w一-鿿]+)`?\*?\*?\s*\|",
+                text,
+                re.IGNORECASE,
+            )
+            cands.extend(g.group(1) for g in m)
+            m = re.finditer(
+                r"[\"「【]([\w一-鿿]+)[\"」】]\s*(?:评级|建议|决策|结论)",
+                text,
+                re.IGNORECASE,
+            )
+            cands.extend(g.group(1) for g in m)
+            return cands
+
+        def _find_rating(text: str) -> tuple[str, str]:
+            """First valid 5-tier candidate in ``text``, else "" / "none"."""
+            for cand in _find_rating_candidates(text):
+                normalized = normalize_rating_label(cand)
+                if normalized:
+                    return normalized, "pm" if text is decision else "trader"
+            return "", "none"
+
+        # Rating: PM decision is authoritative; fall back to the Trader's label,
+        # then the Trader's "FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**" line.
+        rating, rating_source = _find_rating(decision)
+        if not rating:
+            rating, rating_source = _find_rating(trader)
+        if not rating:
+            m = re.search(r"FINAL TRANSACTION PROPOSAL:\s*\*?\*?([A-Za-z]+)", trader, re.IGNORECASE)
+            if m and normalize_rating_label(m.group(1)):
+                rating, rating_source = normalize_rating_label(m.group(1)) or "—", "trader"
+        if not rating:
+            rating, rating_source = "—", "none"
+
+        entry, entry_source = _find(r"Entry Price|Entry|entry_price|入场价格|入场价|买入价|目标价|执行价")
+        stop, stop_source = _find(r"Stop Loss|Stop|stop_loss|止损价|止损位|止损线|止损")
+        size, size_source = _find(
+            r"Position Sizing|Size|position_size|position_sizing|仓位调整|仓位规模|仓位上限|仓位|持仓比例|仓位占比",
+            prefer_flexible=True,
+        )
+
         return {
             "rating": rating,
-            "entry": ce if _ok(ce) else "—",
-            "stop": cs if _ok(cs) else "—",
-            "size": csz if _ok(csz) else "—",
+            "rating_source": rating_source,
+            "entry": entry if _ok(entry) else "—",
+            "entry_source": entry_source if (_ok(entry) or entry_source == "pm") else "none",
+            "stop": stop if _ok(stop) else "—",
+            "stop_source": stop_source if (_ok(stop) or stop_source == "pm") else "none",
+            "size": size if _ok(size) else "—",
+            "size_source": size_source if (_ok(size) or size_source == "pm") else "none",
         }
 
     def _accumulate_stats(self, ticker: str, stats_handler) -> None:

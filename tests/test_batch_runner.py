@@ -213,3 +213,92 @@ class TestParseSummaryFieldsFallbackFormats:
         assert fields["rating"] == "Underweight"
         assert fields["entry"] == "—"
         assert fields["stop"] == "—"
+
+
+@pytest.mark.unit
+class TestParseSummaryFieldsPmAuthoritative:
+    """PM 决策修正值应优先于 trader 回退；评级候选需合法性验证（方案 B）。"""
+
+    def test_rating_ignores_ticker_code_in_heading(self):
+        """002594 场景：标题行 ``### 最终交易决策：**002594.SZ (比亚迪)**`` 中的
+        ``002594`` 不应被当作评级捕获；应取正文 ``**评级：** `Underweight```。"""
+        decision = (
+            "### 最终交易决策：**002594.SZ (比亚迪)**\n"
+            "**评级：** `Underweight`\n"
+        )
+        fields = BatchRunner._parse_summary_fields(decision, "")
+        assert fields["rating"] == "Underweight"
+
+    def test_stop_prefers_pm_corrected_value_over_trader(self):
+        """002594：PM 止损 ``88.57``（反引号 + ``止损位`` 字段名）应覆盖 trader 的
+        ``100.23``（错误方向的 entry+1.5xATR）。"""
+        decision = (
+            "**评级：** `Underweight`\n"
+            "**止损位：** `88.57`（引用自布林带中轨）\n"
+        )
+        trader = (
+            "**Action**: Sell\n"
+            "**Entry Price**: 95.77\n"
+            "**Stop Loss**: 100.23\n"
+            "**Position Sizing**: 全部700股清仓\n"
+        )
+        fields = BatchRunner._parse_summary_fields(decision, trader)
+        assert fields["stop"] == "88.57"
+        assert fields["stop_source"] == "pm"
+
+    def test_size_prefers_pm_adjustment_over_trader(self):
+        """002594：PM 仓位调整 ``卖出100股`` 应覆盖 trader 的 ``全部700股清仓``。"""
+        decision = (
+            "**评级：** `Underweight`\n"
+            "**仓位调整：** 卖出100股（约占当前持仓的14%）\n"
+        )
+        trader = "**Action**: Sell\n**Position Sizing**: 全部700股清仓\n"
+        fields = BatchRunner._parse_summary_fields(decision, trader)
+        assert fields["size"] == "卖出100股"
+        assert fields["size_source"] == "pm"
+
+    def test_pm_explicit_no_stop_not_overridden_by_trader(self):
+        """603993：PM 明确 ``不适用（清仓操作无需设置止损）`` 时，不应回退 trader 的
+        ``21.04``，应保持占位符。"""
+        decision = (
+            "**评级：** 卖出\n"
+            "**止损价：** 不适用（清仓操作无需设置止损）\n"
+        )
+        trader = "**Action**: Sell\n**Stop Loss**: 21.04\n**Position Sizing**: 清仓\n"
+        fields = BatchRunner._parse_summary_fields(decision, trader)
+        assert fields["stop"] == "—"
+        assert fields["stop_source"] == "pm"
+
+    def test_trader_fallback_still_works_with_source_marker(self):
+        """PM 未提及止损时仍回退 trader，但标记来源为 trader。"""
+        decision = "**评级：** Buy\n看多，建议分批建仓。\n"
+        trader = "**Action**: Buy\n**Stop Loss**: 9.50\n"
+        fields = BatchRunner._parse_summary_fields(decision, trader)
+        assert fields["stop"] == "9.50"
+        assert fields["stop_source"] == "trader"
+
+    def test_table_pm_correction_prefers_pm(self):
+        """688239：表格行 PM 止损 ``35.00`` 应覆盖 trader 的 ``45.43``。"""
+        decision = (
+            "| **评级** | **Sell** |\n"
+            "| **止损价** | 35.00 |\n"
+            "| **仓位规模** | 卖出600股（剩余600股） |\n"
+        )
+        trader = (
+            "**Action**: Sell\n"
+            "**Stop Loss**: 45.43\n"
+            "**Position Sizing**: 清仓1200股\n"
+        )
+        fields = BatchRunner._parse_summary_fields(decision, trader)
+        assert fields["stop"] == "35.00"
+        assert fields["stop_source"] == "pm"
+        assert fields["size"] == "卖出600股"
+        assert fields["size_source"] == "pm"
+
+    def test_rating_fallback_to_trader_label_still_works(self):
+        """PM 无数值时仍可回退 trader 的评级标签，来源标记 trader。"""
+        decision = "看多情绪占优，维持当前仓位。\n"
+        trader = "FINAL TRANSACTION PROPOSAL: **Hold**\n"
+        fields = BatchRunner._parse_summary_fields(decision, trader)
+        assert fields["rating"] == "Hold"
+        assert fields["rating_source"] == "trader"
