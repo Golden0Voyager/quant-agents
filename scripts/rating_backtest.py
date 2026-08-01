@@ -285,14 +285,14 @@ def render_report(outcomes: list[dict], regime_note: str = "") -> str:
             avg_ret = sum(o[f"ret_{h}"] for o in rows) / len(rows)
             avg_exc = sum(o[f"excess_{h}"] for o in rows) / len(rows)
             directional = rating != "Hold"
-            l1 = _hit_pct(rows, lambda o: _direction_correct(o["rating"], o[f"excess_{h}"])) if directional else "—"
+            l1 = _hit_pct(rows, lambda o, h=h: _direction_correct(o["rating"], o[f"excess_{h}"])) if directional else "—"
             l2 = _hit_pct(
                 rows,
-                lambda o: (o[f"ret_{h}"] < 0) if o["rating"] in BEARISH else (o[f"ret_{h}"] > 0),
+                lambda o, h=h: (o[f"ret_{h}"] < 0) if o["rating"] in BEARISH else (o[f"ret_{h}"] > 0),
             ) if directional else "—"
             stop_rows = [o for o in rows if o.get(f"stop_hit_{h}") is not None]
             l3 = (
-                _hit_pct(stop_rows, lambda o: o[f"stop_hit_{h}"] == 0) + f" ({len(stop_rows)})"
+                _hit_pct(stop_rows, lambda o, h=h: o[f"stop_hit_{h}"] == 0) + f" ({len(stop_rows)})"
                 if stop_rows else "—"
             )
             lines.append(
