@@ -680,6 +680,136 @@ def check_cross_file_consistency(results: dict[str, AuditResult]) -> list[AuditI
     return issues
 
 
+def _normalize_rating_standalone(raw: str) -> str | None:
+    """Standalone 5-tier rating normalizer used when tradingagents is unavailable."""
+    s = str(raw or "").strip().strip("*:.,`'\" “”")
+    lower = s.lower()
+    for label in ("buy", "overweight", "hold", "underweight", "sell"):
+        if lower == label:
+            return label.capitalize()
+    cn_map = {"买入": "Buy", "增持": "Overweight", "持有": "Hold", "减持": "Underweight", "卖出": "Sell"}
+    return cn_map.get(s)
+
+
+def check_pm_summary_consistency(batch_dir: str | Path) -> list[AuditIssue]:
+    """PM 最终决策 (5_portfolio/decision.md) 与 batch_summary.json 的一致性。
+
+    修复 20260801_batch_my 暴露的审计盲区：旧版 _parse_summary_fields 把 PM
+    反引号字段（``**评级：** `Underweight```）误判成 ``Hold``，并回退 trader
+    的止损数值覆盖 PM 的显式拒绝（``止损价：不适用（清仓操作无需设置止损）``）。
+
+    规则：
+    - PMSUM-001: PM 评级与 summary 评级不一致 (ERROR)
+    - PMSUM-002: PM 止损与 summary 止损不一致，或 PM 显式不设止损却被
+      summary 写入 trader 数值 (ERROR)
+
+    缺少 batch_summary.json 或对应 5_portfolio/decision.md 时静默跳过，
+    避免对目录不完整的批次产生误报。
+    """
+    issues: list[AuditIssue] = []
+    batch_path = Path(batch_dir)
+    summary_path = batch_path / "batch_summary.json"
+    if not summary_path.exists():
+        return issues
+    try:
+        data = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return issues
+    rows = data.get("rows", []) if isinstance(data, dict) else data
+    if not isinstance(rows, list):
+        return issues
+
+    try:
+        import sys as _sys
+
+        _here = str(Path(__file__).resolve().parent.parent)
+        if _here not in _sys.path:
+            _sys.path.insert(0, _here)
+        from tradingagents.agents.utils.rating import normalize_rating_label
+    except Exception:
+        normalize_rating_label = _normalize_rating_standalone
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        ticker = str(row.get("ticker") or "").split(".")[0].strip()
+        if not (ticker.isdigit() and len(ticker) == 6):
+            continue
+
+        decision_path = None
+        for d in batch_path.iterdir():
+            if d.is_dir() and _parse_ticker_dir_name(d.name) == ticker:
+                decision_path = d / "5_portfolio" / "decision.md"
+                break
+        if decision_path is None or not decision_path.exists():
+            continue
+        try:
+            text = decision_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+
+        # PM 评级（冒号行，容忍 ** 与反引号包裹）
+        pm_rating = None
+        m = re.search(r"评级[:：]\s*\*?\*?\s*`?\s*([\w一-鿿]+)`?", text)
+        if m:
+            pm_rating = normalize_rating_label(m.group(1))
+        summary_rating = normalize_rating_label(str(row.get("rating") or ""))
+        if pm_rating and summary_rating and pm_rating != summary_rating:
+            issues.append(AuditIssue(
+                severity="ERROR",
+                rule_id="PMSUM-001",
+                message=f"PM 最终评级 {pm_rating} 与 batch_summary 的 {summary_rating} 不一致",
+                ticker=ticker,
+                file_path=str(decision_path),
+                expected=pm_rating,
+                actual=summary_rating,
+                suggestion="PM 决策为权威来源，检查汇总解析是否误判（如标题中的 ticker 代码被当成评级）"
+            ))
+
+        # PM 显式不设止损（清仓/不适用）→ summary 不应写入任何止损数值
+        pm_reject = re.search(
+            r"(?:止损位|止损价|止损线)\*?\*?\s*[:：][^\d\n]*(?:不适用|无需设置|清仓)", text
+        )
+        try:
+            summary_stop = float(str(row.get("stop") or "").replace(",", ""))
+        except (TypeError, ValueError):
+            summary_stop = None
+        if summary_stop is not None and summary_stop <= 0:
+            summary_stop = None
+        if pm_reject is not None and summary_stop is not None:
+            issues.append(AuditIssue(
+                severity="ERROR",
+                rule_id="PMSUM-002",
+                message=f"PM 明确不设止损（{pm_reject.group(0)[:40]}），"
+                        f"batch_summary 却写入 trader 数值 {summary_stop}",
+                ticker=ticker,
+                file_path=str(decision_path),
+                expected="—",
+                actual=str(summary_stop),
+                suggestion="PM 显式拒绝止损时不得回退 trader 的止损数值"
+            ))
+            continue
+
+        m_stop = re.search(
+            r"(?:止损位|止损价|止损线|止损)[：:]\s*\*?\*?\s*`?\s*([0-9]+(?:\.[0-9]+)?)", text
+        )
+        if m_stop and summary_stop is not None:
+            pm_stop = float(m_stop.group(1))
+            if abs(pm_stop - summary_stop) > 1e-9:
+                issues.append(AuditIssue(
+                    severity="ERROR",
+                    rule_id="PMSUM-002",
+                    message=f"PM 止损 {pm_stop} 与 batch_summary 的 {summary_stop} 不一致",
+                    ticker=ticker,
+                    file_path=str(decision_path),
+                    expected=str(pm_stop),
+                    actual=str(summary_stop),
+                    suggestion="PM 决策为权威来源，检查汇总是否回退了 trader 的旧止损值"
+                ))
+
+    return issues
+
+
 # =============================================================================
 # 主审计引擎
 # =============================================================================
@@ -739,6 +869,11 @@ class ReportAuditor:
         # 跨文件一致性检查
         cross_issues = check_cross_file_consistency(self.results)
         for issue in cross_issues:
+            if issue.ticker in self.results:
+                self.results[issue.ticker].issues.append(issue)
+
+        # PM 最终决策 vs batch_summary 一致性（PMSUM-001/002）
+        for issue in check_pm_summary_consistency(self.batch_dir):
             if issue.ticker in self.results:
                 self.results[issue.ticker].issues.append(issue)
 

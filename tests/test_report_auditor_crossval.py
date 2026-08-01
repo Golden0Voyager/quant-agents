@@ -1,5 +1,6 @@
 """Tests for the report_auditor cross-validation feature."""
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -100,6 +101,74 @@ class TestTickerDirDiscovery:
         (tmp_path / "batch_summary").mkdir()
         results = auditor.ReportAuditor(str(tmp_path)).audit()
         assert results == {}
+
+
+@pytest.mark.unit
+class TestPmSummaryConsistency:
+    """PM 最终决策 (5_portfolio/decision.md) 与 batch_summary 的一致性规则。"""
+
+    def _make_batch(self, tmp_path, summary_rows, decision_text):
+        """构造 batch 目录: batch_summary.json + 比亚迪_002594/5_portfolio/decision.md"""
+        (tmp_path / "batch_summary.json").write_text(
+            json.dumps({"rows": summary_rows}, ensure_ascii=False), encoding="utf-8"
+        )
+        pm_dir = tmp_path / "比亚迪_002594" / "5_portfolio"
+        pm_dir.mkdir(parents=True)
+        (pm_dir / "decision.md").write_text(decision_text, encoding="utf-8")
+        return tmp_path
+
+    def test_flags_rating_mismatch(self, auditor, tmp_path):
+        """summary=Hold vs PM=Underweight → PMSUM-001 ERROR"""
+        batch = self._make_batch(
+            tmp_path,
+            [{"ticker": "002594", "rating": "Hold", "stop": "88.57"}],
+            "**评级：** `Underweight`\n**止损位：** `88.57`\n",
+        )
+        issues = auditor.check_pm_summary_consistency(batch)
+        assert any(i.rule_id == "PMSUM-001" and i.severity == "ERROR" for i in issues)
+
+    def test_flags_stop_mismatch(self, auditor, tmp_path):
+        """summary stop=100.23 vs PM stop=88.57 → PMSUM-002 ERROR"""
+        batch = self._make_batch(
+            tmp_path,
+            [{"ticker": "002594", "rating": "Underweight", "stop": "100.23"}],
+            "**评级：** `Underweight`\n**止损位：** `88.57`\n",
+        )
+        issues = auditor.check_pm_summary_consistency(batch)
+        assert any(i.rule_id == "PMSUM-002" and i.severity == "ERROR" for i in issues)
+
+    def test_pm_explicit_no_stop_kept(self, auditor, tmp_path):
+        """PM 明确 止损价：不适用（清仓操作无需设置止损），summary 却给了 trader 的
+        21.04 → PMSUM-002（PM 显式拒绝不应被 trader 数值覆盖）"""
+        batch = self._make_batch(
+            tmp_path,
+            [{"ticker": "002594", "rating": "Sell", "stop": "21.04"}],
+            "**评级：** `Sell`\n**止损价：** 不适用（清仓操作无需设置止损）\n",
+        )
+        issues = auditor.check_pm_summary_consistency(batch)
+        assert any(i.rule_id == "PMSUM-002" and i.severity == "ERROR" for i in issues)
+
+    def test_no_issue_when_consistent(self, auditor, tmp_path):
+        batch = self._make_batch(
+            tmp_path,
+            [{"ticker": "002594", "rating": "Underweight", "stop": "88.57"}],
+            "**评级：** `Underweight`\n**止损位：** `88.57`\n",
+        )
+        assert auditor.check_pm_summary_consistency(batch) == []
+
+    def test_skips_when_no_decision_file(self, auditor, tmp_path):
+        """缺少 5_portfolio/decision.md 时跳过，不产生误报"""
+        (tmp_path / "batch_summary.json").write_text(
+            json.dumps({"rows": [{"ticker": "002594", "rating": "Hold"}]}),
+            encoding="utf-8",
+        )
+        assert auditor.check_pm_summary_consistency(tmp_path) == []
+
+    def test_skips_when_no_summary_json(self, auditor, tmp_path):
+        pm_dir = tmp_path / "比亚迪_002594" / "5_portfolio"
+        pm_dir.mkdir(parents=True)
+        (pm_dir / "decision.md").write_text("**评级：** `Underweight`\n", encoding="utf-8")
+        assert auditor.check_pm_summary_consistency(tmp_path) == []
 
 
 @pytest.mark.unit

@@ -35,6 +35,29 @@ _RATING_LABEL_RE = re.compile(
     r"(?:rating|decision|评级|建议|决策|结论|评级结果).*?[:：\-][\s*]*([\w一-鿿]+)", re.IGNORECASE)
 
 
+def normalize_rating_label(raw: str) -> str | None:
+    """Return the canonical 5-tier rating if ``raw`` is a valid rating label.
+
+    Accepts both English tier words (case-insensitive) and Chinese synonyms
+    from :data:`_CN_TO_EN_RATING`. Returns ``None`` for anything that is not
+    a rating word — e.g. a ticker code (``002594``) that a lax regex captured
+    from a heading like ``### 最终交易决策：**002594.SZ``. Callers use this to
+    validate *candidates* before trusting one, instead of letting
+    :func:`parse_rating` silently default to ``Hold``.
+    """
+    if not raw:
+        return None
+    clean = raw.strip("*:.,`'\" 　")
+    if not clean:
+        return None
+    lower = clean.lower()
+    if lower in _RATING_SET:
+        return clean.capitalize()
+    if clean in _CN_TO_EN_RATING:
+        return _CN_TO_EN_RATING[clean]
+    return None
+
+
 def parse_rating(text: str, default: str = "Hold") -> str:
     """Heuristically extract a 5-tier rating from prose text.
 
