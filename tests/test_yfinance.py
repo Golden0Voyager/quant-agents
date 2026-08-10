@@ -563,7 +563,9 @@ class YfHistoryEndIsExclusiveTests(unittest.TestCase):
                     index=idx,
                 )
 
-            with patch.object(su.yf, "download", fake_download):
+            with patch.object(su.yf, "download", fake_download), \
+                 patch("tradingagents.dataflows.stockstats_utils._load_ohlcv_from_global_db",
+                       return_value=None):
                 today = pd.Timestamp.today().strftime("%Y-%m-%d")
                 su.load_ohlcv("AAPL", today)
 
