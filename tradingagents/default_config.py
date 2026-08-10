@@ -152,10 +152,13 @@ _BASE_CONFIG = {
     #
     # Note: A-share tickers (.SS/.SZ/.BJ) auto-route to smartmoney_db first,
     # then akshare, then yfinance as last resort (determined at runtime).
+    # US stocks / crypto (AAPL, BTC-USD, …) route to quant_db_global first —
+    # the local quant_core.db global_assets_bars archive — with yfinance as
+    # online fallback when the archive is missing or stale.
     # 2026-05-20: 优先依赖 AkShare 作为 A 股外部数据源，yfinance 仅作为最后兜底。
     # 如需完全禁用 yfinance fallback，可设置环境变量 DISABLE_YFINANCE_FALLBACK=1。
     "data_vendors": {
-        "core_stock_apis": "smartmoney_db,akshare,yfinance",
+        "core_stock_apis": "smartmoney_db,quant_db_global,akshare,yfinance",
         "technical_indicators": "smartmoney_db,akshare,yfinance",
         "fundamental_data": "smartmoney_db,akshare,yfinance",
         "news_data": "akshare,yfinance",  # news not stored locally
