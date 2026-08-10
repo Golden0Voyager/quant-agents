@@ -1,7 +1,11 @@
-"""SmartMoney DB vendor — read A-share data from local SQLite database.
+"""SmartMoney DB vendor — read A-share and global-asset data from local SQLite.
 
 This vendor provides a zero-latency fallback layer for A-share tickers by
-reading from the shared quant_core.db maintained by quant_hunter.
+reading from the shared quant_core.db maintained by quant_hunter. It also
+serves US-stock / crypto OHLCV (AAPL, NVDA, BTC-USD, …) from the
+``global_assets_bars`` table via :func:`get_global_asset_data`, which is
+registered under the separate ``quant_db_global`` vendor name (the router
+skips the ``smartmoney_db`` name for non-A-share tickers).
 
 Placement in the fallback chain:
     quant_core.db → akshare → yfinance
@@ -118,6 +122,78 @@ def get_stock_data(
         f"# Stock data for {symbol.upper()} from {start_date} to {end_date}\n"
         f"# Total records: {len(df)}\n"
         f"# Source: quant_core.db (local SQLite, 前复权)\n"
+        f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    )
+    return header + df.to_csv()
+
+
+# ===========================================================================
+# Global assets (US stocks / crypto) — global_assets_bars table
+# ===========================================================================
+
+def get_global_asset_data(
+    symbol: Annotated[str, "Global ticker e.g. AAPL, NVDA, BTC-USD"],
+    start_date: Annotated[str, "Start date YYYY-MM-DD"],
+    end_date: Annotated[str, "End date YYYY-MM-DD"],
+) -> str:
+    """Fetch US-stock / crypto daily OHLCV from local quant_core.db.
+
+    Reads the ``global_assets_bars`` table maintained by quant_pipeline
+    (schema: ts_code, trade_date, open, high, low, close, adj_close, volume).
+    A-share tickers are rejected immediately — they belong to ``daily_bars``.
+
+    Freshness guard: when the latest local row lags ``end_date`` by more
+    than ``MAX_OHLCV_STALE_DAYS`` calendar days, raises ``NoMarketDataError``
+    so ``route_to_vendor`` falls back to the next vendor (online yfinance).
+    """
+    from tradingagents.dataflows.akshare_common import is_a_share_ticker
+    from tradingagents.dataflows.stockstats_utils import MAX_OHLCV_STALE_DAYS
+
+    if is_a_share_ticker(symbol):
+        raise NoMarketDataError(
+            symbol, symbol,
+            "A-share tickers are stored in daily_bars, not global_assets_bars.",
+        )
+
+    code = symbol.upper()
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, open AS Open, high AS High,
+               low AS Low, close AS Close, volume AS Volume
+        FROM global_assets_bars
+        WHERE ts_code = ? AND trade_date BETWEEN ? AND ?
+        ORDER BY trade_date DESC
+        """,
+        (code, start_date, end_date),
+    )
+
+    if df is None or df.empty:
+        raise NoMarketDataError(
+            symbol, code,
+            f"No data in quant_core.db global_assets_bars for {symbol} "
+            f"between {start_date} and {end_date}.",
+        )
+
+    latest = pd.to_datetime(df["Date"], errors="coerce").max()
+    end = pd.to_datetime(end_date, errors="coerce")
+    if pd.notna(latest) and pd.notna(end):
+        stale_days = (end.normalize() - latest.normalize()).days
+        if stale_days > MAX_OHLCV_STALE_DAYS:
+            raise NoMarketDataError(
+                symbol, code,
+                f"global_assets_bars latest row is {latest.date()}, "
+                f"{stale_days} days before the requested {end_date} (stale) — "
+                f"refusing to use it",
+            )
+
+    df = df.set_index("Date")
+    for col in ("Open", "High", "Low", "Close"):
+        df[col] = df[col].round(2)
+
+    header = (
+        f"# Stock data for {code} from {start_date} to {end_date}\n"
+        f"# Total records: {len(df)}\n"
+        f"# Source: quant_core.db global_assets_bars (local SQLite)\n"
         f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
     )
     return header + df.to_csv()
