@@ -1629,6 +1629,110 @@ class RobustnessGuardsTests(unittest.TestCase):
             os.unlink(db_path)
 
 
+def _create_global_assets_db(path):
+    """Minimal quant_core.db fixture with a global_assets_bars table."""
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE global_assets_bars (
+            ts_code TEXT, trade_date TEXT, open REAL, high REAL,
+            low REAL, close REAL, adj_close REAL, volume REAL,
+            data_source TEXT,
+            PRIMARY KEY (ts_code, trade_date)
+        );
+        INSERT INTO global_assets_bars VALUES ('AAPL','2026-06-15',200.0,203.0,199.0,202.0,202.0,5.0e7,'yfinance');
+        INSERT INTO global_assets_bars VALUES ('AAPL','2026-06-16',202.0,205.0,201.0,204.0,204.0,4.8e7,'yfinance');
+        INSERT INTO global_assets_bars VALUES ('AAPL','2026-06-17',204.0,206.0,203.0,205.5,205.5,4.5e7,'yfinance');
+        INSERT INTO global_assets_bars VALUES ('BTC-USD','2026-06-18',64000.0,65500.0,63800.0,65100.0,65100.0,2.1e10,'yfinance');
+        INSERT INTO global_assets_bars VALUES ('BTC-USD','2026-06-19',65100.0,66000.0,64900.0,65800.0,65800.0,2.3e10,'yfinance');
+    """)
+    conn.commit()
+    conn.close()
+
+
+@pytest.mark.unit
+class GetGlobalAssetDataTests(unittest.TestCase):
+    """Tests for get_global_asset_data (global_assets_bars, quant_db_global vendor)."""
+
+    def setUp(self):
+        from tradingagents.dataflows.errors import NoMarketDataError
+        self.NoMarketDataError = NoMarketDataError
+
+    def _with_db(self, fn):
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_global_assets_db(db_path)
+            with _PatchedVendor(db_path):
+                fn()
+        finally:
+            os.unlink(db_path)
+
+    def test_returns_csv_for_fresh_us_ticker(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_global_asset_data
+
+        def check():
+            result = get_global_asset_data("AAPL", "2026-06-15", "2026-06-17")
+            self.assertIn("# Stock data for AAPL", result)
+            self.assertIn("global_assets_bars", result)
+            self.assertIn("# Total records: 3", result)
+            self.assertIn("2026-06-17", result)
+            self.assertIn("205.5", result)
+
+        self._with_db(check)
+
+    def test_returns_csv_for_crypto(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_global_asset_data
+
+        def check():
+            result = get_global_asset_data("BTC-USD", "2026-06-18", "2026-06-19")
+            self.assertIn("# Stock data for BTC-USD", result)
+            self.assertIn("# Total records: 2", result)
+            self.assertIn("65800.0", result)
+
+        self._with_db(check)
+
+    def test_a_share_ticker_rejected(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_global_asset_data
+
+        def check():
+            with self.assertRaises(self.NoMarketDataError):
+                get_global_asset_data("600519.SS", "2026-06-15", "2026-06-17")
+
+        self._with_db(check)
+
+    def test_unknown_symbol_raises(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_global_asset_data
+
+        def check():
+            with self.assertRaises(self.NoMarketDataError):
+                get_global_asset_data("NOTHING", "2026-06-15", "2026-06-17")
+
+        self._with_db(check)
+
+    def test_stale_data_raises_for_online_fallback(self):
+        """Latest local row > MAX_OHLCV_STALE_DAYS before end_date → no-data error."""
+        from tradingagents.dataflows.smartmoney_vendor import get_global_asset_data
+
+        def check():
+            # AAPL's latest row is 2026-06-17; requesting up to 2026-07-20
+            # is 33 days stale and must fall back to the online vendor.
+            with self.assertRaises(self.NoMarketDataError) as ctx:
+                get_global_asset_data("AAPL", "2026-06-15", "2026-07-20")
+            self.assertIn("stale", str(ctx.exception))
+
+        self._with_db(check)
+
+    def test_within_staleness_window_accepted(self):
+        """A long weekend / holiday gap (≤ MAX_OHLCV_STALE_DAYS) is still served."""
+        from tradingagents.dataflows.smartmoney_vendor import get_global_asset_data
+
+        def check():
+            result = get_global_asset_data("AAPL", "2026-06-15", "2026-06-25")
+            self.assertIn("# Total records: 3", result)
+
+        self._with_db(check)
+
+
 if __name__ == "__main__":
     unittest.main()
 
