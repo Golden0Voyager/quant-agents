@@ -178,6 +178,36 @@ def _load_ohlcv_from_smartmoney_db(
     return df  # _df_from_sql returns None on any error  # pragma: no cover
 
 
+def _load_ohlcv_from_global_db(
+    symbol: str,
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame | None:
+    """Fetch US-stock / crypto OHLCV from local quant_core.db (zero network).
+
+    Reads the ``global_assets_bars`` table (e.g. AAPL, NVDA, BTC-USD).
+    Returns None when the symbol is not archived locally so the caller
+    falls back to the online vendor.
+    """
+    from tradingagents.dataflows.akshare_common import is_a_share_ticker
+    from tradingagents.dataflows.smartmoney_vendor import _df_from_sql
+
+    if is_a_share_ticker(symbol):
+        return None
+
+    df = _df_from_sql(
+        """SELECT trade_date AS Date, open AS Open, high AS High,
+                  low AS Low, close AS Close, volume AS Volume
+           FROM global_assets_bars
+           WHERE ts_code = ? AND trade_date BETWEEN ? AND ?
+           ORDER BY trade_date""",
+        (symbol.upper(), start_date, end_date),
+    )
+    if df is None or df.empty:
+        return None
+    return df
+
+
 def _load_ohlcv_from_akshare(
     symbol: str,
     start_date: str,
@@ -332,6 +362,11 @@ def load_ohlcv(
     coverage is unreliable. Set ``DISABLE_YFINANCE_FALLBACK=1`` to skip yfinance
     entirely for A-share tickers.
 
+    For non-A-share tickers (US stocks, crypto), tries the local quant_core.db
+    ``global_assets_bars`` table first and falls back to online yfinance when
+    the local archive is missing or stale (latest row lags ``curr_date`` by
+    more than ``MAX_OHLCV_STALE_DAYS``).
+
     Args:
         symbol: Ticker symbol.
         curr_date: Analysis date used to filter look-ahead rows and to judge
@@ -411,28 +446,43 @@ def load_ohlcv(
                     symbol,
                 )
         else:
-            # Non-A-share: yfinance first (existing behavior)
-            try:
-                downloaded = yf_retry(
-                    lambda: _silent_yf_download(
-                        canonical,
-                        start=start_str,
-                        end=end_str,
-                        multi_level_index=False,
-                        progress=False,
-                        auto_adjust=True,
+            # Non-A-share: local quant_core.db global_assets_bars first
+            # (US stocks / crypto archived by quant_pipeline), yfinance as
+            # online fallback when local data is missing or stale.
+            downloaded = _load_ohlcv_from_global_db(canonical, start_str, end_str)
+            if downloaded is not None:
+                try:
+                    _assert_ohlcv_not_stale(downloaded, curr_date, symbol, canonical)
+                except NoMarketDataError:
+                    logger.info(
+                        "quant_core.db global OHLCV for %s is stale relative to %s; "
+                        "falling back to yfinance",
+                        symbol,
+                        curr_date,
                     )
-                )
-                downloaded = _ensure_date_column(downloaded.reset_index())
-                if downloaded.empty or "Close" not in downloaded.columns:
                     downloaded = None
-            except Exception:
-                logger.warning(
-                    "yfinance failed for %s",
-                    symbol,
-                    exc_info=True,
-                )
-                downloaded = None
+            if downloaded is None:
+                try:
+                    downloaded = yf_retry(
+                        lambda: _silent_yf_download(
+                            canonical,
+                            start=start_str,
+                            end=end_str,
+                            multi_level_index=False,
+                            progress=False,
+                            auto_adjust=True,
+                        )
+                    )
+                    downloaded = _ensure_date_column(downloaded.reset_index())
+                    if downloaded.empty or "Close" not in downloaded.columns:
+                        downloaded = None
+                except Exception:
+                    logger.warning(
+                        "yfinance failed for %s",
+                        symbol,
+                        exc_info=True,
+                    )
+                    downloaded = None
 
         if downloaded is None or downloaded.empty or "Close" not in downloaded.columns:
             raise NoMarketDataError(symbol, canonical, "No data returned from any vendor")

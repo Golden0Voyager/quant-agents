@@ -26,6 +26,7 @@ from tradingagents.dataflows.stockstats_utils import (
     _coerce_ohlcv_dates,
     _ensure_date_column,
     _load_ohlcv_from_akshare,
+    _load_ohlcv_from_global_db,
     _load_ohlcv_from_smartmoney_db,
     filter_financials_by_date,
     load_ohlcv,
@@ -288,6 +289,8 @@ class LoadOhlcvCacheTests(_TempDirMixin, unittest.TestCase):
                    return_value={"data_cache_dir": str(cache_dir)}), \
              patch("tradingagents.dataflows.stockstats_utils.normalize_symbol",
                    return_value="AAPL"), \
+             patch("tradingagents.dataflows.stockstats_utils._load_ohlcv_from_global_db",
+                   return_value=None), \
              patch("tradingagents.dataflows.stockstats_utils.yf_retry",
                    return_value=downloaded):
             result = load_ohlcv("AAPL", "2026-01-03", lookback_years=5)
@@ -316,6 +319,8 @@ class LoadOhlcvDownloadAndFilterTests(_TempDirMixin, unittest.TestCase):
                    return_value={"data_cache_dir": str(cache_dir)}), \
              patch("tradingagents.dataflows.stockstats_utils.normalize_symbol",
                    return_value="AAPL"), \
+             patch("tradingagents.dataflows.stockstats_utils._load_ohlcv_from_global_db",
+                   return_value=None), \
              patch("tradingagents.dataflows.stockstats_utils.yf_retry",
                    return_value=downloaded):
             result = load_ohlcv("AAPL", "2026-01-03", lookback_years=5)
@@ -660,6 +665,159 @@ class LoadOhlcvStaleDbTests(_TempDirMixin, unittest.TestCase):
         cached = pd.read_csv(cache_files[0])
         self.assertIn("2026-01-10", cached["Date"].values)
         self.assertNotIn("2025-12-21", cached["Date"].values)
+
+
+# =========================================================================
+# _load_ohlcv_from_global_db + non-A-share local-first load_ohlcv
+# =========================================================================
+
+
+@pytest.mark.unit
+class LoadOhlcvFromGlobalDbTests(unittest.TestCase):
+    """Tests for _load_ohlcv_from_global_db (global_assets_bars)."""
+
+    def test_returns_none_for_a_share(self):
+        """A-share symbols belong to daily_bars, not global_assets_bars."""
+        result = _load_ohlcv_from_global_db("600519.SS", "2026-01-01", "2026-01-10")
+        self.assertIsNone(result)
+
+    def test_returns_dataframe_when_archived(self):
+        rows = pd.DataFrame({
+            "Date": ["2026-01-08", "2026-01-09"],
+            "Open": [200.0, 202.0],
+            "High": [203.0, 205.0],
+            "Low": [199.0, 201.0],
+            "Close": [202.0, 204.0],
+            "Volume": [5.0e7, 4.8e7],
+        })
+        with mock.patch(
+            "tradingagents.dataflows.smartmoney_vendor._df_from_sql",
+            return_value=rows,
+        ):
+            result = _load_ohlcv_from_global_db("AAPL", "2026-01-01", "2026-01-10")
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result), 2)
+
+    def test_returns_none_when_not_archived(self):
+        with mock.patch(
+            "tradingagents.dataflows.smartmoney_vendor._df_from_sql",
+            return_value=pd.DataFrame(),
+        ):
+            result = _load_ohlcv_from_global_db("NOTHING", "2026-01-01", "2026-01-10")
+        self.assertIsNone(result)
+
+    def test_returns_none_on_db_error(self):
+        with mock.patch(
+            "tradingagents.dataflows.smartmoney_vendor._df_from_sql",
+            return_value=None,
+        ):
+            result = _load_ohlcv_from_global_db("BTC-USD", "2026-01-01", "2026-01-10")
+        self.assertIsNone(result)
+
+
+@pytest.mark.unit
+class LoadOhlcvGlobalDbFallbackTests(_TempDirMixin, unittest.TestCase):
+    """Non-A-share load_ohlcv: local global_assets_bars first, yfinance fallback."""
+
+    def _fresh(self):
+        return pd.DataFrame({
+            "Date": ["2026-01-08", "2026-01-09"],
+            "Open": [200.0, 202.0],
+            "High": [203.0, 205.0],
+            "Low": [199.0, 201.0],
+            "Close": [202.0, 204.0],
+            "Volume": [5.0e7, 4.8e7],
+        })
+
+    def _stale(self):
+        return pd.DataFrame({
+            "Date": ["2025-12-20", "2025-12-21"],
+            "Open": [100.0, 101.0],
+            "High": [102.0, 103.0],
+            "Low": [99.0, 100.0],
+            "Close": [101.0, 102.0],
+            "Volume": [10000, 11000],
+        })
+
+    def _online(self):
+        dates = pd.DatetimeIndex(
+            ["2026-01-08", "2026-01-09", "2026-01-10"], name="Date"
+        )
+        return pd.DataFrame({
+            "Open": [105.0, 106.0, 107.0],
+            "High": [108.0, 109.0, 110.0],
+            "Low": [104.0, 105.0, 106.0],
+            "Close": [106.0, 107.0, 108.0],
+            "Volume": [20000, 21000, 22000],
+        }, index=dates)
+
+    def test_fresh_local_db_skips_yfinance(self):
+        with mock.patch(
+            "tradingagents.dataflows.stockstats_utils.get_config",
+            return_value={"data_cache_dir": str(self._tmp)},
+        ), mock.patch(
+            "tradingagents.dataflows.stockstats_utils.normalize_symbol",
+            return_value="AAPL",
+        ), mock.patch(
+            "tradingagents.dataflows.stockstats_utils._load_ohlcv_from_global_db",
+            return_value=self._fresh(),
+        ) as dbmock, mock.patch.object(
+            su.yf, "download"
+        ) as yfmock:
+            result = load_ohlcv("AAPL", "2026-01-09", lookback_years=5)
+
+        dbmock.assert_called_once()
+        yfmock.assert_not_called()
+        self.assertEqual(len(result), 2)
+        self.assertIn(pd.Timestamp("2026-01-09"), result["Date"].values)
+
+        cache_files = list(self._tmp.glob("*.csv"))
+        self.assertEqual(len(cache_files), 1)
+
+    def test_stale_local_db_falls_back_to_yfinance(self):
+        with mock.patch(
+            "tradingagents.dataflows.stockstats_utils.get_config",
+            return_value={"data_cache_dir": str(self._tmp)},
+        ), mock.patch(
+            "tradingagents.dataflows.stockstats_utils.normalize_symbol",
+            return_value="AAPL",
+        ), mock.patch(
+            "tradingagents.dataflows.stockstats_utils._load_ohlcv_from_global_db",
+            return_value=self._stale(),
+        ) as dbmock, mock.patch.object(
+            su.yf, "download", return_value=self._online()
+        ) as yfmock:
+            result = load_ohlcv("AAPL", "2026-01-10", lookback_years=5)
+
+        dbmock.assert_called_once()
+        yfmock.assert_called_once()
+        self.assertEqual(len(result), 3)
+        self.assertIn(pd.Timestamp("2026-01-10"), result["Date"].values)
+
+        # The stale local frame must not have poisoned the on-disk cache.
+        cache_files = list(self._tmp.glob("*.csv"))
+        self.assertEqual(len(cache_files), 1)
+        cached = pd.read_csv(cache_files[0])
+        self.assertIn("2026-01-10", cached["Date"].values)
+        self.assertNotIn("2025-12-21", cached["Date"].values)
+
+    def test_missing_local_db_falls_back_to_yfinance(self):
+        with mock.patch(
+            "tradingagents.dataflows.stockstats_utils.get_config",
+            return_value={"data_cache_dir": str(self._tmp)},
+        ), mock.patch(
+            "tradingagents.dataflows.stockstats_utils.normalize_symbol",
+            return_value="AAPL",
+        ), mock.patch(
+            "tradingagents.dataflows.stockstats_utils._load_ohlcv_from_global_db",
+            return_value=None,
+        ), mock.patch.object(
+            su.yf, "download", return_value=self._online()
+        ) as yfmock:
+            result = load_ohlcv("AAPL", "2026-01-10", lookback_years=5)
+
+        yfmock.assert_called_once()
+        self.assertEqual(len(result), 3)
 
 
 if __name__ == "__main__":

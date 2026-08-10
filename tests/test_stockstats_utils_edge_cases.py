@@ -235,6 +235,8 @@ class LoadOhlcvYfinanceExceptionTests(_TempDirMixin, unittest.TestCase):
                    return_value={"data_cache_dir": str(self._tmp)}), \
              patch("tradingagents.dataflows.stockstats_utils.normalize_symbol",
                    return_value="AAPL"), \
+             patch("tradingagents.dataflows.stockstats_utils._load_ohlcv_from_global_db",
+                   return_value=None), \
              patch("tradingagents.dataflows.stockstats_utils.yf_retry",
                    side_effect=ValueError("yfinance crashed")), self.assertRaises(NoMarketDataError):
             load_ohlcv("AAPL", "2026-01-03", lookback_years=5)
@@ -282,6 +284,8 @@ class LoadOhlcvYfinanceExceptionTests(_TempDirMixin, unittest.TestCase):
                    return_value={"data_cache_dir": str(self._tmp)}), \
              patch("tradingagents.dataflows.stockstats_utils.normalize_symbol",
                    return_value="AAPL"), \
+             patch("tradingagents.dataflows.stockstats_utils._load_ohlcv_from_global_db",
+                   return_value=None), \
              patch("tradingagents.dataflows.stockstats_utils.yf_retry",
                    return_value=downloaded):
             result = load_ohlcv("AAPL", "2026-01-03", lookback_years=5)
@@ -478,6 +482,8 @@ class LoadOhlcvCacheFreshnessTests(_TempDirMixin, unittest.TestCase):
                    return_value="AAPL"), \
              patch("tradingagents.dataflows.akshare_common.is_a_share_ticker",
                    return_value=False), \
+             patch("tradingagents.dataflows.stockstats_utils._load_ohlcv_from_global_db",
+                   return_value=None), \
              patch("tradingagents.dataflows.stockstats_utils.yf_retry",
                    return_value=fresh) as mock_yf:
             result = load_ohlcv("AAPL", "2026-01-05", lookback_years=5)
@@ -520,6 +526,8 @@ class LoadOhlcvCacheFreshnessTests(_TempDirMixin, unittest.TestCase):
                    return_value="AAPL"), \
              patch("tradingagents.dataflows.akshare_common.is_a_share_ticker",
                    return_value=False), \
+             patch("tradingagents.dataflows.stockstats_utils._load_ohlcv_from_global_db",
+                   return_value=None), \
              patch("tradingagents.dataflows.stockstats_utils.yf_retry",
                    return_value=fresh) as mock_yf:
             result = load_ohlcv("AAPL", "2026-01-06", lookback_years=5, refresh=True)
