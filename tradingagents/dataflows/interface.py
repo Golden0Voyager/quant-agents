@@ -65,6 +65,7 @@ from .smartmoney_vendor import (
     get_earnings_estimates as get_smartmoney_earnings_estimates,
     get_fund_flow as get_smartmoney_fund_flow,
     get_fundamentals as get_smartmoney_fundamentals,
+    get_global_asset_data as get_smartmoney_global_asset_data,
     get_income_statement as get_smartmoney_income_statement,
     get_index_daily as get_smartmoney_index_daily,
     get_indicators as get_smartmoney_indicators,
@@ -180,6 +181,10 @@ VENDOR_LIST = [
     "alpha_vantage",
     "akshare",
     "smartmoney_db",
+    # Local quant_core.db global_assets_bars (US stocks / crypto). Registered
+    # under a distinct name because the router skips the ``smartmoney_db``
+    # name for non-A-share tickers.
+    "quant_db_global",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -204,6 +209,7 @@ VENDOR_METHODS: dict[str, dict[str, Any]] = {
     # core_stock_apis
     "get_stock_data": {
         "smartmoney_db": get_smartmoney_stock_data,
+        "quant_db_global": get_smartmoney_global_asset_data,
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
         "akshare": get_akshare_stock_data,
