@@ -116,6 +116,52 @@ class TestBatchRunnerFallbackDetection:
 
 @pytest.mark.unit
 class TestBatchRunnerSummaryOutput:
+    def test_generate_summary_includes_data_coverage_degradation(self, tmp_path):
+        runner = BatchRunner(
+            tickers=["AAPL"],
+            profile_config={"llm_provider": "openai", "output_language": "English"},
+            output_dir=tmp_path / "reports" / "batch_20260101_000000",
+            workers=1,
+        )
+        runner._extract_summary(
+            "AAPL",
+            {
+                "final_trade_decision": "**Rating**: Hold\n",
+                "trader_investment_plan": "",
+                "company_name": "Apple",
+                "data_coverage": [
+                    {
+                        "method": "get_news",
+                        "category": "news_data",
+                        "status": "failed",
+                        "attempted_vendors": ["yfinance", "akshare"],
+                        "selected_vendor": None,
+                        "as_of": "2026-08-11",
+                        "reason": "network down",
+                    },
+                    {
+                        "method": "get_pledge_ratio",
+                        "category": "governance_risk",
+                        "status": "no_data",
+                        "attempted_vendors": ["smartmoney_db", "akshare"],
+                        "selected_vendor": None,
+                        "as_of": None,
+                        "reason": "no rows",
+                    },
+                ],
+            },
+        )
+
+        assert runner.summaries["AAPL"]["coverage_degraded"] == 2
+        assert runner.summaries["AAPL"]["coverage_top_missing"] == [
+            "governance_risk",
+            "news_data",
+        ]
+
+        report = runner.generate_summary().read_text(encoding="utf-8")
+        assert "数据覆盖降级 2 项" in report
+        assert "governance_risk, news_data" in report
+
     def test_generate_summary_appends_fallback_marker(self, tmp_path):
         output_dir = tmp_path / "reports" / "batch_20260101_000000"
         output_dir.mkdir(parents=True)

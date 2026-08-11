@@ -273,13 +273,16 @@ class TestRouteToVendorEdgeCases:
         """
         from tradingagents.dataflows import interface
 
+        fake_sm = MagicMock(
+            side_effect=NoMarketDataError("600519.SS", "600519.SS", "Not in local DB")
+        )
         fake_ak = MagicMock(return_value="AKSHARE_RESULT")
         # get_pledge_ratio belongs to governance_risk which has NO entry in
         # default data_vendors → get_vendor returns "default" → primary_vendors = ["default"]
         # → smartmoney_db NOT in primary_vendors → else branch (line 348)
         with patch.dict(
             interface.VENDOR_METHODS["get_pledge_ratio"],
-            {"akshare": fake_ak},
+            {"smartmoney_db": fake_sm, "akshare": fake_ak},
             clear=False,
         ):
             result = interface.route_to_vendor("get_pledge_ratio", "600519.SS")

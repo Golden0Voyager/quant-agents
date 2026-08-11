@@ -670,6 +670,65 @@ def get_company_announcements(
     return "\n".join(lines)
 
 
+def get_company_announcements_cninfo(
+    symbol: Annotated[str, "A-share ticker e.g. 300454.SZ"],
+    start_date: Annotated[str, "Start date YYYY-MM-DD"],
+    end_date: Annotated[str, "End date YYYY-MM-DD"],
+) -> str:
+    """Fetch company announcements from CNINFO through AkShare.
+
+    CNINFO exposes a different announcement index from Eastmoney.  Keep this
+    as a separate vendor method so the router can distinguish a CNINFO result
+    from the existing Eastmoney notice endpoint and explain the fallback in a
+    report.
+    """
+    code = to_akshare_symbol(symbol, "bare")
+    with _akshare_task_context(f"📋 {symbol} 巨潮资讯公告"), no_proxy():
+        df = _safe_call(
+            ak.stock_zh_a_disclosure_report_cninfo,
+            symbol=code,
+            market="沪深京",
+            start_date=_to_yyyymmdd(start_date),
+            end_date=_to_yyyymmdd(end_date),
+        )
+
+    if df is None or df.empty:
+        raise NoMarketDataError(
+            symbol,
+            detail=f"no CNINFO announcements found for {symbol} between {start_date} and {end_date}",
+        )
+
+    def _value(row, *keys):
+        for key in keys:
+            value = row.get(key)
+            if value is not None and not pd.isna(value):
+                return value
+        return "N/A"
+
+    lines = [
+        f"## {symbol.upper()} Company Announcements from {start_date} to {end_date} "
+        "(source: AkShare / CNINFO)",
+        f"Total notices: {len(df)}",
+        "",
+    ]
+    for _, row in df.head(50).iterrows():
+        title = _value(row, "公告标题", "公告名称", "TITLE", "title")
+        date = _value(row, "公告日期", "公告时间", "DATE", "date")
+        category = _value(row, "公告类型", "分类", "公告类别", "CATEGORY", "category")
+        link = _value(row, "公告链接", "公告网址", "链接", "URL", "url")
+        lines.extend(
+            [
+                f"### 公告标题: {title}",
+                f"- 公告日期: {date}",
+                f"- 公告类型: {category}",
+                f"- 公告链接: {link}",
+                "",
+            ]
+        )
+
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Fund flow & northbound data
 # ---------------------------------------------------------------------------

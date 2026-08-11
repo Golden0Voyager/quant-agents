@@ -6,8 +6,71 @@ CLI and ``TradingAgentsGraph.save_reports`` both call this, so a headless / API
 run produces the same on-disk report tree a CLI run does.
 """
 
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
+
+
+def _coverage_value(item, key: str, default=""):
+    if isinstance(item, Mapping):
+        return item.get(key, default)
+    return getattr(item, key, default)
+
+
+def _coverage_impact(category: str, method: str) -> str:
+    if category in {"macro_data", "research_opinion"} or "sentiment" in method:
+        return "低"
+    if category in {"news_data", "governance_risk"}:
+        return "中"
+    return "高"
+
+
+def render_data_coverage_section(data_coverage) -> str:
+    """Render route provenance and limitations as a stable report section."""
+    lines = ["## 数据覆盖与限制", ""]
+    if not data_coverage:
+        lines.append("本次运行未记录数据源降级或无数据项；具体覆盖范围仍以各分析师原始数据为准。")
+        return "\n".join(lines)
+
+    lines.extend(
+        [
+            "| 数据项 | 状态 | 来源 | 截止日期 | 尝试数据源 | 原因 | 影响 |",
+            "|---|---|---|---|---|---|---|",
+        ]
+    )
+    status_labels = {
+        "ok": "可用",
+        "no_data": "无数据",
+        "failed": "失败",
+        "stale": "过期",
+        "unavailable": "未配置/不可用",
+    }
+    for item in data_coverage:
+        method = str(_coverage_value(item, "method", "unknown"))
+        category = str(_coverage_value(item, "category", "unknown"))
+        status = str(_coverage_value(item, "status", "unknown"))
+        source = _coverage_value(item, "selected_vendor") or "—"
+        as_of = _coverage_value(item, "as_of") or "—"
+        attempted = _coverage_value(item, "attempted_vendors", ())
+        attempted_text = (
+            attempted
+            if isinstance(attempted, str)
+            else " → ".join(str(v) for v in attempted) or "—"
+        )
+        reason = str(_coverage_value(item, "reason", "未提供原因"))
+        cells = [
+            method,
+            f"{status_labels.get(status, status)} ({status})",
+            str(source),
+            str(as_of),
+            attempted_text,
+            reason,
+            _coverage_impact(category, method),
+        ]
+        lines.append("| " + " | ".join(value.replace("|", "\\|") for value in cells) + " |")
+    lines.append("")
+    lines.append("影响等级：高=核心价格/基本面输入，中=新闻/治理结论，低=可选增强信息。")
+    return "\n".join(lines)
 
 
 def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
@@ -129,6 +192,11 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
             portfolio_dir.mkdir(exist_ok=True)
             (portfolio_dir / "decision.md").write_text(risk["judge_decision"], encoding="utf-8")
             sections.append(f"## V. Portfolio Manager Decision\n\n### Portfolio Manager\n{risk['judge_decision']}")
+
+    # 6. Data coverage and limitations.  This section is intentionally always
+    # present so a reader can distinguish "no degradation was recorded" from
+    # an older report format that had no provenance field at all.
+    sections.append(render_data_coverage_section(final_state.get("data_coverage", [])))
 
     # Write consolidated report
     trade_date = final_state.get("trade_date", "")

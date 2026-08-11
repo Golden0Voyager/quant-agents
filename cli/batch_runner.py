@@ -1,4 +1,5 @@
 import os
+from collections import Counter
 
 from tradingagents.agents.utils.structured import FALLBACK_MARKER, parse_confidence
 
@@ -485,6 +486,19 @@ class BatchRunner:
         )
         fields["fallback"] = is_fallback
         fields["confidence"] = parse_confidence(decision) or "—"
+
+        coverage = final_state.get("data_coverage") or []
+        degraded = [
+            item for item in coverage
+            if (item.get("status") if isinstance(item, dict) else getattr(item, "status", "")) != "ok"
+        ]
+        categories = Counter(
+            (item.get("category") if isinstance(item, dict) else getattr(item, "category", "unknown"))
+            for item in degraded
+        )
+        fields["coverage_total"] = len(coverage)
+        fields["coverage_degraded"] = len(degraded)
+        fields["coverage_top_missing"] = sorted(categories)
 
         self.summaries[ticker] = {"company": company or ticker, **fields}
 
@@ -1140,6 +1154,10 @@ class BatchRunner:
                 details = f"[Report](./{dir_name}/complete_report.md)"
                 if s.get("fallback"):
                     details += " [fallback]"
+                degraded = s.get("coverage_degraded", 0)
+                if degraded:
+                    categories = ", ".join(s.get("coverage_top_missing", [])) or "unknown"
+                    details += f" 数据覆盖降级 {degraded} 项（{categories}）"
                 if has_stats:
                     lines.append(
                         f"| {ticker} | {s.get('company', ticker)} | {s.get('rating', '—')} | "
@@ -1162,6 +1180,9 @@ class BatchRunner:
                         "size": s.get("size"),
                         "confidence": s.get("confidence"),
                         "fallback": s.get("fallback", False),
+                        "coverage_total": s.get("coverage_total", 0),
+                        "coverage_degraded": s.get("coverage_degraded", 0),
+                        "coverage_top_missing": s.get("coverage_top_missing", []),
                         "llm_calls": per_ticker_stats.get("llm_calls"),
                         "tokens_in": per_ticker_stats.get("tokens_in"),
                         "tokens_out": per_ticker_stats.get("tokens_out"),

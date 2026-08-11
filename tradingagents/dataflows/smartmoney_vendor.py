@@ -1193,8 +1193,52 @@ def get_industry_valuation(symbol: str) -> str:
     return "\n".join(lines)
 
 
-def get_earnings_estimates(symbol: str) -> str:
-    raise RuntimeError("Earnings estimates not available in quant_core.db")
+def get_earnings_estimates(symbol: str, curr_date: str | None = None) -> str:
+    """Fetch the latest locally archived earnings forecast for *symbol*.
+
+    ``earnings_forecast`` is the normalized local table used by the data
+    pipeline.  Keep the method name for tool compatibility, while exposing
+    the archived pre-announcement data instead of unconditionally reporting
+    that estimates are unavailable.
+    """
+    code = _to_smartmoney_symbol(symbol)
+    date_filter = ""
+    params: list[str] = [code]
+    if curr_date:
+        date_filter = " AND end_date <= ?"
+        params.append(curr_date)
+
+    df = _df_from_sql(
+        f"""
+        SELECT name, end_date, forecast_type, net_profit_change, previous_profit
+        FROM earnings_forecast
+        WHERE ts_code = ?{date_filter}
+        ORDER BY end_date DESC
+        LIMIT 5
+        """,
+        tuple(params),
+    )
+
+    if df is None or df.empty:
+        raise NoMarketDataError(
+            symbol,
+            detail=f"no earnings forecast data in quant_core.db for {symbol}",
+        )
+
+    lines = [
+        f"## {symbol.upper()} Earnings Forecast (业绩预告)",
+        "Source: quant_core.db / earnings_forecast",
+        "",
+    ]
+    for _, row in df.iterrows():
+        change = row.get("net_profit_change")
+        change_str = f"{change:+.2f}%" if pd.notna(change) else "N/A"
+        lines.append(
+            f"- **报告期 {row.get('end_date', 'N/A')}**: "
+            f"类型 [{row.get('forecast_type', 'N/A')}], "
+            f"预计净利润同比变动 {change_str}"
+        )
+    return "\n".join(lines)
 
 
 def get_macro_indicators(
@@ -1744,32 +1788,31 @@ def get_shareholder_count(
 def get_pledge_ratio(symbol: str) -> str:
     """Fetch A-share pledge-ratio data from quant_core.db.
 
-    Reads the ``stock_gpzy`` table with schema:
-        ts_code TEXT, pledge_date TEXT, pledger TEXT,
-        pledged_shares REAL, pct_of_holding REAL, pct_of_total REAL,
-        pledge_org TEXT
+    Reads the normalized ``stock_pledge`` table with schema:
+        stock_code TEXT, trade_date TEXT, pledger TEXT,
+        pledge_amount REAL, pledge_ratio REAL, pledge_org TEXT
 
     If the table does not exist, is empty, or the query fails, raises
-    ``RuntimeError`` so ``route_to_vendor`` falls through to akshare.
+    ``NoMarketDataError`` so ``route_to_vendor`` falls through to AkShare.
     """
     code = _to_smartmoney_symbol(symbol)
 
     df = _df_from_sql(
         """
-        SELECT pledge_date, pledger, pledged_shares,
-               pct_of_holding, pct_of_total, pledge_org
-        FROM stock_gpzy
-        WHERE ts_code = ?
-        ORDER BY pledge_date DESC
+        SELECT trade_date, pledger, pledge_amount,
+               pledge_ratio, pledge_org
+        FROM stock_pledge
+        WHERE stock_code = ?
+        ORDER BY trade_date DESC
         LIMIT 10
         """,
         (code,),
     )
 
     if df is None or df.empty:
-        raise RuntimeError(
-            f"No pledge-ratio data in quant_core.db for {symbol}. "
-            "Route will fall back to akshare."
+        raise NoMarketDataError(
+            symbol,
+            detail=f"no pledge-ratio data in quant_core.db for {symbol}",
         )
 
     lines = [
@@ -1779,10 +1822,11 @@ def get_pledge_ratio(symbol: str) -> str:
     ]
     for _, row in df.iterrows():
         lines.append(f"**Pledger**: {row.get('pledger', 'N/A')}")
-        lines.append(f"- 质押日期: {row.get('pledge_date', 'N/A')}")
-        lines.append(f"- 质押数量: {row.get('pledged_shares', 'N/A')}")
-        lines.append(f"- 占所持比例: {row.get('pct_of_holding', 0):.2f}%")
-        lines.append(f"- 占总股本比例: {row.get('pct_of_total', 0):.2f}%")
+        lines.append(f"- 质押日期: {row.get('trade_date', 'N/A')}")
+        lines.append(f"- 质押数量: {row.get('pledge_amount', 'N/A')}")
+        ratio = row.get("pledge_ratio")
+        ratio_str = f"{ratio:.2f}%" if pd.notna(ratio) else "N/A"
+        lines.append(f"- 质押比例: {ratio_str}")
         lines.append(f"- 质押机构: {row.get('pledge_org', 'N/A')}")
         lines.append("")
 
@@ -2160,4 +2204,3 @@ def get_concept_board(symbol: str) -> str:
         "- 概念标签: " + ", ".join(concepts[:15]),
     ]
     return "\n".join(lines)
-

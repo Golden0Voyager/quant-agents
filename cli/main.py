@@ -2,6 +2,7 @@ import contextlib
 import datetime
 import os
 import time
+from dataclasses import asdict
 from functools import wraps
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from cli.profiles import list_profiles, load_profile, save_profile
 from cli.stats_handler import StatsCallbackHandler
 from cli.utils import *
 from cli.watchlists import list_watchlists, load_watchlist, save_watchlist
+from tradingagents.dataflows.interface import collect_route_diagnostics
 from tradingagents.default_config import DEFAULT_CONFIG, default_config
 from tradingagents.graph.analyst_execution import (
     AnalystWallTimeTracker,
@@ -1064,18 +1066,19 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
         max_debate = config.get("max_debate_rounds", 1)
         max_risk = config.get("max_risk_discuss_rounds", 1)
         try:
-            for chunk in graph.graph.stream(init_agent_state, **args):
-                sync_analyst_tracker_from_chunk(analyst_wall_time_tracker, chunk)
+            with collect_route_diagnostics() as route_diagnostics:
+                for chunk in graph.graph.stream(init_agent_state, **args):
+                    sync_analyst_tracker_from_chunk(analyst_wall_time_tracker, chunk)
 
-                processed_ids = process_stream_chunk(
-                    dashboard,
-                    chunk,
-                    max_debate_rounds=max_debate,
-                    max_risk_rounds=max_risk,
-                    processed_ids=processed_ids,
-                )
-                update_dashboard_display(layout, dashboard, ticker=ticker, stats_handler=stats_handler, start_time=start_time)
-                trace.append(chunk)
+                    processed_ids = process_stream_chunk(
+                        dashboard,
+                        chunk,
+                        max_debate_rounds=max_debate,
+                        max_risk_rounds=max_risk,
+                        processed_ids=processed_ids,
+                    )
+                    update_dashboard_display(layout, dashboard, ticker=ticker, stats_handler=stats_handler, start_time=start_time)
+                    trace.append(chunk)
 
         except Exception as exc:
             from openai import APIConnectionError, APITimeoutError, RateLimitError
@@ -1096,6 +1099,7 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
         final_state = {}
         for chunk in trace:
             final_state.update(chunk)
+        final_state["data_coverage"] = [asdict(item) for item in route_diagnostics]
         graph.process_signal(final_state.get("final_trade_decision", "hold"))
 
         # Update all agent statuses to completed

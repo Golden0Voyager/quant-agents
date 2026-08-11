@@ -15,6 +15,7 @@ import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import interface
 from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.errors import VendorNotConfiguredError
 from tradingagents.dataflows.symbol_utils import NoMarketDataError
 
 
@@ -116,6 +117,79 @@ class VendorRoutingTests(unittest.TestCase):
         with self._route({"yfinance": _raises(ValueError("boom"))}), \
                 self.assertRaises(ValueError):
             interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
+
+    def test_route_diagnostic_records_successful_fallback(self):
+        set_config({"data_vendors": {"fundamental_data": "smartmoney_db,akshare"}})
+        with self._route_method(
+            "get_fundamentals",
+            {"smartmoney_db": _no_data, "akshare": _returns("AK_DATA")},
+        ):
+            result = interface.route_to_vendor_with_source(
+                "get_fundamentals", "600519.SS", "2026-08-11"
+            )
+
+        assert result.data == "AK_DATA"
+        assert result.diagnostic is not None
+        assert result.diagnostic.status == "ok"
+        assert result.diagnostic.attempted_vendors == ("smartmoney_db", "akshare")
+        assert result.diagnostic.selected_vendor == "akshare"
+        assert result.diagnostic.as_of == "2026-08-11"
+
+    def test_route_diagnostic_distinguishes_clean_no_data(self):
+        set_config({"data_vendors": {"fundamental_data": "smartmoney_db,akshare"}})
+        with self._route_method(
+            "get_fundamentals", {"smartmoney_db": _no_data, "akshare": _no_data}
+        ):
+            result = interface.route_to_vendor_with_source(
+                "get_fundamentals", "600519.SS", "2026-08-11"
+            )
+
+        assert result.diagnostic is not None
+        assert result.diagnostic.status == "no_data"
+        assert result.diagnostic.selected_vendor is None
+        assert "no rows" in result.diagnostic.reason
+
+    def test_route_diagnostic_marks_optional_network_failure(self):
+        set_config({"data_vendors": {"macro_data": "fred"}})
+        with self._route_method(
+            "get_macro_indicators", {"fred": _raises(ValueError("network down"))}
+        ):
+            result = interface.route_to_vendor_with_source(
+                "get_macro_indicators", "cpi", "2026-08-11"
+            )
+
+        assert "DATA_UNAVAILABLE" in result.data
+        assert result.diagnostic is not None
+        assert result.diagnostic.status == "failed"
+        assert "network down" in result.diagnostic.reason
+
+    def test_route_diagnostics_are_context_local(self):
+        set_config({"data_vendors": {"macro_data": "fred"}})
+        with self._route_method(
+            "get_macro_indicators", {"fred": _raises(ValueError("network down"))}
+        ), interface.collect_route_diagnostics() as records:
+            interface.route_to_vendor("get_macro_indicators", "cpi", "2026-08-11")
+
+        assert len(records) == 1
+        assert records[0].method == "get_macro_indicators"
+
+    def test_not_configured_vendor_is_circuit_broken_for_context(self):
+        set_config({"data_vendors": {"fundamental_data": "tushare,akshare"}})
+        unavailable = mock.Mock(side_effect=VendorNotConfiguredError("missing token"))
+        fallback = mock.Mock(return_value="AK_DATA")
+        with self._route_method(
+            "get_fundamentals", {"tushare": unavailable, "akshare": fallback}
+        ), interface.collect_route_diagnostics() as records:
+            first = interface.route_to_vendor_with_source(
+                "get_fundamentals", "600519.SS", "2026-08-11"
+            )
+            second = interface.route_to_vendor_with_source(
+                "get_fundamentals", "600519.SS", "2026-08-11"
+            )
+
+        assert first.data == second.data == "AK_DATA"
+        assert unavailable.call_count == 1
+        assert records[1].attempted_vendors == ("akshare",)
 
 
 if __name__ == "__main__":
