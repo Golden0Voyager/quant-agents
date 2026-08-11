@@ -75,6 +75,9 @@ class Propagator:
             "governance_report": "",
             "industry_report": "",
             "structured_fallback_agents": [],
+            # One record per routed data request; populated by the vendor
+            # router during a run and rendered in the final report.
+            "data_coverage": [],
         }
 
     def get_graph_args(self, callbacks: list | None = None) -> dict[str, Any]:

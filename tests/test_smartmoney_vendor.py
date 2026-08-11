@@ -835,11 +835,53 @@ class RuntimeErrorStubsTests(unittest.TestCase):
             get_news("600519.SS", "2026-01-01", "2026-06-19")
         self.assertIn("News not available", str(ctx.exception))
 
-    def test_get_earnings_estimates_raises(self):
+    def test_get_earnings_estimates_reads_local_forecast_rows(self):
         from tradingagents.dataflows.smartmoney_vendor import get_earnings_estimates
-        with self.assertRaises(RuntimeError) as ctx:
-            get_earnings_estimates("600519.SS")
-        self.assertIn("Earnings estimates", str(ctx.exception))
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = get_earnings_estimates("600519.SS", curr_date="2026-08-11")
+            self.assertIn("Earnings Forecast", result)
+            self.assertIn("2026-06-30", result)
+            self.assertIn("预增", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_get_pledge_ratio_reads_stock_pledge_schema(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_pledge_ratio
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.executescript("""
+                CREATE TABLE stock_pledge (
+                    id INTEGER PRIMARY KEY,
+                    trade_date TEXT NOT NULL,
+                    stock_code TEXT NOT NULL,
+                    stock_name TEXT,
+                    pledger TEXT,
+                    pledge_amount REAL,
+                    pledge_ratio REAL,
+                    pledge_org TEXT,
+                    source_record_key TEXT NOT NULL
+                );
+                INSERT INTO stock_pledge VALUES
+                    (1, '2026-08-07', '600519', '贵州茅台', '股东A',
+                     1000000, 2.5, '机构A', '600519|2026-08-07|1');
+            """)
+            conn.commit()
+            conn.close()
+            with _PatchedVendor(db_path):
+                result = get_pledge_ratio("600519.SS")
+            self.assertIn("Pledge Ratio", result)
+            self.assertIn("质押数量", result)
+            self.assertIn("2.5", result)
+        finally:
+            os.unlink(db_path)
 
     def test_get_macro_indicators_raises(self):
         from tradingagents.dataflows.smartmoney_vendor import get_macro_indicators
@@ -1735,5 +1777,4 @@ class GetGlobalAssetDataTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
 

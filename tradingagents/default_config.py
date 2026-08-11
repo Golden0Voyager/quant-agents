@@ -25,6 +25,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_RESULTS_DIR":          "results_dir",
     "TRADINGAGENTS_CACHE_DIR":            "data_cache_dir",
     "TRADINGAGENTS_MEMORY_LOG_PATH":      "memory_log_path",
+    "TRADINGAGENTS_TUSHARE_ENABLED":     "tushare_enabled",
     "DISABLE_YFINANCE_FALLBACK":          "disable_yfinance_fallback",
     "INPUT_TOKEN_PRICE_PER_1M":           "input_token_price_per_1m",
     "OUTPUT_TOKEN_PRICE_PER_1M":          "output_token_price_per_1m",
@@ -59,6 +60,8 @@ _BASE_CONFIG = {
     "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
     "results_dir": os.path.join(_TRADINGAGENTS_HOME, "logs"),
     "data_cache_dir": os.path.join(_TRADINGAGENTS_HOME, "cache"),
+    # Tushare is optional and only appended to supported routes when enabled.
+    "tushare_enabled": False,
     "memory_log_path": os.path.join(_TRADINGAGENTS_HOME, "memory", "trading_memory.md"),
     # Optional cap on the number of resolved memory log entries. When set,
     # the oldest resolved entries are pruned once this limit is exceeded.
@@ -173,6 +176,9 @@ _BASE_CONFIG = {
         "get_block_trade": "smartmoney_db,akshare",
         "get_institutional_holdings": "smartmoney_db,akshare",
         "get_northbound_hold": "smartmoney_db,akshare",
+        # CNINFO is available through the existing AkShare dependency and
+        # provides a second announcement index after the local archive.
+        "get_company_announcements": "smartmoney_db,cninfo,akshare",
     },
     # When True, A-share vendor chains never fall back to yfinance.
     "disable_yfinance_fallback": False,

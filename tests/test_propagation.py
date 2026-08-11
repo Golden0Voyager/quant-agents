@@ -38,6 +38,7 @@ class CreateInitialStateTests(unittest.TestCase):
         self.assertIn("industry_report", state)
         self.assertIn("structured_fallback_agents", state)
         self.assertEqual(state["structured_fallback_agents"], [])
+        self.assertEqual(state["data_coverage"], [])
 
     def test_creates_state_with_required_fields(self):
         p = Propagator()

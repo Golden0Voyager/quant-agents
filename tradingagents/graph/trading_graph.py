@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time as _time
+from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,10 @@ from tradingagents.agents.utils.agent_utils import (
 )
 from tradingagents.agents.utils.memory import TradingMemoryLog
 from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.interface import (
+    collect_route_diagnostics,
+    get_route_diagnostics,
+)
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.llm_clients import create_llm_client
@@ -628,6 +633,7 @@ class TradingAgentsGraph:
                             ticker, trade_date,
                         )
                         self.curr_state = cached_state
+                        cached_state.setdefault("data_coverage", [])
                         # Clear any stale checkpoint so the next run starts fresh.
                         clear_checkpoint(
                             self.config["data_cache_dir"], ticker, str(trade_date)
@@ -655,16 +661,20 @@ class TradingAgentsGraph:
                 logger.info("Starting fresh for %s on %s", ticker, trade_date)
 
         try:
-            return self._run_graph(
-                ticker,
-                trade_date,
-                asset_type=asset_type,
-                confirmed_name=resolved_name,
-                on_chunk=on_chunk,
-                holdings_context=holdings_context,
-                transactions_context=transactions_context,
-                company_display_name=company_display_name,
-            )
+            with collect_route_diagnostics() as route_diagnostics:
+                result = self._run_graph(
+                    ticker,
+                    trade_date,
+                    asset_type=asset_type,
+                    confirmed_name=resolved_name,
+                    on_chunk=on_chunk,
+                    holdings_context=holdings_context,
+                    transactions_context=transactions_context,
+                    company_display_name=company_display_name,
+                )
+            final_state, signal = result
+            final_state["data_coverage"] = [asdict(item) for item in route_diagnostics]
+            return final_state, signal
         finally:
             if self._checkpointer_ctx is not None:
                 self._checkpointer_ctx.__exit__(None, None, None)
@@ -854,6 +864,9 @@ class TradingAgentsGraph:
                 on_chunk(merged_state)
 
         final_state = merged_state
+        final_state["data_coverage"] = [
+            asdict(item) for item in get_route_diagnostics()
+        ]
         self.node_timings = timings
         self.analyst_wall_times = tracker.get_wall_times()
         self.analyst_wall_time_summary = tracker.format_summary()
@@ -912,6 +925,7 @@ class TradingAgentsGraph:
             },
             "investment_plan": final_state["investment_plan"],
             "final_trade_decision": final_state["final_trade_decision"],
+            "data_coverage": final_state.get("data_coverage", []),
         }
 
         # Save to file. Reject ticker values that would escape the

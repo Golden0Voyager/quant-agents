@@ -2,6 +2,8 @@ import datetime as _dt
 import logging
 import os
 import re as _re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,6 +14,7 @@ from .akshare_vendor import (
     get_block_trade as get_akshare_block_trade,
     get_cashflow as get_akshare_cashflow,
     get_company_announcements as get_akshare_company_announcements,
+    get_company_announcements_cninfo as get_akshare_company_announcements_cninfo,
     get_dividend_history as get_akshare_dividend_history,
     get_dragon_tiger as get_akshare_dragon_tiger,
     get_earnings_estimates as get_akshare_earnings_estimates,
@@ -83,6 +86,13 @@ from .smartmoney_vendor import (
     get_sector_fund_flow as get_smartmoney_sector_fund_flow,
     get_shareholder_count as get_smartmoney_shareholder_count,
     get_stock_data as get_smartmoney_stock_data,
+)
+from .tushare_vendor import (
+    get_company_announcements as get_tushare_company_announcements,
+    get_earnings_estimates as get_tushare_earnings_estimates,
+    get_fund_flow as get_tushare_fund_flow,
+    get_margin_trading as get_tushare_margin_trading,
+    get_pledge_ratio as get_tushare_pledge_ratio,
 )
 from .y_finance import (
     get_balance_sheet as get_yfinance_balance_sheet,
@@ -181,6 +191,8 @@ VENDOR_LIST = [
     "alpha_vantage",
     "akshare",
     "smartmoney_db",
+    "cninfo",
+    "tushare",
     # Local quant_core.db global_assets_bars (US stocks / crypto). Registered
     # under a distinct name because the router skips the ``smartmoney_db``
     # name for non-A-share tickers.
@@ -196,11 +208,100 @@ OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets", "research_opinion"}
 
 
 @dataclass(frozen=True)
+class VendorRouteDiagnostic:
+    """Explain how one logical data request was resolved."""
+
+    method: str
+    category: str
+    status: str
+    attempted_vendors: tuple[str, ...]
+    selected_vendor: str | None
+    as_of: str | None
+    reason: str
+
+
+@dataclass(frozen=True)
 class VendorRouteResult:
     """Successful or graceful-degradation vendor result with provenance."""
 
     data: Any
     vendor: str | None
+    diagnostic: VendorRouteDiagnostic | None = None
+
+
+_ROUTE_DIAGNOSTICS: ContextVar[list[VendorRouteDiagnostic] | None] = ContextVar(
+    "tradingagents_route_diagnostics", default=None
+)
+_ROUTE_CIRCUIT_BREAKERS: ContextVar[set[tuple[str, str]] | None] = ContextVar(
+    "tradingagents_route_circuit_breakers", default=None
+)
+
+
+@contextmanager
+def collect_route_diagnostics():
+    """Collect route diagnostics for the current ticker/worker context."""
+    token = _ROUTE_DIAGNOSTICS.set([])
+    breaker_token = _ROUTE_CIRCUIT_BREAKERS.set(set())
+    try:
+        records = _ROUTE_DIAGNOSTICS.get()
+        assert records is not None
+        yield records
+    finally:
+        _ROUTE_CIRCUIT_BREAKERS.reset(breaker_token)
+        _ROUTE_DIAGNOSTICS.reset(token)
+
+
+def get_route_diagnostics() -> list[VendorRouteDiagnostic]:
+    """Return a snapshot of diagnostics in the current context."""
+    return list(_ROUTE_DIAGNOSTICS.get() or [])
+
+
+def _should_circuit_break(vendor: str, exc: Exception) -> bool:
+    """Identify failures that are stable for this vendor/method context."""
+    if isinstance(exc, VendorNotConfiguredError):
+        return True
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in ("permission", "forbidden", "unauthorized", "invalid token", "schema")
+    )
+
+
+def _route_as_of(method: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> str | None:
+    for key in ("as_of", "curr_date", "end_date", "trade_date"):
+        value = kwargs.get(key)
+        if value:
+            return str(value)[:10]
+    if len(args) > 1:
+        return str(args[-1])[:10]
+    return None
+
+
+def _route_result(
+    *,
+    data: Any,
+    vendor: str | None,
+    method: str,
+    category: str,
+    status: str,
+    attempted_vendors: list[str],
+    reason: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> VendorRouteResult:
+    diagnostic = VendorRouteDiagnostic(
+        method=method,
+        category=category,
+        status=status,
+        attempted_vendors=tuple(attempted_vendors),
+        selected_vendor=vendor,
+        as_of=_route_as_of(method, args, kwargs),
+        reason=reason,
+    )
+    records = _ROUTE_DIAGNOSTICS.get()
+    if records is not None:
+        records.append(diagnostic)
+    return VendorRouteResult(data, vendor, diagnostic)
 
 # Mapping of methods to their vendor-specific implementations
 # method -> vendor -> implementation (a callable, or a list of callables
@@ -227,10 +328,12 @@ VENDOR_METHODS: dict[str, dict[str, Any]] = {
     "get_fund_flow": {
         "smartmoney_db": get_smartmoney_fund_flow,
         "akshare": get_akshare_fund_flow,
+        "tushare": get_tushare_fund_flow,
     },
     "get_margin_trading": {
         "smartmoney_db": get_smartmoney_margin_trading,
         "akshare": get_akshare_margin_trading,
+        "tushare": get_tushare_margin_trading,
     },
     "get_dragon_tiger": {
         "smartmoney_db": get_smartmoney_dragon_tiger,
@@ -283,6 +386,7 @@ VENDOR_METHODS: dict[str, dict[str, Any]] = {
     "get_earnings_estimates": {
         "smartmoney_db": get_smartmoney_earnings_estimates,
         "akshare": get_akshare_earnings_estimates,
+        "tushare": get_tushare_earnings_estimates,
     },
     # news_data
     "get_news": {
@@ -303,7 +407,9 @@ VENDOR_METHODS: dict[str, dict[str, Any]] = {
     },
     "get_company_announcements": {
         "smartmoney_db": get_smartmoney_company_announcements,
+        "cninfo": get_akshare_company_announcements_cninfo,
         "akshare": get_akshare_company_announcements,
+        "tushare": get_tushare_company_announcements,
     },
     "get_restricted_release": {
         "smartmoney_db": get_smartmoney_restricted_release,
@@ -326,6 +432,7 @@ VENDOR_METHODS: dict[str, dict[str, Any]] = {
     "get_pledge_ratio": {
         "smartmoney_db": get_smartmoney_pledge_ratio,
         "akshare": get_akshare_pledge_ratio,
+        "tushare": get_tushare_pledge_ratio,
     },
     # shareholder_return (v2.2)
     "get_dividend_history": {
@@ -426,6 +533,18 @@ def _build_vendor_chain(method: str, vendor_config: str, symbol: str | None) -> 
     else:
         vendor_chain = list(all_available_vendors)
 
+    # Tushare is an opt-in enrichment source.  It is appended only when the
+    # dedicated setting is enabled; explicit tool/category chains remain
+    # authoritative and can select it directly without this flag.
+    config = get_config()
+    tushare_enabled = bool(config.get("tushare_enabled")) or os.getenv("TUSHARE_ENABLED") == "1"
+    if (
+        tushare_enabled
+        and "tushare" in all_available_vendors
+        and "tushare" not in vendor_chain
+    ):
+        vendor_chain.append("tushare")
+
     is_ashare = isinstance(symbol, str) and is_a_share_ticker(symbol)
     if is_ashare and "akshare" in VENDOR_METHODS[method]:
         # Only the default chain gets local-first A-share promotion; explicit
@@ -512,8 +631,16 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
                 "Returning DATA_UNAVAILABLE.",
                 method, category,
             )
-            return VendorRouteResult(
-                _format_optional_unavailable(category, None, method), None
+            return _route_result(
+                data=_format_optional_unavailable(category, None, method),
+                vendor=None,
+                method=method,
+                category=category,
+                status="unavailable",
+                attempted_vendors=[],
+                reason="no vendor implementation is configured",
+                args=args,
+                kwargs=kwargs,
             )
         raise ValueError(f"Method '{method}' not supported")
 
@@ -537,13 +664,20 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
                 "for method='%s'. Returning DATA_UNAVAILABLE.",
                 symbol, method,
             )
-            return VendorRouteResult(
-                (
+            return _route_result(
+                data=(
                     f"DATA_UNAVAILABLE: No global-market vendor configured for '{method}' "
                     f"with symbol '{symbol}'. This data source is A-share only. "
                     f"Proceed without it; do not fabricate values."
                 ),
-                None,
+                vendor=None,
+                method=method,
+                category=category,
+                status="unavailable",
+                attempted_vendors=[],
+                reason="all configured vendors are A-share only",
+                args=args,
+                kwargs=kwargs,
             )
         if filtered != vendor_chain:
             logger.info(
@@ -553,7 +687,21 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
             )
         vendor_chain = filtered
 
+    attempted_vendors: list[str] = []
+    circuit_breakers = _ROUTE_CIRCUIT_BREAKERS.get()
     for vendor in vendor_chain:
+        if circuit_breakers is not None and (vendor, method) in circuit_breakers:
+            logger.info(
+                "Skipping circuit-broken vendor %r for method=%s",
+                vendor,
+                method,
+            )
+            if first_error is None:
+                first_error = VendorNotConfiguredError(
+                    f"vendor {vendor!r} is disabled for {method} in this run context"
+                )
+            continue
+        attempted_vendors.append(vendor)
         vendor_impl = VENDOR_METHODS[method][vendor]
         impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
 
@@ -594,7 +742,20 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
                     symbol,
                 )
                 continue
-            return VendorRouteResult(result, vendor)
+            reason = "selected primary vendor"
+            if len(attempted_vendors) > 1:
+                reason = f"selected after fallback from {attempted_vendors[:-1]}"
+            return _route_result(
+                data=result,
+                vendor=vendor,
+                method=method,
+                category=category,
+                status="ok",
+                attempted_vendors=attempted_vendors,
+                reason=reason,
+                args=args,
+                kwargs=kwargs,
+            )
         except VendorRateLimitError as exc:
             logger.warning("Vendor %r rate-limited for %s; trying next vendor.", vendor, method)
             if first_error is None:
@@ -604,6 +765,8 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
             logger.warning("Vendor %r not configured for %s; trying next vendor.", vendor, method)
             if first_error is None:
                 first_error = e
+            if circuit_breakers is not None:
+                circuit_breakers.add((vendor, method))
             continue
         except NoMarketDataError as e:
             last_no_data = e  # No data here; another configured vendor may have it
@@ -625,6 +788,8 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
                 logger.warning("Vendor %r failed for %s: %s", vendor, method, exc)
             if first_error is None:
                 first_error = exc
+            if circuit_breakers is not None and _should_circuit_break(vendor, exc):
+                circuit_breakers.add((vendor, method))
             continue  # Try next vendor in fallback chain
 
     # If any vendor reported "no data", the symbol is genuinely unavailable.
@@ -639,8 +804,20 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
                 "Returning NO_DATA for %s, but a vendor errored earlier: %s",
                 method, first_error,
             )
-        return VendorRouteResult(
-            _format_no_data_sentinel(last_no_data, vendor_chain, method), None
+        status = "failed" if first_error is not None else "no_data"
+        reason = last_no_data.detail or "all attempted vendors returned no usable rows"
+        if first_error is not None:
+            reason = f"{reason}; provider error: {first_error}"
+        return _route_result(
+            data=_format_no_data_sentinel(last_no_data, vendor_chain, method),
+            vendor=None,
+            method=method,
+            category=category,
+            status=status,
+            attempted_vendors=attempted_vendors,
+            reason=reason,
+            args=args,
+            kwargs=kwargs,
         )
 
     # No vendor returned data and none reported clean "no data" — surface the
@@ -650,8 +827,17 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
     if first_error is not None:
         if category in OPTIONAL_CATEGORIES:
             logger.warning("Optional %s unavailable for %s: %s", category, method, first_error)
-            return VendorRouteResult(
-                _format_optional_unavailable(category, first_error, method), None
+            status = "unavailable" if isinstance(first_error, VendorNotConfiguredError) else "failed"
+            return _route_result(
+                data=_format_optional_unavailable(category, first_error, method),
+                vendor=None,
+                method=method,
+                category=category,
+                status=status,
+                attempted_vendors=attempted_vendors,
+                reason=str(first_error),
+                args=args,
+                kwargs=kwargs,
             )
         raise first_error
 
