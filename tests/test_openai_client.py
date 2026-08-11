@@ -75,7 +75,7 @@ class OpenAIClientGetLlmTests(unittest.TestCase):
     @patch.dict(os.environ, {"SENSENOVA_API_KEY": "ss-test"}, clear=True)
     @patch("tradingagents.llm_clients.openai_client.NormalizedChatOpenAI")
     def test_sensenova_non_reasoning_model(self, mock_chat):
-        client = OpenAIClient("sensenova-6.7-flash-lite", provider="sensenova")
+        client = OpenAIClient("sensenova-6.8-flash-lite", provider="sensenova")
         client.get_llm()
         mock_chat.assert_called_once()
 
@@ -131,7 +131,7 @@ class OpenAIClientGetLlmTests(unittest.TestCase):
     @patch("tradingagents.llm_clients.openai_client.NormalizedChatOpenAI")
     def test_no_rate_limiter_without_rpm(self, mock_chat):
         """Without requests_per_minute, no rate_limiter is attached."""
-        client = OpenAIClient("sensenova-6.7-flash-lite", provider="sensenova")
+        client = OpenAIClient("sensenova-6.8-flash-lite", provider="sensenova")
         client.get_llm()
         _, kwargs = mock_chat.call_args
         self.assertNotIn("rate_limiter", kwargs)
@@ -144,7 +144,7 @@ class OpenAIClientGetLlmTests(unittest.TestCase):
         import logging
         with self.assertLogs("tradingagents.llm_clients.openai_client", level=logging.WARNING) as cm:
             client = OpenAIClient(
-                "sensenova-6.7-flash-lite",
+                "sensenova-6.8-flash-lite",
                 provider="sensenova",
                 requests_per_minute="not-a-number",
             )

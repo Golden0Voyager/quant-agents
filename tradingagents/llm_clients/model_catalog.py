@@ -175,13 +175,13 @@ MODEL_OPTIONS: ProviderModeOptions = {
     # SenseNova: Token Plan endpoint with DeepSeek reasoning support.
     "sensenova": {
         "quick": [
-            ("sensenova-6.7-flash-lite - Lightweight multimodal, 256K ctx", "sensenova-6.7-flash-lite"),
+            ("sensenova-6.8-flash-lite - Lightweight multimodal, 256K ctx", "sensenova-6.8-flash-lite"),
             ("deepseek-v4-flash - High-performance chat, reasoning mode", "deepseek-v4-flash"),
             ("Custom model ID", "custom"),
         ],
         "deep": [
             ("deepseek-v4-flash - High-performance chat, reasoning mode", "deepseek-v4-flash"),
-            ("sensenova-6.7-flash-lite - Lightweight multimodal, 256K ctx", "sensenova-6.7-flash-lite"),
+            ("sensenova-6.8-flash-lite - Lightweight multimodal, 256K ctx", "sensenova-6.8-flash-lite"),
             ("Custom model ID", "custom"),
         ],
     },

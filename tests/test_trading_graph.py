@@ -876,14 +876,14 @@ class CreateFallbackLlmTests(unittest.TestCase):
             g.config = {
                 "llm_provider": "sensenova",
                 "deep_think_llm": "deepseek-v4-flash",
-                "quick_think_llm": "sensenova-6.7-flash-lite",
+                "quick_think_llm": "sensenova-6.8-flash-lite",
                 "backend_url": "https://api.example.com",
                 "deep_think_fallback": [
                     {"provider": "sensenova", "model": "deepseek-v4-flash"},
                     {"provider": "modelscope", "model": "deepseek-ai/DeepSeek-V4-Pro"},
                 ],
                 "quick_think_fallback": [
-                    {"provider": "sensenova", "model": "sensenova-6.7-flash-lite"},
+                    {"provider": "sensenova", "model": "sensenova-6.8-flash-lite"},
                     {"provider": "modelscope", "model": "stepfun-ai/Step-3.7-Flash"},
                 ],
                 **(config_overrides or {}),
@@ -1010,7 +1010,7 @@ class CreateFallbackLlmTests(unittest.TestCase):
             self.assertEqual(result, "quick_legacy")
             mock_create.assert_called_once_with(
                 provider="sensenova",
-                model="sensenova-6.7-flash-lite",
+                model="sensenova-6.8-flash-lite",
                 base_url="https://api.example.com",
             )
 

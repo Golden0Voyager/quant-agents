@@ -150,7 +150,7 @@ def test_no_env_uses_built_in_defaults(monkeypatch):
     cfg = _dc_with_env(monkeypatch)
     assert cfg["llm_provider"] == "sensenova"
     assert cfg["deep_think_llm"] == "deepseek-v4-flash"
-    assert cfg["quick_think_llm"] == "sensenova-6.7-flash-lite"
+    assert cfg["quick_think_llm"] == "sensenova-6.8-flash-lite"
     assert cfg["backend_url"] == "https://token.sensenova.cn/v1"
     assert cfg["max_debate_rounds"] == 1
     assert cfg["checkpoint_enabled"] is False

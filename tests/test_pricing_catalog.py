@@ -52,7 +52,7 @@ def _priced_models() -> list[tuple[str, str]]:
         ("deepseek", "deepseek-v4-flash"),
         ("kimi", "kimi-k2.6"),
         ("kimi", "kimi-k3"),
-        ("sensenova", "sensenova-6.7-flash-lite"),
+        ("sensenova", "sensenova-6.8-flash-lite"),
         ("sensenova", "deepseek-v4-flash"),
     ]
 
@@ -85,9 +85,9 @@ def test_agnes_is_free():
 
 
 def test_sensenova_flash_lite_post_beta_rate():
-    """SenseNova 6.7 Flash-Lite post-beta rate: ¥1.5/M input, ¥4.5/M output
+    """SenseNova 6.8 Flash-Lite transition rate: ¥1.5/M input, ¥4.5/M output
     stored as USD $0.22/$0.66 in pricing.yaml."""
-    in_rate, out_rate = get_price("sensenova", "sensenova-6.7-flash-lite")
+    in_rate, out_rate = get_price("sensenova", "sensenova-6.8-flash-lite")
     assert in_rate == pytest.approx(0.22, rel=1e-2)
     assert out_rate == pytest.approx(0.66, rel=1e-2)
 
@@ -906,7 +906,7 @@ class TestGetPriceEdgeCases:
         """get_price lowercases the provider before lookup."""
         assert get_price("DEEPSEEK", "deepseek-v4-flash") == (0.14, 0.28)
         assert get_price("Agnes", "agnes-2.0-flash") == (0.00, 0.00)
-        assert get_price("Sensenova", "sensenova-6.7-flash-lite") == (
+        assert get_price("Sensenova", "sensenova-6.8-flash-lite") == (
             pytest.approx(0.22, rel=1e-2),
             pytest.approx(0.66, rel=1e-2),
         )

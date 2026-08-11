@@ -12,7 +12,7 @@
 DEFAULT_CONFIG = {
     "llm_provider": "sensenova",                    # 统一供应商
     "deep_think_llm": "deepseek-v4-flash",         # 串行决策模型（思考模式）
-    "quick_think_llm": "sensenova-6.7-flash-lite", # 并行分析模型（无思考）
+    "quick_think_llm": "sensenova-6.8-flash-lite", # 并行分析模型（无思考）
     "backend_url": "https://token.sensenova.cn/v1", # API 端点
     # 供应商专属参数
     "google_thinking_level": None,
@@ -42,7 +42,7 @@ deep_client = create_llm_client(
 )
 quick_client = create_llm_client(
     provider=self.config["llm_provider"],      # "sensenova"
-    model=self.config["quick_think_llm"],      # "sensenova-6.7-flash-lite"
+    model=self.config["quick_think_llm"],      # "sensenova-6.8-flash-lite"
     base_url=self.config.get("backend_url"),
     **llm_kwargs,
 )
@@ -142,7 +142,7 @@ return chat_cls(**llm_kwargs)
 | 供应商 | 模型 | 使用的客户端类 | 原因 |
 |--------|------|---------------|------|
 | `sensenova` | `deepseek-v4-flash` | `DeepSeekChatOpenAI` | 返回 `reasoning_content` |
-| `sensenova` | `sensenova-6.7-flash-lite` | `NormalizedChatOpenAI` | 不返回 reasoning |
+| `sensenova` | `sensenova-6.8-flash-lite` | `NormalizedChatOpenAI` | 不返回 reasoning |
 | `deepseek` | 任意 | `DeepSeekChatOpenAI` | 全部可能返回 reasoning |
 | `mimo` | `v2.5`/`v2.5-pro` | `DeepSeekChatOpenAI` | 支持 thinking |
 | `openai` | 任意 | `NormalizedChatOpenAI` | Responses API 标准化 |
@@ -336,7 +336,7 @@ TradingAgentsGraph()
     |-- create_llm_client("sensenova", "deepseek-v4-flash") --.
     |   └── OpenAIClient.get_llm()                              |
     |       └── DeepSeekChatOpenAI(...)  <- reasoning 模型      |
-    └── create_llm_client("sensenova", "sensenova-6.7-flash-lite")
+    └── create_llm_client("sensenova", "sensenova-6.8-flash-lite")
         └── OpenAIClient.get_llm()
             └── NormalizedChatOpenAI(...)  <- 普通模型
     |
@@ -375,7 +375,7 @@ graph.invoke(state)
 |------|-----|
 | `llm_provider` | `sensenova` |
 | `deep_think_llm` | `deepseek-v4-flash` |
-| `quick_think_llm` | `sensenova-6.7-flash-lite` |
+| `quick_think_llm` | `sensenova-6.8-flash-lite` |
 | `backend_url` | `https://token.sensenova.cn/v1` |
 
 **实际运行时**：
@@ -389,7 +389,7 @@ graph.invoke(state)
 
 2. **Quick Think 路径**（6 个 Analyst + 3 个 Debater + Trader）：
    - `OpenAIClient` -> `base_url="https://token.sensenova.cn/v1"`
-   - `model="sensenova-6.7-flash-lite"` 不在 `_reasoning_models` 中
+   - `model="sensenova-6.8-flash-lite"` 不在 `_reasoning_models` 中
    - -> 使用 `NormalizedChatOpenAI` 子类
    - -> 标准 OpenAI 兼容调用，无 reasoning 特殊处理
    - -> 支持 `with_structured_output`

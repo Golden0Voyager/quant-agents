@@ -34,5 +34,5 @@ openrouter:
 sensenova:
   # SenseNova also routes DeepSeek V4-Flash (same USD rate as deepseek: section above).
   deepseek-v4-flash: [0.14, 0.28]
-  sensenova-6.7-flash-lite: [0.22, 0.66]  # input ¥1.5 / output ¥4.5
-
+  sensenova-6.7-flash-lite: [0.22, 0.66]  # legacy compatibility until 2026-08-31
+  sensenova-6.8-flash-lite: [0.22, 0.66]  # temporary carry-over; verify new official rate

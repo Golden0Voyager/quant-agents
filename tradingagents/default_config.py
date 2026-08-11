@@ -67,7 +67,7 @@ _BASE_CONFIG = {
     # LLM settings (defaults aligned with personal usage: SenseNova Token Plan)
     "llm_provider": "sensenova",
     "deep_think_llm": "deepseek-v4-flash",
-    "quick_think_llm": "sensenova-6.7-flash-lite",
+    "quick_think_llm": "sensenova-6.8-flash-lite",
     # SenseNova Token Plan endpoint; upstream default is None (per-provider fallback)
     "backend_url": "https://token.sensenova.cn/v1",
     # Provider-specific thinking configuration
@@ -98,7 +98,7 @@ _BASE_CONFIG = {
     # The first entry's provider and backend_url match the primary config;
     # subsequent entries use their provider's default endpoint.
     "quick_think_fallback": [
-        {"provider": "sensenova",   "model": "sensenova-6.7-flash-lite"},
+        {"provider": "sensenova",   "model": "sensenova-6.8-flash-lite"},
         {"provider": "sensenova",   "model": "deepseek-v4-flash"},
         {"provider": "modelscope",  "model": "deepseek-ai/DeepSeek-V4-Flash"},
         {"provider": "modelscope",  "model": "stepfun-ai/Step-3.7-Flash"},
