@@ -1,6 +1,6 @@
 #商汤 SenseNova Token Plan 集成指南
 
-> **适用场景**：在 TradingAgents 框架中使用商汤 SenseNova Token Plan 提供的模型（sensenova-6.7-flash-lite / deepseek-v4-flash）。
+> **适用场景**：在 TradingAgents 框架中使用商汤 SenseNova Token Plan 提供的模型（sensenova-6.8-flash-lite / deepseek-v4-flash）。
 > **文档性质**：实战指南 + 最佳实践。
 
 ---
@@ -15,14 +15,14 @@
 
 | 模型名称 | Model ID | 上下文长度 | 速率限制 | 描述 |
 |---------|---------|-----------|---------|------|
-| SenseNova 6.7 Flash-Lite | `sensenova-6.7-flash-lite` | 256K | 每5小时1500次 | 轻量多模态智能体模型，支持文本对话与图像输入 |
+| SenseNova 6.8 Flash-Lite | `sensenova-6.8-flash-lite` | 256K | 每5小时1500次 | 轻量多模态智能体模型，支持文本对话与图像输入 |
 | DeepSeek V4 Flash | `deepseek-v4-flash` | 256K | 每5小时500次 | 高性能对话模型，支持思考/非思考模式、工具调用 |
 
 ### 1.2 速率限制
 
 | 模型 | QPS | RPM | TPM | 备注 |
 |------|-----|-----|-----|------|
-| sensenova-6.7-flash-lite | — | 每5小时1500次 | — | 按时间窗口计数 |
+| sensenova-6.8-flash-lite | — | 每5小时1500次 | — | 按时间窗口计数 |
 | deepseek-v4-flash | — | 每5小时500次 | — | 思考模式开销更大 |
 
 **影响**：并行运行的 researcher agent 容易被限流，建议：
@@ -69,7 +69,7 @@ from tradingagents.default_config import DEFAULT_CONFIG
 
 config = DEFAULT_CONFIG.copy()
 config["llm_provider"] = "sensenova"
-config["quick_think_llm"] = "sensenova-6.7-flash-lite"   # 通用任务（无 reasoning）
+config["quick_think_llm"] = "sensenova-6.8-flash-lite"   # 通用任务（无 reasoning）
 config["deep_think_llm"] = "deepseek-v4-flash"           # 推理任务（trader/manager）
 
 ta = TradingAgentsGraph(debug=True, config=config)
@@ -100,7 +100,7 @@ _PROVIDER_CONFIG = {
 
 | 模型 | 是否返回 reasoning_content | 使用的客户端类 |
 |------|--------------------------|--------------|
-| `sensenova-6.7-flash-lite` | ❌ 否（OpenAI 兼容接口） | `NormalizedChatOpenAI` |
+| `sensenova-6.8-flash-lite` | ❌ 否（OpenAI 兼容接口） | `NormalizedChatOpenAI` |
 | `deepseek-v4-flash` | ✅ 是（支持 reasoning_effort） | `DeepSeekChatOpenAI` |
 
 `DeepSeekChatOpenAI` 实现了 reasoning_content 的 sidecar 缓存机制，确保多轮对话中 thinking-mode 的往返正确。
@@ -125,7 +125,7 @@ config["deep_think_llm_kwargs"] = {"reasoning_effort": "high"}
 ### 3.4 Structured Output
 
 `deepseek-v4-flash` 支持 `tool_choice`，因此可以使用 function-calling 做结构化输出。
-`sensenova-6.7-flash-lite` 也支持工具调用，框架中的 `structured.py` 会自动处理。
+`sensenova-6.8-flash-lite` 也支持工具调用，框架中的 `structured.py` 会自动处理。
 
 ---
 
@@ -133,8 +133,8 @@ config["deep_think_llm_kwargs"] = {"reasoning_effort": "high"}
 
 | Agent 角色 | 推荐模型 | 理由 |
 |-----------|---------|------|
-| **Analyst** (并行) | `sensenova-6.7-flash-lite` | 轻量快速，256K 上下文，每5小时1500次额度充足 |
-| **Research Manager** | `sensenova-6.7-flash-lite` | 结构化输出，无需深度推理 |
+| **Analyst** (并行) | `sensenova-6.8-flash-lite` | 轻量快速，256K 上下文，每5小时1500次额度充足 |
+| **Research Manager** | `sensenova-6.8-flash-lite` | 结构化输出，无需深度推理 |
 | **Trader** | `deepseek-v4-flash` | 需要强推理能力做交易决策 |
 | **Portfolio Manager** | `deepseek-v4-flash` | 需要强推理能力做风险评估 |
 
@@ -158,7 +158,7 @@ config["deep_think_llm_kwargs"] = {"reasoning_effort": "high"}
 
 **解决**：
 - 降低 `max_debate_rounds`（建议 ≤ 2）
-- Analyst 使用 `sensenova-6.7-flash-lite`，避免用 `deepseek-v4-flash`
+- Analyst 使用 `sensenova-6.8-flash-lite`，避免用 `deepseek-v4-flash`
 - 避免同时运行多个 ticker 的分析
 - 等待 5 小时窗口重置
 
@@ -175,10 +175,10 @@ config["deep_think_llm_kwargs"] = {"reasoning_effort": "high"}
 ## 6. 最佳实践清单
 
 - [ ] 确保 `.env` 中 `SENSENOVA_API_KEY` 已配置
-- [ ] quick_think 用 `sensenova-6.7-flash-lite`，deep_think 用 `deepseek-v4-flash`
+- [ ] quick_think 用 `sensenova-6.8-flash-lite`，deep_think 用 `deepseek-v4-flash`
 - [ ] 监控额度使用情况，避免 5 小时窗口内超限
 - [ ] 中文 A 股场景下，配合 `ticker_resolver.py` 使用
-- [ ] 如需图像输入，`sensenova-6.7-flash-lite` 支持 `image_url` 类型的 content 块
+- [ ] 如需图像输入，`sensenova-6.8-flash-lite` 支持 `image_url` 类型的 content 块
 
 ---
 

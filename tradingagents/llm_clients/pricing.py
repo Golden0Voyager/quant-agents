@@ -77,9 +77,11 @@ _DEFAULT_PRICING: dict[str, dict[str, Price | dict[str, Any]]] = {
     },
     # SenseNova (Token Plan endpoint)
     "sensenova": {
-        # Post-beta rate verified 2026-07: ¥1.5/M input, ¥4.5/M output.
-        # Stored as native CNY values; converted to USD/M by _load_pricing_yaml().
+        # 6.8 transition mapping carries the last known 6.7 rate until the
+        # provider publishes a new official price. Stored as native CNY and
+        # converted to USD/M by _load_pricing_yaml().
         "sensenova-6.7-flash-lite": {"input": 1.5, "output": 4.5, "currency": "CNY"},
+        "sensenova-6.8-flash-lite": {"input": 1.5, "output": 4.5, "currency": "CNY"},
         # SenseNova also routes DeepSeek V4-Flash at the same USD rate.
         "deepseek-v4-flash": (0.14, 0.28),
     },
