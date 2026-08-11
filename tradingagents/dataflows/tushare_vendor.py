@@ -83,7 +83,7 @@ def get_company_announcements(symbol: str, start_date: str, end_date: str) -> st
 
 
 def get_earnings_estimates(symbol: str, curr_date: str | None = None) -> str:
-    kwargs = {"ts_code": _ts_code(symbol)}
+    kwargs: dict[str, Any] = {"ts_code": _ts_code(symbol)}
     if curr_date:
         kwargs["ann_date"] = _date(curr_date)
     frame = _rows_or_raise(symbol, _pro().forecast(**kwargs), "earnings forecast")
@@ -91,7 +91,7 @@ def get_earnings_estimates(symbol: str, curr_date: str | None = None) -> str:
 
 
 def get_margin_trading(symbol: str, curr_date: str | None = None) -> str:
-    kwargs = {"ts_code": _ts_code(symbol)}
+    kwargs: dict[str, Any] = {"ts_code": _ts_code(symbol)}
     if curr_date:
         kwargs["end_date"] = _date(curr_date)
     frame = _rows_or_raise(symbol, _pro().margin(**kwargs), "margin-trading")
@@ -104,7 +104,7 @@ def get_pledge_ratio(symbol: str) -> str:
 
 
 def get_fund_flow(symbol: str, curr_date: str | None = None) -> str:
-    kwargs = {"ts_code": _ts_code(symbol)}
+    kwargs: dict[str, Any] = {"ts_code": _ts_code(symbol)}
     if curr_date:
         kwargs["trade_date"] = _date(curr_date)
     frame = _rows_or_raise(symbol, _pro().moneyflow(**kwargs), "fund-flow")
