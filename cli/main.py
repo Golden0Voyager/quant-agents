@@ -1307,6 +1307,11 @@ def analyze(
         "--clear-checkpoints",
         help="Delete all saved checkpoints before running (force fresh start).",
     ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Regenerate reports even when matching reports already exist.",
+    ),
     profile: str | None = typer.Option(
         None,
         "--profile",
@@ -1402,6 +1407,7 @@ def analyze(
             holdings=holdings,
             workers=cfg.get("workers", workers),
             headless=True,
+            force=cfg.get("force", force),
         )
         return
 
@@ -1447,6 +1453,7 @@ def analyze(
             holdings=holdings,
             workers=workers,
             headless=True,
+            force=force,
         )
         return
 

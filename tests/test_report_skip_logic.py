@@ -157,6 +157,20 @@ class TestIsAlreadyCompleted:
         assert runner._is_already_completed("AAPL") is True
 
 
+class TestForceRegeneration:
+    def test_force_disables_checkpoint_cache(self, tmp_path):
+        """Forced batch runs must execute the graph instead of reusing state logs."""
+        runner = BatchRunner(
+            tickers=["AAPL"],
+            profile_config={"checkpoint_enabled": True},
+            output_dir=tmp_path,
+            checkpoint=True,
+            force=True,
+        )
+
+        assert runner._build_config()["checkpoint_enabled"] is False
+
+
 class TestSaveReportToDisk:
     def test_includes_analysis_date_in_header(self, tmp_path, sample_final_state):
         save_path = tmp_path / "reports" / "AAPL"

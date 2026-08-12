@@ -176,6 +176,29 @@ class TestRunBatchAnalysisMyWatchlist:
             # Explicitly provided holdings should be preserved.
             assert mock_runner_class.call_args[1]["holdings"] == {"AAPL": {"shares": 10}}
 
+    def test_force_is_forwarded_to_batch_runner(self, tmp_path):
+        """Batch CLI callers can force regeneration of existing reports."""
+        from cli.main import run_batch_analysis
+
+        with patch("cli.main.BatchRunner") as mock_runner_class:
+            mock_runner = MagicMock()
+            mock_runner.summaries = {}
+            mock_runner.failures = {}
+            mock_runner.completed_tickers = {"AAPL"}
+            mock_runner.batch_stats = {}
+            mock_runner.generate_summary.return_value = tmp_path / "batch_summary.md"
+            mock_runner_class.return_value = mock_runner
+
+            run_batch_analysis(
+                tickers=["AAPL"],
+                profile_config={"llm_provider": "openai", "output_language": "English"},
+                output_dir=tmp_path,
+                headless=True,
+                force=True,
+            )
+
+            assert mock_runner_class.call_args.kwargs["force"] is True
+
     def test_my_watchlist_overrides_explicit_holdings(self, tmp_path):
         """When watchlist_name='my', any explicitly-passed holdings dict is ignored."""
         from cli.main import run_batch_analysis
@@ -466,4 +489,3 @@ class TestSyncPortfolioForMyList:
         assert saved.holdings["OLD"].shares == 5
         assert len(saved.transactions) == 1
         assert saved.transactions[0].ticker == "OLD"
-

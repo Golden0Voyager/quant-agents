@@ -332,7 +332,9 @@ class BatchRunner:
         config["openai_reasoning_effort"] = self.profile_config.get("openai_reasoning_effort")
         config["anthropic_effort"] = self.profile_config.get("anthropic_effort")
         config["output_language"] = self.profile_config.get("output_language", "English")
-        config["checkpoint_enabled"] = self.checkpoint
+        # A forced regeneration must bypass both report-copy detection and the
+        # completed full-state log in TradingAgentsGraph.propagate().
+        config["checkpoint_enabled"] = self.checkpoint and not self.force
         return config
 
     def _run_single(self, ticker: str) -> dict:
