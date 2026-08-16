@@ -7,6 +7,7 @@ import pytest
 from tradingagents.dataflows.data_policy import (
     ToolPolicy,
     UnknownToolPolicyError,
+    is_applicable,
     legacy_policy_for,
     normalized_dates,
     policy_for,
@@ -52,7 +53,7 @@ from tradingagents.market_context import AnalysisDates
         (
             "get_company_announcements",
             ToolPolicy(
-                applicable_markets=frozenset({"XSHG", "XHKG"}),
+                applicable_markets=frozenset({"XSHG"}),
                 date_policy="calendar_window",
                 empty_semantics="confirmed_empty",
                 impact="high",
@@ -93,6 +94,12 @@ def test_policy_for_returns_the_centralized_immutable_policy(method, expected):
 def test_policy_for_unknown_method_is_strict():
     with pytest.raises(UnknownToolPolicyError, match="missing_tool"):
         policy_for("missing_tool")
+
+
+@pytest.mark.unit
+def test_company_announcements_is_inapplicable_to_hk_until_hkex_is_registered():
+    assert is_applicable("get_company_announcements", "XSHG") is True
+    assert is_applicable("get_company_announcements", "XHKG") is False
 
 
 @pytest.mark.unit

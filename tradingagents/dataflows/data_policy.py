@@ -61,7 +61,7 @@ _POLICIES: dict[str, ToolPolicy] = {
         allowed_vendors=("smartmoney_db", "alpha_vantage", "yfinance", "akshare"),
     ),
     "get_company_announcements": ToolPolicy(
-        applicable_markets=frozenset({"XSHG", "XHKG"}),
+        applicable_markets=frozenset({"XSHG"}),
         date_policy="calendar_window",
         empty_semantics="confirmed_empty",
         impact="high",

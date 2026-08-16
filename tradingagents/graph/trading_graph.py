@@ -639,6 +639,9 @@ class TradingAgentsGraph:
                         )
                         self.curr_state = cached_state
                         cached_state.setdefault("data_coverage", [])
+                        cached_context = runtime_data_context_for(ticker, str(trade_date))
+                        cached_state.setdefault("market", cached_context.market)
+                        cached_state.setdefault("analysis_dates", asdict(cached_context.dates))
                         # Clear any stale checkpoint so the next run starts fresh.
                         clear_checkpoint(
                             self.config["data_cache_dir"], ticker, str(trade_date)
@@ -667,18 +670,17 @@ class TradingAgentsGraph:
 
         runtime_context = runtime_data_context_for(ticker, str(trade_date))
         try:
-            with use_runtime_data_context(runtime_context):
-                with collect_route_diagnostics() as route_diagnostics:
-                    result = self._run_graph(
-                        ticker,
-                        trade_date,
-                        asset_type=asset_type,
-                        confirmed_name=resolved_name,
-                        on_chunk=on_chunk,
-                        holdings_context=holdings_context,
-                        transactions_context=transactions_context,
-                        company_display_name=company_display_name,
-                    )
+            with use_runtime_data_context(runtime_context), collect_route_diagnostics() as route_diagnostics:
+                result = self._run_graph(
+                    ticker,
+                    trade_date,
+                    asset_type=asset_type,
+                    confirmed_name=resolved_name,
+                    on_chunk=on_chunk,
+                    holdings_context=holdings_context,
+                    transactions_context=transactions_context,
+                    company_display_name=company_display_name,
+                )
             final_state, signal = result
             final_state["data_coverage"] = [asdict(item) for item in route_diagnostics]
             return final_state, signal
