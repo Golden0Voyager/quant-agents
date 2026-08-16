@@ -1,9 +1,12 @@
 """Market capability filtering for analyst-bound tools."""
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event, Lock
 from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage
+from langchain_core.runnables import RunnableLambda
 from langchain_core.tools import tool
 
 from tradingagents.agents.analysts.fundamentals_analyst import (
@@ -30,6 +33,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_institutional_intelligence,
     get_limit_up_down,
     get_margin_trading,
+    get_news,
     get_northbound_hold,
     get_pledge_ratio,
     get_research_reports,
@@ -37,7 +41,10 @@ from tradingagents.agents.utils.agent_utils import (
     get_sector_fund_flow,
     get_shareholder_count,
 )
-from tradingagents.agents.utils.tool_capabilities import tools_for_market
+from tradingagents.agents.utils.tool_capabilities import (
+    BoundToolsByMarket,
+    tools_for_market,
+)
 
 _A_SHARE_ONLY_TOOLS = [
     get_block_trade,
@@ -75,12 +82,19 @@ _HK_STATE = {
 }
 
 
-def _capturing_llm(bound_tool_sets: list[set[str]]) -> MagicMock:
+def _capturing_llm(
+    bound_tool_sets: list[set[str]], prompts: list[str] | None = None
+) -> MagicMock:
     llm = MagicMock()
 
     def bind_tools(tools):
         bound_tool_sets.append({item.name for item in tools})
-        return MagicMock(return_value=AIMessage(content="report"))
+        def invoke(prompt_value):
+            if prompts is not None:
+                prompts.append(prompt_value.to_messages()[0].content)
+            return AIMessage(content="report")
+
+        return RunnableLambda(invoke)
 
     llm.bind_tools.side_effect = bind_tools
     return llm
@@ -110,6 +124,37 @@ def test_tools_without_policy_use_explicit_warned_legacy_compatibility(caplog):
     assert selected == [legacy_tool]
     assert "legacy data policy" in caplog.text
     assert "legacy_tool" in caplog.text
+
+
+@pytest.mark.unit
+def test_bound_tools_cache_single_flights_concurrent_market_binding():
+    entered = Event()
+    release = Event()
+    calls = 0
+    calls_lock = Lock()
+    llm = MagicMock()
+
+    def bind_tools(tools):
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+        entered.set()
+        assert release.wait(timeout=2)
+        return object()
+
+    llm.bind_tools.side_effect = bind_tools
+    cache = BoundToolsByMarket(llm, [get_news, get_research_reports])
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(cache.get, "XHKG")
+        assert entered.wait(timeout=2)
+        second = executor.submit(cache.get, "XHKG")
+        release.set()
+        first_result = first.result(timeout=2)
+        second_result = second.result(timeout=2)
+
+    assert calls == 1
+    assert first_result is second_result
 
 
 @pytest.mark.unit
@@ -181,6 +226,88 @@ def test_hk_analyst_nodes_never_bind_or_call_policy_excluded_tools(
     assert bound_tool_sets[0].isdisjoint(excluded_names)
     for spy in call_spies:
         spy.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("factory", "excluded_names", "retained_name"),
+    [
+        (
+            create_market_analyst,
+            {
+                "get_chip_distribution",
+                "get_fund_flow",
+                "get_sector_fund_flow",
+                "get_limit_up_down",
+                "get_index_daily",
+            },
+            "get_stock_data",
+        ),
+        (
+            create_news_analyst,
+            {"get_research_reports", "get_cailianpress_telegrams"},
+            "get_news",
+        ),
+        (
+            create_governance_analyst,
+            {
+                "get_company_announcements",
+                "get_restricted_release",
+                "get_institutional_intelligence",
+                "get_northbound_hold",
+                "get_margin_trading",
+                "get_pledge_ratio",
+                "get_dragon_tiger",
+                "get_block_trade",
+            },
+            "get_insider_transactions",
+        ),
+        (
+            create_industry_analyst,
+            {
+                "get_industry_valuation",
+                "get_concept_board",
+                "get_sector_fund_flow",
+            },
+            "get_macro_indicators",
+        ),
+        (
+            create_fundamentals_analyst,
+            {
+                "get_historical_valuation",
+                "get_earnings_forecast",
+                "get_earnings_estimates",
+                "get_shareholder_count",
+                "get_dividend_history",
+            },
+            "get_fundamentals",
+        ),
+    ],
+)
+def test_analyst_prompt_guidance_matches_bound_tools_for_hk_and_xshg(
+    factory, excluded_names, retained_name
+):
+    bound_tool_sets: list[set[str]] = []
+    prompts: list[str] = []
+    node = factory(_capturing_llm(bound_tool_sets, prompts))
+    xshg_state = {
+        **_HK_STATE,
+        "company_of_interest": "600519.SS",
+        "company_name": "Kweichow Moutai",
+        "market": "XSHG",
+        "instrument_context": "Company: Kweichow Moutai; Ticker: 600519.SS",
+    }
+
+    node(dict(_HK_STATE))
+    node(xshg_state)
+
+    assert len(prompts) == 2
+    hk_prompt, xshg_prompt = prompts
+    assert retained_name in hk_prompt
+    assert retained_name in xshg_prompt
+    for tool_name in excluded_names:
+        assert tool_name not in hk_prompt
+        assert tool_name in xshg_prompt
 
 
 @pytest.mark.unit

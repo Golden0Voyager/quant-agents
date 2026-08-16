@@ -10,7 +10,10 @@ from tradingagents.agents.utils.agent_utils import (
     get_research_reports,
     sanitize_company_name_in_report,
 )
-from tradingagents.agents.utils.tool_capabilities import tools_for_market
+from tradingagents.agents.utils.tool_capabilities import (
+    BoundToolsByMarket,
+    tool_guidance_for,
+)
 from tradingagents.market_context import infer_market
 
 
@@ -22,7 +25,14 @@ def create_news_analyst(llm):
         get_research_reports,
         get_cailianpress_telegrams,
     ]
-    bound_llms = {}
+    bound_tools = BoundToolsByMarket(llm, tools)
+    tool_guidance = {
+        "get_news": "Use get_news(query, start_date, end_date) for company-specific or targeted news searches.",
+        "get_global_news": "Use get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news.",
+        "get_macro_indicators": "Use get_macro_indicators for quantitative macro data such as PMI, CPI, M2, social finance, and supported FRED series.",
+        "get_research_reports": "Use get_research_reports(ticker) for broker ratings, target prices, and institutional opinions.",
+        "get_cailianpress_telegrams": "Use get_cailianpress_telegrams(limit) for real-time Chinese market flash news and announcements from Cailianpress (财联社).",
+    }
 
     def news_analyst_node(state):
         current_date = state["trade_date"]
@@ -32,10 +42,7 @@ def create_news_analyst(llm):
         asset_label = "company" if asset_type == "stock" else "asset"
         instrument_context = get_instrument_context_from_state(state)
         market = state.get("market") or infer_market(ticker)
-        if market not in bound_llms:
-            market_tools = tools_for_market(tools, market)
-            bound_llms[market] = (market_tools, llm.bind_tools(market_tools))
-        market_tools, bound_llm = bound_llms[market]
+        market_tools, bound_llm = bound_tools.get(market)
 
         ticker_guard = (
             f"TICKER VERIFICATION — You are analyzing {company_name} ({ticker}). "
@@ -44,7 +51,9 @@ def create_news_analyst(llm):
         ) if company_name else ""
 
         system_message = ticker_guard + (
-            f"You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(query, start_date, end_date) for {asset_label}-specific or targeted news searches, get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news, get_macro_indicators(indicator, curr_date, look_back_days) for quantitative macro data (pmi, cpi, m2, social_finance, or FRED series like 'fed_funds_rate', '10y_treasury', 'unemployment'), get_research_reports(ticker) for broker analyst ratings, target prices, and institutional opinions, get_cailianpress_telegrams(limit) for real-time Chinese market flash news and announcements from Cailianpress (财联社). Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
+            f"You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world relevant to trading, macroeconomics, and this {asset_label}."
+            + tool_guidance_for(market_tools, tool_guidance)
+            + " Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
             + (
                 "\n\n## Missing Data Protocol\n"

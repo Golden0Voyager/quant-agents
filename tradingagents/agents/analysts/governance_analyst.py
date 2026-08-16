@@ -15,7 +15,10 @@ from tradingagents.agents.utils.agent_utils import (
     get_restricted_release,
     sanitize_company_name_in_report,
 )
-from tradingagents.agents.utils.tool_capabilities import tools_for_market
+from tradingagents.agents.utils.tool_capabilities import (
+    BoundToolsByMarket,
+    tool_guidance_for,
+)
 from tradingagents.market_context import infer_market
 
 
@@ -32,7 +35,19 @@ def create_governance_analyst(llm):
         get_dragon_tiger,
         get_block_trade,
     ]
-    bound_llms = {}
+    bound_tools = BoundToolsByMarket(llm, tools)
+    tool_guidance = {
+        "get_company_announcements": "Use get_company_announcements for regulatory filings and notices.",
+        "get_insider_transactions": "Use get_insider_transactions for shareholder-change and insider-transaction data.",
+        "get_news": "Use get_news for related news coverage.",
+        "get_restricted_release": "Use get_restricted_release to identify upcoming share unlocks and potential supply pressure.",
+        "get_institutional_intelligence": "Use get_institutional_intelligence for shareholder positioning, fund holdings, surveys, and focus topics.",
+        "get_northbound_hold": "Use get_northbound_hold to monitor foreign-investor positioning.",
+        "get_margin_trading": "Use get_margin_trading to assess leverage and speculative sentiment.",
+        "get_pledge_ratio": "Use get_pledge_ratio to evaluate equity-pledge and liquidation risk.",
+        "get_dragon_tiger": "Use get_dragon_tiger to track hot-money and institutional trading activity.",
+        "get_block_trade": "Use get_block_trade to monitor large-block transactions and premium/discount signals.",
+    }
 
     def governance_analyst_node(state):
         current_date = state["trade_date"]
@@ -43,10 +58,7 @@ def create_governance_analyst(llm):
         company_name = state.get("company_name", "")
         ticker = state["company_of_interest"]
         market = state.get("market") or infer_market(ticker)
-        if market not in bound_llms:
-            market_tools = tools_for_market(tools, market)
-            bound_llms[market] = (market_tools, llm.bind_tools(market_tools))
-        market_tools, bound_llm = bound_llms[market]
+        market_tools, bound_llm = bound_tools.get(market)
         company_line = f"Target company: {company_name} ({ticker}). " if company_name else ""
 
         system_message = (
@@ -59,19 +71,8 @@ def create_governance_analyst(llm):
             "TERMINOLOGY MANDATE: Reserve '公司总市值' strictly for total company market cap. "
             "For institutional or northbound position value, explicitly write '机构持股市值' or '北向持股市值' to avoid ambiguity. "
             "Do NOT use plain '市值' for position values. "
-            "Use the get_company_announcements tool for regulatory filings and notices, "
-            "get_insider_transactions for shareholder change data, get_news "
-            "for related news coverage, get_restricted_release to identify upcoming "
-            "share unlock events and their potential supply pressure, "
-            "get_institutional_intelligence to track top shareholder positioning, fund holdings, "
-            "institutional survey frequency, and key focus topics (merged indicator), "
-            "get_northbound_hold to monitor foreign investor sentiment, "
-            "get_margin_trading to assess leverage and speculative sentiment, "
-            "get_pledge_ratio to evaluate equity pledge risk and liquidation pressure, "
-            "get_dragon_tiger to track hot-money and institutional trading activity, "
-            "and get_block_trade to monitor off-exchange large-block transactions "
-            "that may signal institutional accumulation (premium) or distribution (discount). "
-            "Provide specific, actionable insights on governance risks, capital structure "
+            + tool_guidance_for(market_tools, tool_guidance)
+            + " Provide specific, actionable insights on governance risks, capital structure "
             "changes, management signals, and any red flags that could impact investment decisions."
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
             + (
