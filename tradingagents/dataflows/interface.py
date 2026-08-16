@@ -4,7 +4,8 @@ import os
 import re as _re
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
+from threading import Lock
 from typing import Any, Literal
 
 from tradingagents.market_context import Market, infer_market
@@ -262,7 +263,7 @@ class VendorPayload:
             raise ValueError(f"Unsupported vendor payload status: {self.status}")
 
 
-@dataclass
+@dataclass(frozen=True)
 class VendorRouteDiagnostic:
     """Explain how one logical data request was resolved."""
 
@@ -285,8 +286,37 @@ class VendorRouteResult:
     diagnostic: VendorRouteDiagnostic | None = None
 
 
-_ROUTE_DIAGNOSTICS: ContextVar[list[VendorRouteDiagnostic] | None] = ContextVar(
+@dataclass
+class _RouteDiagnosticCollector:
+    """Collector-local aggregation; memoized results never own call counts."""
+
+    records: list[VendorRouteDiagnostic] = field(default_factory=list)
+    _indexes: dict[RequestKey, int] = field(default_factory=dict)
+    _lock: Lock = field(default_factory=Lock)
+
+    def record(
+        self, diagnostic: VendorRouteDiagnostic, request_key: RequestKey | None = None
+    ) -> None:
+        with self._lock:
+            if request_key is None:
+                self.records.append(diagnostic)
+                return
+            index = self._indexes.get(request_key)
+            if index is None:
+                self._indexes[request_key] = len(self.records)
+                self.records.append(replace(diagnostic, call_count=1))
+                return
+            current = self.records[index]
+            self.records[index] = replace(
+                current, call_count=current.call_count + 1
+            )
+
+
+_ROUTE_DIAGNOSTICS: ContextVar[_RouteDiagnosticCollector | None] = ContextVar(
     "tradingagents_route_diagnostics", default=None
+)
+_DEFER_MEMO_DIAGNOSTIC: ContextVar[bool] = ContextVar(
+    "tradingagents_defer_memo_diagnostic", default=False
 )
 _ROUTE_CIRCUIT_BREAKERS: ContextVar[set[tuple[str, str]] | None] = ContextVar(
     "tradingagents_route_circuit_breakers", default=None
@@ -296,12 +326,11 @@ _ROUTE_CIRCUIT_BREAKERS: ContextVar[set[tuple[str, str]] | None] = ContextVar(
 @contextmanager
 def collect_route_diagnostics():
     """Collect route diagnostics for the current ticker/worker context."""
-    token = _ROUTE_DIAGNOSTICS.set([])
+    collector = _RouteDiagnosticCollector()
+    token = _ROUTE_DIAGNOSTICS.set(collector)
     breaker_token = _ROUTE_CIRCUIT_BREAKERS.set(set())
     try:
-        records = _ROUTE_DIAGNOSTICS.get()
-        assert records is not None
-        yield records
+        yield collector.records
     finally:
         _ROUTE_CIRCUIT_BREAKERS.reset(breaker_token)
         _ROUTE_DIAGNOSTICS.reset(token)
@@ -309,7 +338,8 @@ def collect_route_diagnostics():
 
 def get_route_diagnostics() -> list[VendorRouteDiagnostic]:
     """Return a snapshot of diagnostics in the current context."""
-    return list(_ROUTE_DIAGNOSTICS.get() or [])
+    collector = _ROUTE_DIAGNOSTICS.get()
+    return list(collector.records) if collector is not None else []
 
 
 def _is_transport_error(exc: Exception) -> bool:
@@ -391,9 +421,9 @@ def _route_result(
         ),
         reason=reason,
     )
-    records = _ROUTE_DIAGNOSTICS.get()
-    if records is not None:
-        records.append(diagnostic)
+    collector = _ROUTE_DIAGNOSTICS.get()
+    if collector is not None and not _DEFER_MEMO_DIAGNOSTIC.get():
+        collector.record(diagnostic)
     return VendorRouteResult(data, vendor, diagnostic)
 
 
@@ -470,6 +500,24 @@ def _date_like(value: Any) -> bool:
     )
 
 
+def _normalize_key_date(value: Any) -> Any:
+    if isinstance(value, _dt.datetime):
+        return value.date().isoformat()
+    if isinstance(value, _dt.date):
+        return value.isoformat()
+    if not isinstance(value, str):
+        return value
+    candidate = value.strip()
+    try:
+        if "T" in candidate or " " in candidate:
+            return _dt.datetime.fromisoformat(
+                candidate.replace("Z", "+00:00")
+            ).date().isoformat()
+        return _dt.date.fromisoformat(candidate).isoformat()
+    except ValueError:
+        return value
+
+
 def _request_key(
     method: str,
     policy: ToolPolicy,
@@ -479,56 +527,59 @@ def _request_key(
     kwargs: dict[str, Any],
 ) -> RequestKey:
     """Build a stable key after policy ticker/date normalization."""
-    symbol = args[0] if args else kwargs.get("symbol") or kwargs.get("ticker")
-    ticker = (
-        context.ticker
-        if policy.date_policy == "market_session" or not isinstance(symbol, str)
-        else symbol
-    )
-    normalized_ticker = ticker.strip().upper()
+    positional = list(args)
+    residual_options = dict(kwargs)
 
-    start_date = next(
-        (
-            kwargs[name]
-            for name in ("start_date", "trade_date", "curr_date", "as_of")
-            if kwargs.get(name) is not None
-        ),
-        None,
-    )
-    end_date = next(
-        (
-            kwargs[name]
-            for name in ("end_date", "evidence_window_end")
-            if kwargs.get(name) is not None
-        ),
-        None,
-    )
-    positional_dates = [value for value in args if _date_like(value)]
-    if start_date is None and positional_dates:
-        start_date = positional_dates[0]
-    if end_date is None and len(positional_dates) > 1:
-        end_date = positional_dates[-1]
+    ticker_aliases = [
+        residual_options.pop(name)
+        for name in ("symbol", "ticker")
+        if residual_options.get(name) is not None
+    ]
+    ticker: Any = ticker_aliases[0] if ticker_aliases else None
+    if policy.date_policy == "market_session":
+        ticker = context.ticker
+    elif ticker is None and positional and not _date_like(positional[0]):
+        ticker = positional.pop(0)
+    if not isinstance(ticker, str):
+        ticker = context.ticker
+    normalized_ticker = ticker.strip().upper()
+    if any(
+        isinstance(alias, str) and alias.strip().upper() != normalized_ticker
+        for alias in ticker_aliases[1:]
+    ):
+        residual_options["_ticker_aliases"] = ticker_aliases
+
+    def pop_date_alias(names: tuple[str, ...]) -> Any:
+        values = [
+            residual_options.pop(name)
+            for name in names
+            if residual_options.get(name) is not None
+        ]
+        if len({_normalize_key_date(value) for value in values}) > 1:
+            residual_options[f"_{names[0]}_aliases"] = values
+        return values[0] if values else None
+
+    start_date = pop_date_alias(("start_date", "trade_date", "curr_date", "as_of"))
+    end_date = pop_date_alias(("end_date", "evidence_window_end"))
+    if start_date is None:
+        for index, value in enumerate(positional):
+            if _date_like(value):
+                start_date = positional.pop(index)
+                break
+    if end_date is None:
+        for index, value in enumerate(positional):
+            if _date_like(value):
+                end_date = positional.pop(index)
+                break
     if start_date is None and end_date is None and registered_policy:
         start_date, end_date = normalized_dates(method, context)
-
-    frozen_args = list(args)
-    if (
-        policy.date_policy != "market_session"
-        and frozen_args
-        and isinstance(frozen_args[0], str)
-    ):
-        frozen_args[0] = normalized_ticker
-    frozen_options = dict(kwargs)
-    for name in ("symbol", "ticker"):
-        if name in frozen_options:
-            frozen_options[name] = normalized_ticker
 
     return RequestKey(
         method=method,
         ticker=normalized_ticker,
         start_date=start_date,
         end_date=end_date,
-        frozen_kwargs={"args": frozen_args, "kwargs": frozen_options},
+        frozen_kwargs={"args": positional, "kwargs": residual_options},
         policy_version=context.policy_version,
     )
 
@@ -883,7 +934,15 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
         args,
         kwargs,
     )
-    return memo.resolve(key, resolver)
+    defer_token = _DEFER_MEMO_DIAGNOSTIC.set(True)
+    try:
+        result = memo.resolve(key, resolver)
+    finally:
+        _DEFER_MEMO_DIAGNOSTIC.reset(defer_token)
+    collector = _ROUTE_DIAGNOSTICS.get()
+    if collector is not None and result.diagnostic is not None:
+        collector.record(result.diagnostic, key)
+    return result
 
 
 def _resolve_route_with_source(

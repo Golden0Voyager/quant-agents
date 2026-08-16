@@ -88,7 +88,6 @@ class RequestMemo(Generic[T]):  # noqa: UP046 - package supports Python 3.10+
         with self._lock:
             cached = self._cache.get(key, _MISSING)
             if cached is not _MISSING:
-                self._record_additional_call(cached)
                 return cached  # type: ignore[return-value]
 
             flight = self._in_flight.get(key)
@@ -123,16 +122,9 @@ class RequestMemo(Generic[T]):  # noqa: UP046 - package supports Python 3.10+
                 raise flight.exception
             if flight.result is _MISSING:
                 raise RuntimeError("Request flight completed without a result")
-            self._record_additional_call(flight.result)
             return flight.result  # type: ignore[return-value]
 
     @staticmethod
     def _status(result: Any) -> str | None:
         diagnostic = getattr(result, "diagnostic", None)
         return getattr(diagnostic, "status", None)
-
-    @staticmethod
-    def _record_additional_call(result: Any) -> None:
-        diagnostic = getattr(result, "diagnostic", None)
-        if diagnostic is not None and hasattr(diagnostic, "call_count"):
-            diagnostic.call_count += 1

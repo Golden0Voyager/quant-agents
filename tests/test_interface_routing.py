@@ -1513,6 +1513,159 @@ def test_runtime_memo_normalizes_equivalent_ticker_case_in_full_request_key():
 
 
 @pytest.mark.unit
+def test_runtime_memo_normalizes_positional_and_keyword_request_forms():
+    from tradingagents.dataflows import interface
+
+    vendor = MagicMock(return_value="news")
+    with (
+        use_runtime_data_context(_runtime_context()),
+        interface.collect_route_diagnostics() as records,
+        patch.object(interface, "get_vendor", return_value="smartmoney_db"),
+        patch.dict(
+            interface.VENDOR_METHODS["get_news"],
+            {"smartmoney_db": vendor},
+            clear=True,
+        ),
+    ):
+        positional = interface.route_to_vendor(
+            "get_news", "600519.SS", "2026-08-01", "2026-08-16"
+        )
+        keyword = interface.route_to_vendor(
+            "get_news",
+            ticker="600519.SS",
+            start_date="2026-08-01",
+            end_date="2026-08-16",
+        )
+
+    assert positional == keyword == "news"
+    vendor.assert_called_once()
+    assert len(records) == 1
+    assert records[0].call_count == 2
+
+
+@pytest.mark.unit
+def test_runtime_memo_normalizes_symbol_and_ticker_aliases():
+    from tradingagents.dataflows import interface
+
+    vendor = MagicMock(return_value="news")
+    with (
+        use_runtime_data_context(_runtime_context()),
+        interface.collect_route_diagnostics() as records,
+        patch.object(interface, "get_vendor", return_value="smartmoney_db"),
+        patch.dict(
+            interface.VENDOR_METHODS["get_news"],
+            {"smartmoney_db": vendor},
+            clear=True,
+        ),
+    ):
+        by_symbol = interface.route_to_vendor(
+            "get_news",
+            symbol="600519.SS",
+            start_date="2026-08-01",
+            end_date="2026-08-16",
+        )
+        by_ticker = interface.route_to_vendor(
+            "get_news",
+            ticker="600519.SS",
+            start_date="2026-08-01",
+            end_date="2026-08-16",
+        )
+
+    assert by_symbol == by_ticker == "news"
+    vendor.assert_called_once()
+    assert len(records) == 1
+    assert records[0].call_count == 2
+
+
+@pytest.mark.unit
+def test_runtime_memo_keeps_distinct_residual_options_separate():
+    from tradingagents.dataflows import interface
+
+    vendor = MagicMock(side_effect=lambda *args, **kwargs: f"limit={kwargs['limit']}")
+    with (
+        use_runtime_data_context(_runtime_context()),
+        interface.collect_route_diagnostics() as records,
+        patch.object(interface, "get_vendor", return_value="smartmoney_db"),
+        patch.dict(
+            interface.VENDOR_METHODS["get_news"],
+            {"smartmoney_db": vendor},
+            clear=True,
+        ),
+    ):
+        first = interface.route_to_vendor(
+            "get_news", "600519.SS", "2026-08-01", "2026-08-16", limit=10
+        )
+        second = interface.route_to_vendor(
+            "get_news", "600519.SS", "2026-08-01", "2026-08-16", limit=20
+        )
+
+    assert first == "limit=10"
+    assert second == "limit=20"
+    assert vendor.call_count == 2
+    assert len(records) == 2
+
+
+@pytest.mark.unit
+def test_cached_result_is_recorded_independently_in_each_collector_scope():
+    from tradingagents.dataflows import interface
+
+    vendor = MagicMock(return_value="news")
+    with (
+        use_runtime_data_context(_runtime_context()),
+        patch.object(interface, "get_vendor", return_value="smartmoney_db"),
+        patch.dict(
+            interface.VENDOR_METHODS["get_news"],
+            {"smartmoney_db": vendor},
+            clear=True,
+        ),
+    ):
+        with interface.collect_route_diagnostics() as first_records:
+            first = interface.route_to_vendor_with_source(
+                "get_news", "600519.SS", "2026-08-01", "2026-08-16"
+            )
+        first_snapshot = first_records[0]
+
+        with interface.collect_route_diagnostics() as second_records:
+            second = interface.route_to_vendor_with_source(
+                "get_news", "600519.SS", "2026-08-01", "2026-08-16"
+            )
+
+    assert first is second
+    vendor.assert_called_once()
+    assert len(first_records) == len(second_records) == 1
+    assert first_records[0].call_count == second_records[0].call_count == 1
+    assert first_records[0] is first_snapshot
+    assert first_records[0] is not second_records[0]
+
+
+@pytest.mark.unit
+def test_cache_hit_after_uncollected_call_registers_in_current_collector():
+    from tradingagents.dataflows import interface
+
+    vendor = MagicMock(return_value="news")
+    with (
+        use_runtime_data_context(_runtime_context()),
+        patch.object(interface, "get_vendor", return_value="smartmoney_db"),
+        patch.dict(
+            interface.VENDOR_METHODS["get_news"],
+            {"smartmoney_db": vendor},
+            clear=True,
+        ),
+    ):
+        interface.route_to_vendor(
+            "get_news", "600519.SS", "2026-08-01", "2026-08-16"
+        )
+        with interface.collect_route_diagnostics() as records:
+            interface.route_to_vendor(
+                "get_news", "600519.SS", "2026-08-01", "2026-08-16"
+            )
+
+    vendor.assert_called_once()
+    assert len(records) == 1
+    assert records[0].call_count == 1
+
+
+@pytest.mark.unit
 def test_runtime_memo_does_not_leak_across_tickers_or_context_scopes():
     from tradingagents.dataflows import interface
 

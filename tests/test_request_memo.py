@@ -90,7 +90,7 @@ def test_five_concurrent_callers_execute_resolver_once():
 
     assert attempts == 1
     assert all(item is result for item in resolved)
-    assert result.diagnostic.call_count == 5
+    assert result.diagnostic.call_count == 1
 
 
 @pytest.mark.unit
@@ -111,7 +111,7 @@ def test_stable_outcomes_are_cached(status):
 
     assert first is second
     assert attempts == 1
-    assert first.diagnostic.call_count == 2
+    assert first.diagnostic.call_count == 1
 
 
 @pytest.mark.unit
