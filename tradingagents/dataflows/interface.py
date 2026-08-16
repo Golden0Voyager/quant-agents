@@ -220,6 +220,27 @@ OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets", "research_opinion"}
 VendorPayloadStatus = Literal["ok", "valid_empty", "partial", "stale"]
 _VENDOR_PAYLOAD_STATUSES = frozenset({"ok", "valid_empty", "partial", "stale"})
 _INFER_AS_OF_FROM_REQUEST = object()
+_TRANSPORT_EXCEPTION_NAMES = frozenset(
+    {
+        "ConnectionError",
+        "ConnectError",
+        "ConnectTimeout",
+        "NetworkError",
+        "PoolTimeout",
+        "ProtocolError",
+        "ProxyError",
+        "ReadError",
+        "ReadTimeout",
+        "RemoteDisconnected",
+        "RequestError",
+        "SSLError",
+        "Timeout",
+        "TimeoutError",
+        "TransportError",
+        "WriteError",
+        "WriteTimeout",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -285,8 +306,19 @@ def get_route_diagnostics() -> list[VendorRouteDiagnostic]:
     return list(_ROUTE_DIAGNOSTICS.get() or [])
 
 
+def _is_transport_error(exc: Exception) -> bool:
+    """Classify typed network failures before inspecting provider messages."""
+    if isinstance(exc, (ConnectionError, TimeoutError, VendorRateLimitError)):
+        return True
+    return any(
+        cls.__name__ in _TRANSPORT_EXCEPTION_NAMES for cls in type(exc).__mro__
+    )
+
+
 def _is_provider_unavailable(exc: Exception) -> bool:
     """Whether a provider cannot serve this method until configuration changes."""
+    if _is_transport_error(exc):
+        return False
     if isinstance(exc, (VendorNotConfiguredError, PermissionError)):
         return True
     message = str(exc).lower()

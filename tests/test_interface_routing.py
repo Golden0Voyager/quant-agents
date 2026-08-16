@@ -1347,6 +1347,24 @@ def test_payload_with_unknown_as_of_does_not_infer_request_end_date():
         (
             {
                 "smartmoney_db": MagicMock(
+                    side_effect=ConnectionError("schema endpoint connection failed")
+                )
+            },
+            "smartmoney_db",
+            "failed",
+        ),
+        (
+            {
+                "smartmoney_db": MagicMock(
+                    side_effect=TimeoutError("API key endpoint timed out")
+                )
+            },
+            "smartmoney_db",
+            "failed",
+        ),
+        (
+            {
+                "smartmoney_db": MagicMock(
                     side_effect=VendorNotConfiguredError("missing API key")
                 ),
                 "akshare": MagicMock(
