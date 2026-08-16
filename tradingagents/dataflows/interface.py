@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import datetime as _dt
 import logging
 import os
@@ -50,6 +52,9 @@ from .alpha_vantage import (
     get_news as get_alpha_vantage_news,
     get_stock as get_alpha_vantage_stock,
 )
+from .cailianpress_vendor import (
+    fetch_cailianpress_telegrams as get_cailianpress_telegrams,
+)
 
 # Configuration and routing logic
 from .config import get_config
@@ -59,6 +64,11 @@ from .data_policy import (
     legacy_policy_for,
     normalized_dates,
     policy_for,
+)
+from .eastmoney_sentiment import (
+    fetch_eastmoney_guba_sentiment,
+    fetch_eastmoney_hot_keywords,
+    fetch_eastmoney_hot_rank,
 )
 from .errors import (
     NoMarketDataError,
@@ -79,18 +89,23 @@ from .smartmoney_vendor import (
     get_balance_sheet as get_smartmoney_balance_sheet,
     get_block_trade as get_smartmoney_block_trade,
     get_cashflow as get_smartmoney_cashflow,
+    get_chip_distribution as get_smartmoney_chip_distribution,
     get_company_announcements as get_smartmoney_company_announcements,
+    get_concept_board as get_smartmoney_concept_board,
     get_dragon_tiger as get_smartmoney_dragon_tiger,
     get_earnings_estimates as get_smartmoney_earnings_estimates,
+    get_earnings_forecast as get_smartmoney_earnings_forecast,
     get_fund_flow as get_smartmoney_fund_flow,
     get_fundamentals as get_smartmoney_fundamentals,
     get_global_asset_data as get_smartmoney_global_asset_data,
+    get_historical_valuation as get_smartmoney_historical_valuation,
     get_income_statement as get_smartmoney_income_statement,
     get_index_daily as get_smartmoney_index_daily,
     get_indicators as get_smartmoney_indicators,
     get_industry_valuation as get_smartmoney_industry_valuation,
     get_insider_transactions as get_smartmoney_insider_transactions,
     get_institutional_holdings as get_smartmoney_institutional_holdings,
+    get_institutional_intelligence as get_smartmoney_institutional_intelligence,
     get_limit_up_down as get_smartmoney_limit_up_down,
     get_macro_indicators as get_smartmoney_macro_indicators,
     get_margin_trading as get_smartmoney_margin_trading,
@@ -98,7 +113,6 @@ from .smartmoney_vendor import (
     get_northbound_hold as get_smartmoney_northbound_hold,
     get_pledge_ratio as get_smartmoney_pledge_ratio,
     get_research_reports as get_smartmoney_research_reports,
-    get_restricted_release as get_smartmoney_restricted_release,
     get_sector_fund_flow as get_smartmoney_sector_fund_flow,
     get_shareholder_count as get_smartmoney_shareholder_count,
     get_stock_data as get_smartmoney_stock_data,
@@ -122,6 +136,43 @@ from .y_finance import (
 from .yfinance_news import get_global_news_yfinance, get_news_yfinance
 
 logger = logging.getLogger(__name__)
+
+
+def _fetch_cailianpress_for_route(
+    limit: int = 20, look_back_days: int | None = None
+) -> str:
+    """Adapt the public look-back argument without treating it as pagination."""
+    del look_back_days
+    return get_cailianpress_telegrams(limit=limit)
+
+
+def _eastmoney_payload(data: str, subject: str) -> str | VendorPayload:
+    """Translate Eastmoney prose placeholders into route-visible health states."""
+    stripped = data.strip()
+    degraded = bool(
+        _re.search(r"<[^>]*(?:unavailable|no .+data|not found)[^>]*>", stripped, _re.I)
+    )
+    if degraded and stripped.startswith("<") and stripped.endswith(">"):
+        return f"NO_DATA_AVAILABLE: Eastmoney returned no usable data for {subject}: {stripped}"
+    if degraded:
+        return VendorPayload(
+            data=data,
+            status="partial",
+            reason="one or more Eastmoney enrichment sources were unavailable",
+        )
+    return data
+
+
+def _fetch_eastmoney_hot_rank_for_route(ticker: str, limit: int = 20):
+    return _eastmoney_payload(fetch_eastmoney_hot_rank(ticker, limit), ticker)
+
+
+def _fetch_eastmoney_guba_for_route(ticker: str, limit: int = 10):
+    return _eastmoney_payload(fetch_eastmoney_guba_sentiment(ticker, limit), ticker)
+
+
+def _fetch_eastmoney_keywords_for_route(limit: int = 15):
+    return _eastmoney_payload(fetch_eastmoney_hot_keywords(limit), "market hot keywords")
 
 # Tools organized by category
 TOOLS_CATEGORIES = {
@@ -197,6 +248,20 @@ TOOLS_CATEGORIES = {
         "tools": [
             "get_prediction_markets",
         ]
+    },
+    "analyst_enrichment": {
+        "description": "Optional analyst enrichment and sentiment context",
+        "tools": [
+            "get_chip_distribution",
+            "get_concept_board",
+            "get_historical_valuation",
+            "get_earnings_forecast",
+            "get_institutional_intelligence",
+            "get_cailianpress_telegrams",
+            "fetch_eastmoney_hot_rank",
+            "fetch_eastmoney_guba_sentiment",
+            "fetch_eastmoney_hot_keywords",
+        ],
     }
 }
 
@@ -213,6 +278,8 @@ VENDOR_LIST = [
     # under a distinct name because the router skips the ``smartmoney_db``
     # name for non-A-share tickers.
     "quant_db_global",
+    "cailianpress",
+    "eastmoney",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -220,7 +287,12 @@ VENDOR_LIST = [
 # sentinel instead of aborting the run (a bad LLM-supplied indicator, a missing
 # key, or a network blip should not crash an analysis over flavour data). Core
 # categories (prices, fundamentals, news) still raise so a broken primary is loud.
-OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets", "research_opinion"}
+OPTIONAL_CATEGORIES = {
+    "macro_data",
+    "prediction_markets",
+    "research_opinion",
+    "analyst_enrichment",
+}
 
 
 VendorPayloadStatus = Literal["ok", "valid_empty", "partial", "stale"]
@@ -294,6 +366,18 @@ class _RouteDiagnosticCollector:
     _indexes: dict[RequestKey, int] = field(default_factory=dict)
     _lock: Lock = field(default_factory=Lock)
 
+    _STATUS_QUALITY = {
+        "failed": 0,
+        "unavailable": 1,
+        "no_data": 2,
+        "stale": 3,
+        "partial": 4,
+        "not_applicable": 5,
+        "valid_empty": 5,
+        "ok_fallback": 6,
+        "ok": 7,
+    }
+
     def record(
         self, diagnostic: VendorRouteDiagnostic, request_key: RequestKey | None = None
     ) -> None:
@@ -307,8 +391,12 @@ class _RouteDiagnosticCollector:
                 self.records.append(replace(diagnostic, call_count=1))
                 return
             current = self.records[index]
+            if self._STATUS_QUALITY.get(diagnostic.status, -1) > self._STATUS_QUALITY.get(
+                current.status, -1
+            ):
+                current = diagnostic
             self.records[index] = replace(
-                current, call_count=current.call_count + 1
+                current, call_count=self.records[index].call_count + 1
             )
 
 
@@ -481,6 +569,27 @@ def _rewrite_policy_dates(
                 if key in rewritten_kwargs:
                     rewritten_kwargs[key] = market_as_of
                     break
+    elif policy.date_policy == "latest_snapshot":
+        schema = _METHOD_PARAMETER_SCHEMAS.get(method, ())
+        date_names = ("curr_date", "as_of", "trade_date", "end_date")
+        for index, (name, _default) in enumerate(schema):
+            if name not in date_names or index >= len(rewritten_args):
+                continue
+            requested = rewritten_args[index]
+            if requested is not None:
+                normalized = _normalize_key_date(requested)
+                if isinstance(normalized, str) and _date_like(normalized):
+                    rewritten_args[index] = min(normalized[:10], market_as_of)
+            break
+        else:
+            for key in date_names:
+                requested = rewritten_kwargs.get(key)
+                if requested is None:
+                    continue
+                normalized = _normalize_key_date(requested)
+                if isinstance(normalized, str) and _date_like(normalized):
+                    rewritten_kwargs[key] = min(normalized[:10], market_as_of)
+                break
     elif policy.date_policy == "calendar_window" and evidence_window_end is not None:
         if len(rewritten_args) >= 3:
             rewritten_args[2] = min(str(rewritten_args[2]), evidence_window_end)
@@ -559,6 +668,33 @@ _METHOD_PARAMETER_SCHEMAS: dict[str, tuple[tuple[str, Any], ...]] = {
         ("curr_date", None),
     ),
     "get_industry_valuation": (("ticker", _REQUIRED_PARAMETER),),
+    "get_chip_distribution": (
+        ("ticker", _REQUIRED_PARAMETER),
+        ("curr_date", None),
+    ),
+    "get_concept_board": (("ticker", _REQUIRED_PARAMETER),),
+    "get_historical_valuation": (
+        ("ticker", _REQUIRED_PARAMETER),
+        ("curr_date", None),
+    ),
+    "get_earnings_forecast": (("ticker", _REQUIRED_PARAMETER),),
+    "get_institutional_intelligence": (
+        ("ticker", _REQUIRED_PARAMETER),
+        ("curr_date", None),
+    ),
+    "get_cailianpress_telegrams": (
+        ("limit", 20),
+        ("look_back_days", None),
+    ),
+    "fetch_eastmoney_hot_rank": (
+        ("ticker", _REQUIRED_PARAMETER),
+        ("limit", 20),
+    ),
+    "fetch_eastmoney_guba_sentiment": (
+        ("ticker", _REQUIRED_PARAMETER),
+        ("limit", 10),
+    ),
+    "fetch_eastmoney_hot_keywords": (("limit", 15),),
     "get_earnings_estimates": (("ticker", _REQUIRED_PARAMETER),),
     "get_shareholder_count": (
         ("ticker", _REQUIRED_PARAMETER),
@@ -818,6 +954,34 @@ VENDOR_METHODS: dict[str, dict[str, Any]] = {
         "smartmoney_db": get_smartmoney_industry_valuation,
         "akshare": get_akshare_industry_valuation,
     },
+    # Optional analyst enrichments
+    "get_chip_distribution": {
+        "smartmoney_db": get_smartmoney_chip_distribution,
+    },
+    "get_concept_board": {
+        "smartmoney_db": get_smartmoney_concept_board,
+    },
+    "get_historical_valuation": {
+        "smartmoney_db": get_smartmoney_historical_valuation,
+    },
+    "get_earnings_forecast": {
+        "smartmoney_db": get_smartmoney_earnings_forecast,
+    },
+    "get_institutional_intelligence": {
+        "smartmoney_db": get_smartmoney_institutional_intelligence,
+    },
+    "get_cailianpress_telegrams": {
+        "cailianpress": _fetch_cailianpress_for_route,
+    },
+    "fetch_eastmoney_hot_rank": {
+        "eastmoney": _fetch_eastmoney_hot_rank_for_route,
+    },
+    "fetch_eastmoney_guba_sentiment": {
+        "eastmoney": _fetch_eastmoney_guba_for_route,
+    },
+    "fetch_eastmoney_hot_keywords": {
+        "eastmoney": _fetch_eastmoney_keywords_for_route,
+    },
     "get_earnings_estimates": {
         "smartmoney_db": get_smartmoney_earnings_estimates,
         "akshare": get_akshare_earnings_estimates,
@@ -847,7 +1011,6 @@ VENDOR_METHODS: dict[str, dict[str, Any]] = {
         "tushare": get_tushare_company_announcements,
     },
     "get_restricted_release": {
-        "smartmoney_db": get_smartmoney_restricted_release,
         "akshare": get_akshare_restricted_release,
     },
     "get_institutional_holdings": {
@@ -1359,6 +1522,8 @@ def _resolve_route_with_source(
             status = "failed"
         elif first_unavailable_error is not None:
             status = "unavailable"
+        elif registered_policy and policy.empty_semantics == "confirmed_empty":
+            status = "valid_empty"
         else:
             status = "no_data"
         reason = last_no_data.detail or "all attempted vendors returned no usable rows"

@@ -32,13 +32,13 @@ class BoundToolsByMarket:
         self._cache: dict[tuple[int, tuple[tuple[str, int], ...], Market], tuple] = {}
         self._lock = Lock()
 
-    def get(self, market: Market) -> tuple[list[BaseTool], Any]:
+    def get(self, market: Market) -> tuple[tuple[BaseTool, ...], Any]:
         """Return a single-flight cached ``(tools, bound_llm)`` pair."""
         key = (id(self._llm), self._context_key, market)
         with self._lock:
             cached = self._cache.get(key)
             if cached is None:
-                market_tools = tools_for_market(self._tools, market)
+                market_tools = tuple(tools_for_market(self._tools, market))
                 cached = (market_tools, self._llm.bind_tools(market_tools))
                 self._cache[key] = cached
             return cached

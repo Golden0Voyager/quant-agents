@@ -37,7 +37,25 @@ from tradingagents.market_context import AnalysisDates
                 date_policy="calendar_window",
                 empty_semantics="confirmed_empty",
                 impact="medium",
-                allowed_vendors=("smartmoney_db", "akshare"),
+                allowed_vendors=("akshare",),
+            ),
+        ),
+        (
+            "get_stock_data",
+            ToolPolicy(
+                applicable_markets=frozenset(
+                    {"XSHG", "XHKG", "XNYS", "CRYPTO", "UNKNOWN"}
+                ),
+                date_policy="calendar_window",
+                empty_semantics="coverage_gap",
+                impact="high",
+                allowed_vendors=(
+                    "smartmoney_db",
+                    "quant_db_global",
+                    "alpha_vantage",
+                    "yfinance",
+                    "akshare",
+                ),
             ),
         ),
         (

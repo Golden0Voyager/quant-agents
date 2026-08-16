@@ -46,6 +46,15 @@ def test_resolve_analysis_dates_uses_xhkg_only_holiday():
 
 
 @pytest.mark.unit
+def test_resolve_analysis_dates_skips_xnys_independence_day():
+    assert resolve_analysis_dates("AAPL", "2024-07-04") == AnalysisDates(
+        analysis_date="2024-07-04",
+        market_as_of_date="2024-07-03",
+        evidence_window_end="2024-07-04",
+    )
+
+
+@pytest.mark.unit
 def test_resolve_analysis_dates_keeps_crypto_on_calendar_day():
     assert resolve_analysis_dates("BTC-USD", "2026-08-16") == AnalysisDates(
         analysis_date="2026-08-16",

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pandas as pd
 import pytest
 
 # ===================================================================
@@ -294,24 +293,24 @@ class TestSingleToolModules:
         assert get_industry_valuation.func("AAPL") == "PE: 25, PB: 4.5"
         mock_route.assert_called_once_with("get_industry_valuation", "AAPL")
 
-    @patch("tradingagents.agents.utils.core_stock_tools.load_ohlcv")
-    def test_get_stock_data(self, mock_load):
+    @patch(
+        "tradingagents.agents.utils.core_stock_tools.route_to_vendor",
+        return_value=(
+            "Date,Open,High,Low,Close,Volume\n"
+            "2026-01-11,100.0,101.0,99.0,100.5,10000\n"
+            "2026-01-12,101.0,102.0,100.0,101.5,11000"
+        ),
+    )
+    def test_get_stock_data(self, mock_route):
         from tradingagents.agents.utils.core_stock_tools import get_stock_data
 
-        mock_load.return_value = pd.DataFrame({
-            "Date": ["2026-01-11", "2026-01-12", "2026-01-13"],
-            "Open": [100.0, 101.0, 102.0],
-            "High": [101.0, 102.0, 103.0],
-            "Low": [99.0, 100.0, 101.0],
-            "Close": [100.5, 101.5, 102.5],
-            "Volume": [10000, 11000, 12000],
-        })
         result = get_stock_data.func("AAPL", "2026-01-11", "2026-01-12")
         assert "Date,Open,High,Low,Close,Volume" in result
         assert "2026-01-11" in result
         assert "2026-01-12" in result
-        assert "2026-01-13" not in result
-        mock_load.assert_called_once_with("AAPL", "2026-01-12")
+        mock_route.assert_called_once_with(
+            "get_stock_data", "AAPL", "2026-01-11", "2026-01-12"
+        )
 
     @patch("tradingagents.agents.utils.prediction_markets_tools.route_to_vendor",
            return_value="Fed cut: 65%")

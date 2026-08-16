@@ -158,6 +158,23 @@ def test_bound_tools_cache_single_flights_concurrent_market_binding():
 
 
 @pytest.mark.unit
+def test_bound_tool_sets_are_immutable_and_isolated_between_instances():
+    llm = MagicMock()
+    llm.bind_tools.side_effect = lambda tools: object()
+    first = BoundToolsByMarket(llm, [get_news, get_research_reports])
+    second = BoundToolsByMarket(llm, [get_news, get_research_reports])
+
+    first_tools, _ = first.get("XSHG")
+    second_tools, _ = second.get("XSHG")
+
+    assert isinstance(first_tools, tuple)
+    assert isinstance(second_tools, tuple)
+    assert first_tools == second_tools
+    assert first_tools is not second_tools
+    assert llm.bind_tools.call_count == 2
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("factory", "excluded_names"),
     [

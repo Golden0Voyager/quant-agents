@@ -245,11 +245,9 @@ def get_institutional_intelligence(
     Retrieve merged institutional intelligence (survey frequency, visiting funds/brokers, and shareholder positioning).
     Shows institutional attention, communication trends, and top holder structure.
     """
-    from tradingagents.dataflows.smartmoney_vendor import get_institutional_intelligence as _get_intel
-    try:
-        return _get_intel(ticker, curr_date)
-    except Exception as exc:
-        return f"NO_DATA_AVAILABLE: Institutional intelligence unavailable for {ticker} ({exc})"
+    if curr_date is None:
+        return route_to_vendor("get_institutional_intelligence", ticker)
+    return route_to_vendor("get_institutional_intelligence", ticker, curr_date)
 
 
 get_institution_survey = get_institutional_intelligence
@@ -276,11 +274,7 @@ def get_cailianpress_telegrams(
     Returns:
         str: Formatted markdown report of Cailianpress telegrams.
     """
-    from tradingagents.dataflows.cailianpress_vendor import fetch_cailianpress_telegrams
-
-    try:
-        return fetch_cailianpress_telegrams(limit=limit)
-    except Exception as exc:
-        return f"NO_DATA_AVAILABLE: Cailianpress telegrams unavailable ({type(exc).__name__}: {exc})"
-
+    if look_back_days is None:
+        return route_to_vendor("get_cailianpress_telegrams", limit)
+    return route_to_vendor("get_cailianpress_telegrams", limit, look_back_days)
 

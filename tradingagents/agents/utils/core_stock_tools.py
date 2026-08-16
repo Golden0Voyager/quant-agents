@@ -2,7 +2,7 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
-from tradingagents.dataflows.stockstats_utils import load_ohlcv
+from tradingagents.dataflows.interface import route_to_vendor
 
 
 @tool
@@ -13,8 +13,8 @@ def get_stock_data(
 ) -> str:
     """
     Retrieve stock price data (OHLCV) for a given ticker symbol.
-    Uses the same cached OHLCV source as the verified market snapshot so
-    analysts and downstream agents see consistent prices.
+    Uses the shared vendor router so runtime memoization, fallback diagnostics,
+    and market-session date policies apply consistently.
     Args:
         symbol (str): Ticker symbol of the company, e.g. AAPL, TSM
         start_date (str): Start date in yyyy-mm-dd format
@@ -22,11 +22,7 @@ def get_stock_data(
     Returns:
         str: A formatted dataframe containing the stock price data for the specified ticker symbol in the specified date range.
     """
-    data = load_ohlcv(symbol, end_date)
-    filtered = data[
-        (data["Date"] >= start_date) & (data["Date"] <= end_date)
-    ]
-    return filtered.to_csv(index=False)
+    return route_to_vendor("get_stock_data", symbol, start_date, end_date)
 
 
 @tool
@@ -38,9 +34,6 @@ def get_chip_distribution(
     Retrieve chip distribution (筹码分布), average holder cost, concentration, and cost bias.
     Provides key insights into profit ratio and dynamic cost support/resistance zones.
     """
-    from tradingagents.dataflows.smartmoney_vendor import get_chip_distribution as _get_chip
-    try:
-        return _get_chip(symbol, curr_date)
-    except Exception as exc:
-        return f"NO_DATA_AVAILABLE: Chip distribution unavailable for {symbol} ({exc})"
-
+    if curr_date is None:
+        return route_to_vendor("get_chip_distribution", symbol)
+    return route_to_vendor("get_chip_distribution", symbol, curr_date)

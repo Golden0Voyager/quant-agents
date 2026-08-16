@@ -29,9 +29,4 @@ def get_concept_board(
     Retrieve belonging concept boards (归属概念题材) and sector themes for a given ticker.
     Useful for sector rotation and theme momentum analysis.
     """
-    from tradingagents.dataflows.smartmoney_vendor import get_concept_board as _get_cb
-    try:
-        return _get_cb(ticker)
-    except Exception as exc:
-        return f"NO_DATA_AVAILABLE: Concept board unavailable for {ticker} ({exc})"
-
+    return route_to_vendor("get_concept_board", ticker)

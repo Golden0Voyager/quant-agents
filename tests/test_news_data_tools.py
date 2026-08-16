@@ -180,26 +180,29 @@ class TestNewsDataTools:
 
 
 # ===================================================================
-# get_institutional_intelligence (local import from smartmoney_vendor)
+# get_institutional_intelligence
 # ===================================================================
 
 
 @pytest.mark.unit
 class TestGetInstitutionalIntelligence:
     @patch(
-        "tradingagents.dataflows.smartmoney_vendor.get_institutional_intelligence",
+        "tradingagents.agents.utils.news_data_tools.route_to_vendor",
         return_value="survey: 10 institutions visited in Q2",
     )
     def test_returns_intelligence(self, mock_intel):
         from tradingagents.agents.utils.news_data_tools import get_institutional_intelligence
 
         result = get_institutional_intelligence.func("600519.SS")
-        mock_intel.assert_called_once_with("600519.SS", None)
+        mock_intel.assert_called_once_with("get_institutional_intelligence", "600519.SS")
         assert "survey" in result
 
     @patch(
-        "tradingagents.dataflows.smartmoney_vendor.get_institutional_intelligence",
-        side_effect=ConnectionError("timeout"),
+        "tradingagents.agents.utils.news_data_tools.route_to_vendor",
+        return_value=(
+            "NO_DATA_AVAILABLE: get_institutional_intelligence unavailable for "
+            "000001.SZ: timeout"
+        ),
     )
     def test_error_returns_no_data_message(self, mock_intel):
         from tradingagents.agents.utils.news_data_tools import get_institutional_intelligence

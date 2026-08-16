@@ -1747,6 +1747,159 @@ def test_keyword_ticker_owner_invokes_strict_symbol_vendor_positionally():
 
 
 @pytest.mark.unit
+def test_direct_enrichment_route_is_memoized_and_diagnosed():
+    from tradingagents.dataflows import interface
+
+    vendor = MagicMock(return_value="concept data")
+    with (
+        use_runtime_data_context(_runtime_context()),
+        interface.collect_route_diagnostics() as records,
+        patch.object(interface, "get_vendor", return_value="smartmoney_db"),
+        patch.dict(
+            interface.VENDOR_METHODS,
+            {"get_concept_board": {"smartmoney_db": vendor}},
+        ),
+    ):
+        first = interface.route_to_vendor("get_concept_board", "600519.SS")
+        second = interface.route_to_vendor("get_concept_board", "600519.SS")
+
+    assert first == second == "concept data"
+    vendor.assert_called_once_with("600519.SS")
+    assert len(records) == 1
+    assert records[0].status == "ok"
+    assert records[0].call_count == 2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("first_status", ["failed", "partial"])
+def test_collector_replaces_degraded_diagnostic_after_success(first_status):
+    from tradingagents.dataflows import interface
+
+    if first_status == "failed":
+        vendor = MagicMock(side_effect=[ConnectionError("offline"), "recovered"])
+    else:
+        vendor = MagicMock(
+            side_effect=[
+                interface.VendorPayload("partial rows", status="partial"),
+                "recovered",
+            ]
+        )
+
+    with (
+        use_runtime_data_context(_runtime_context()),
+        interface.collect_route_diagnostics() as records,
+        patch.object(interface, "get_vendor", return_value="smartmoney_db"),
+        patch.dict(
+            interface.VENDOR_METHODS["get_research_reports"],
+            {"smartmoney_db": vendor},
+            clear=True,
+        ),
+    ):
+        interface.route_to_vendor("get_research_reports", "600519.SS")
+        result = interface.route_to_vendor("get_research_reports", "600519.SS")
+
+    assert result == "recovered"
+    assert len(records) == 1
+    assert records[0].status == "ok"
+    assert records[0].selected_vendor == "smartmoney_db"
+    assert records[0].call_count == 2
+
+
+@pytest.mark.unit
+def test_latest_snapshot_caps_explicit_weekend_date_without_adding_omitted_date():
+    from tradingagents.dataflows import interface
+
+    calls = []
+
+    def vendor(*args):
+        calls.append(args)
+        return "flow"
+
+    with (
+        use_runtime_data_context(_runtime_context()),
+        interface.collect_route_diagnostics() as records,
+        patch.object(interface, "get_vendor", return_value="smartmoney_db"),
+        patch.dict(
+            interface.VENDOR_METHODS["get_fund_flow"],
+            {"smartmoney_db": vendor},
+            clear=True,
+        ),
+    ):
+        interface.route_to_vendor("get_fund_flow", "600519.SS", "2026-08-16")
+        interface.route_to_vendor("get_fund_flow", "600519.SS")
+
+    assert calls == [
+        ("600519.SS", "2026-08-14"),
+        ("600519.SS",),
+    ]
+    assert [record.as_of for record in records] == ["2026-08-14", None]
+
+
+@pytest.mark.unit
+def test_restricted_release_uses_only_supported_vendor_and_clean_empty_semantics():
+    from tradingagents.dataflows import interface
+    from tradingagents.dataflows.data_policy import policy_for
+
+    assert "smartmoney_db" not in interface.VENDOR_METHODS["get_restricted_release"]
+    assert "smartmoney_db" not in policy_for("get_restricted_release").allowed_vendors
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("payload", "expected_status"),
+    [
+        ("<Eastmoney hot keywords unavailable: JSONDecodeError>", "no_data"),
+        (
+            "Eastmoney 人气排名\n<hot-rank table unavailable: JSONDecodeError>\n"
+            "历史排名与粉丝构成:\n[2026-08-14] 排名: 10",
+            "partial",
+        ),
+    ],
+)
+def test_eastmoney_enrichment_placeholders_are_not_reported_as_clean_success(
+    payload, expected_status
+):
+    from tradingagents.dataflows import interface
+
+    vendor = MagicMock(return_value=interface._eastmoney_payload(payload, "600519.SS"))
+    with (
+        use_runtime_data_context(_runtime_context()),
+        interface.collect_route_diagnostics() as records,
+        patch.object(interface, "get_vendor", return_value="eastmoney"),
+        patch.dict(
+            interface.VENDOR_METHODS["fetch_eastmoney_hot_rank"],
+            {"eastmoney": vendor},
+            clear=True,
+        ),
+    ):
+        interface.route_to_vendor("fetch_eastmoney_hot_rank", "600519.SS")
+
+    assert records[0].status == expected_status
+
+    vendor = MagicMock(
+        side_effect=NoMarketDataError("600519.SS", detail="no releases in window")
+    )
+    with (
+        patch.object(interface, "get_vendor", return_value="akshare"),
+        patch.dict(
+            interface.VENDOR_METHODS["get_restricted_release"],
+            {"akshare": vendor},
+            clear=True,
+        ),
+    ):
+        result = interface.route_to_vendor_with_source(
+            "get_restricted_release",
+            "600519.SS",
+            "2026-08-01",
+            "2026-08-16",
+        )
+
+    assert result.diagnostic is not None
+    assert result.diagnostic.status == "valid_empty"
+    assert result.diagnostic.attempted_vendors == ("akshare",)
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("args", "kwargs", "message"),
     [

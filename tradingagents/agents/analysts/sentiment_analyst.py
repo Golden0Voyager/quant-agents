@@ -48,11 +48,7 @@ from tradingagents.agents.utils.structured import (
     invoke_structured_or_freetext,
 )
 from tradingagents.dataflows.data_policy import is_applicable
-from tradingagents.dataflows.eastmoney_sentiment import (
-    fetch_eastmoney_guba_sentiment,
-    fetch_eastmoney_hot_keywords,
-    fetch_eastmoney_hot_rank,
-)
+from tradingagents.dataflows.interface import route_to_vendor
 from tradingagents.market_context import Market, infer_market
 
 logger = logging.getLogger(__name__)
@@ -118,19 +114,20 @@ def create_sentiment_analyst(llm):
         hot_rank_block = _prefetch_for_market(
             "fetch_eastmoney_hot_rank",
             market,
-            "Eastmoney hot rank", lambda: fetch_eastmoney_hot_rank(ticker)
+            "Eastmoney hot rank",
+            lambda: route_to_vendor("fetch_eastmoney_hot_rank", ticker),
         )
         guba_block = _prefetch_for_market(
             "fetch_eastmoney_guba_sentiment",
             market,
             "Eastmoney Guba sentiment",
-            lambda: fetch_eastmoney_guba_sentiment(ticker),
+            lambda: route_to_vendor("fetch_eastmoney_guba_sentiment", ticker),
         )
         hot_keywords_block = _prefetch_for_market(
             "fetch_eastmoney_hot_keywords",
             market,
             "Eastmoney market hot keywords",
-            lambda: fetch_eastmoney_hot_keywords(),
+            lambda: route_to_vendor("fetch_eastmoney_hot_keywords"),
         )
 
         system_message = _build_system_message(

@@ -494,12 +494,12 @@ class TestSentimentAnalystAgent:
         from tradingagents.agents.analysts import sentiment_analyst as module
 
         monkeypatch.setattr(module.get_news, "func", lambda *args: "NEWS_DATA")
-        monkeypatch.setattr(
-            module, "fetch_eastmoney_hot_rank", lambda ticker: "HOT_RANK_DATA"
-        )
-        monkeypatch.setattr(
-            module, "fetch_eastmoney_guba_sentiment", lambda ticker: "GUBA_DATA"
-        )
+        results = {
+            "fetch_eastmoney_hot_rank": "HOT_RANK_DATA",
+            "fetch_eastmoney_guba_sentiment": "GUBA_DATA",
+            "fetch_eastmoney_hot_keywords": "HOT_KEYWORDS_DATA",
+        }
+        monkeypatch.setattr(module, "route_to_vendor", lambda method, *args: results[method])
 
     def test_structured_path_produces_rendered_markdown(self):
         captured = {}
@@ -580,13 +580,9 @@ class TestSentimentAnalystAgent:
         from tradingagents.agents.analysts import sentiment_analyst as module
 
         news = MagicMock(return_value="HK_NEWS")
-        hot_rank = MagicMock(return_value="SHOULD_NOT_RUN")
-        guba = MagicMock(return_value="SHOULD_NOT_RUN")
-        hot_keywords = MagicMock(return_value="SHOULD_NOT_RUN")
+        enrichment_route = MagicMock(return_value="SHOULD_NOT_RUN")
         monkeypatch.setattr(module.get_news, "func", news)
-        monkeypatch.setattr(module, "fetch_eastmoney_hot_rank", hot_rank)
-        monkeypatch.setattr(module, "fetch_eastmoney_guba_sentiment", guba)
-        monkeypatch.setattr(module, "fetch_eastmoney_hot_keywords", hot_keywords)
+        monkeypatch.setattr(module, "route_to_vendor", enrichment_route)
         state = {
             **_make_sentiment_state(),
             "company_of_interest": "1810.HK",
@@ -596,9 +592,7 @@ class TestSentimentAnalystAgent:
         create_sentiment_analyst(_structured_sentiment_llm({}))(state)
 
         news.assert_called_once()
-        hot_rank.assert_not_called()
-        guba.assert_not_called()
-        hot_keywords.assert_not_called()
+        enrichment_route.assert_not_called()
 
 
 @pytest.mark.unit
@@ -613,12 +607,12 @@ class TestSocialMediaAnalystShim:
         from tradingagents.agents.analysts import sentiment_analyst as module
 
         monkeypatch.setattr(module.get_news, "func", lambda *args: "NEWS_DATA")
-        monkeypatch.setattr(
-            module, "fetch_eastmoney_hot_rank", lambda ticker: "HOT_RANK_DATA"
-        )
-        monkeypatch.setattr(
-            module, "fetch_eastmoney_guba_sentiment", lambda ticker: "GUBA_DATA"
-        )
+        results = {
+            "fetch_eastmoney_hot_rank": "HOT_RANK_DATA",
+            "fetch_eastmoney_guba_sentiment": "GUBA_DATA",
+            "fetch_eastmoney_hot_keywords": "HOT_KEYWORDS_DATA",
+        }
+        monkeypatch.setattr(module, "route_to_vendor", lambda method, *args: results[method])
 
     def test_returns_callable(self):
         from tradingagents.agents.analysts.sentiment_analyst import create_social_media_analyst

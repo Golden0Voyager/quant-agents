@@ -39,6 +39,19 @@ class UnknownToolPolicyError(KeyError):
 
 _ALL_MARKETS = frozenset({"XSHG", "XHKG", "XNYS", "CRYPTO", "UNKNOWN"})
 _POLICIES: dict[str, ToolPolicy] = {
+    "get_stock_data": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="calendar_window",
+        empty_semantics="coverage_gap",
+        impact="high",
+        allowed_vendors=(
+            "smartmoney_db",
+            "quant_db_global",
+            "alpha_vantage",
+            "yfinance",
+            "akshare",
+        ),
+    ),
     "get_limit_up_down": ToolPolicy(
         applicable_markets=frozenset({"XSHG"}),
         date_policy="market_session",
@@ -51,7 +64,7 @@ _POLICIES: dict[str, ToolPolicy] = {
         date_policy="calendar_window",
         empty_semantics="confirmed_empty",
         impact="medium",
-        allowed_vendors=("smartmoney_db", "akshare"),
+        allowed_vendors=("akshare",),
     ),
     "get_news": ToolPolicy(
         applicable_markets=frozenset({"XSHG", "XHKG", "XNYS", "CRYPTO"}),
@@ -161,8 +174,8 @@ _POLICIES: dict[str, ToolPolicy] = {
         impact="medium",
         allowed_vendors=("smartmoney_db", "akshare"),
     ),
-    # Direct (non-router) A-share enrichments still use the same central
-    # capability source so analyst binding/prefetch cannot bypass policy.
+    # Optional A-share enrichments use the same routed capability source as
+    # core tools, including memoization and diagnostics.
     "get_chip_distribution": ToolPolicy(
         applicable_markets=frozenset({"XSHG"}),
         date_policy="latest_snapshot",
