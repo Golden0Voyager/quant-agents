@@ -4,6 +4,8 @@ from typing import Annotated
 from langgraph.graph import MessagesState
 from typing_extensions import TypedDict
 
+from tradingagents.market_context import AnalysisDates, Market
+
 
 # Researcher team state
 class InvestDebateState(TypedDict):
@@ -51,6 +53,8 @@ class AgentState(MessagesState):
     asset_type: Annotated[str, "Asset type under analysis such as stock or crypto"]
     instrument_context: Annotated[str, "Deterministic ticker identity resolved at run start"]
     trade_date: Annotated[str, "What date we are trading at"]
+    market: Annotated[Market, "Canonical exchange market for this run"]
+    analysis_dates: Annotated[AnalysisDates, "Resolved report and market-session dates"]
 
     sender: Annotated[str, "Agent that sent this message"]
 

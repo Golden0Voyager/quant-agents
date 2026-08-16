@@ -6,6 +6,7 @@ from tradingagents.agents.utils.agent_states import (
     InvestDebateState,
     RiskDebateState,
 )
+from tradingagents.market_context import AnalysisDates, Market, infer_market, resolve_analysis_dates
 
 
 class Propagator:
@@ -24,6 +25,8 @@ class Propagator:
         instrument_context: str = "",
         holdings_context: dict | None = None,
         transactions_context: list | None = None,
+        market: Market | None = None,
+        analysis_dates: AnalysisDates | None = None,
     ) -> dict[str, Any]:
         """Create the initial state for the agent graph.
 
@@ -33,12 +36,16 @@ class Propagator:
         fall back to ticker-only context via
         ``get_instrument_context_from_state``.
         """
+        resolved_market = market or infer_market(company_name)
+        resolved_dates = analysis_dates or resolve_analysis_dates(company_name, str(trade_date))
         return {
             "messages": [("human", company_name)],
             "company_of_interest": company_name,
             "asset_type": asset_type,
             "instrument_context": instrument_context,
             "trade_date": str(trade_date),
+            "market": resolved_market,
+            "analysis_dates": resolved_dates,
             "past_context": past_context,
             "holdings_context": holdings_context or {},
             "transactions_context": transactions_context or [],

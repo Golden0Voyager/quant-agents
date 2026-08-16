@@ -60,6 +60,11 @@ from tradingagents.dataflows.interface import (
     collect_route_diagnostics,
     get_route_diagnostics,
 )
+from tradingagents.dataflows.runtime_context import (
+    get_runtime_data_context,
+    runtime_data_context_for,
+    use_runtime_data_context,
+)
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.llm_clients import create_llm_client
@@ -660,18 +665,20 @@ class TradingAgentsGraph:
             else:
                 logger.info("Starting fresh for %s on %s", ticker, trade_date)
 
+        runtime_context = runtime_data_context_for(ticker, str(trade_date))
         try:
-            with collect_route_diagnostics() as route_diagnostics:
-                result = self._run_graph(
-                    ticker,
-                    trade_date,
-                    asset_type=asset_type,
-                    confirmed_name=resolved_name,
-                    on_chunk=on_chunk,
-                    holdings_context=holdings_context,
-                    transactions_context=transactions_context,
-                    company_display_name=company_display_name,
-                )
+            with use_runtime_data_context(runtime_context):
+                with collect_route_diagnostics() as route_diagnostics:
+                    result = self._run_graph(
+                        ticker,
+                        trade_date,
+                        asset_type=asset_type,
+                        confirmed_name=resolved_name,
+                        on_chunk=on_chunk,
+                        holdings_context=holdings_context,
+                        transactions_context=transactions_context,
+                        company_display_name=company_display_name,
+                    )
             final_state, signal = result
             final_state["data_coverage"] = [asdict(item) for item in route_diagnostics]
             return final_state, signal
@@ -721,6 +728,9 @@ class TradingAgentsGraph:
         instrument_context = self.resolve_instrument_context(
             company_name, asset_type, confirmed_name=confirmed_name,
         )
+        runtime_context = get_runtime_data_context() or runtime_data_context_for(
+            company_name, str(trade_date)
+        )
         init_agent_state = self.propagator.create_initial_state(
             company_name,
             trade_date,
@@ -729,6 +739,8 @@ class TradingAgentsGraph:
             instrument_context=instrument_context,
             holdings_context=holdings_context,
             transactions_context=transactions_context,
+            market=runtime_context.market,
+            analysis_dates=runtime_context.dates,
         )
         if company_display_name:
             init_agent_state["company_name"] = company_display_name
