@@ -219,6 +219,7 @@ OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets", "research_opinion"}
 
 VendorPayloadStatus = Literal["ok", "valid_empty", "partial", "stale"]
 _VENDOR_PAYLOAD_STATUSES = frozenset({"ok", "valid_empty", "partial", "stale"})
+_INFER_AS_OF_FROM_REQUEST = object()
 
 
 @dataclass(frozen=True)
@@ -284,15 +285,30 @@ def get_route_diagnostics() -> list[VendorRouteDiagnostic]:
     return list(_ROUTE_DIAGNOSTICS.get() or [])
 
 
-def _should_circuit_break(vendor: str, exc: Exception) -> bool:
-    """Identify failures that are stable for this vendor/method context."""
-    if isinstance(exc, VendorNotConfiguredError):
+def _is_provider_unavailable(exc: Exception) -> bool:
+    """Whether a provider cannot serve this method until configuration changes."""
+    if isinstance(exc, (VendorNotConfiguredError, PermissionError)):
         return True
     message = str(exc).lower()
     return any(
         marker in message
-        for marker in ("permission", "forbidden", "unauthorized", "invalid token", "schema")
+        for marker in (
+            "permission",
+            "forbidden",
+            "unauthorized",
+            "authentication",
+            "invalid token",
+            "invalid api key",
+            "api key",
+            "api_key",
+            "schema",
+        )
     )
+
+
+def _should_circuit_break(vendor: str, exc: Exception) -> bool:
+    """Identify failures that are stable for this vendor/method context."""
+    return _is_provider_unavailable(exc)
 
 
 def _route_as_of(method: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> str | None:
@@ -322,7 +338,7 @@ def _route_result(
     reason: str,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    as_of: str | None = None,
+    as_of: str | None | object = _INFER_AS_OF_FROM_REQUEST,
 ) -> VendorRouteResult:
     diagnostic = VendorRouteDiagnostic(
         method=method,
@@ -330,7 +346,11 @@ def _route_result(
         status=status,
         attempted_vendors=tuple(attempted_vendors),
         selected_vendor=vendor,
-        as_of=as_of if as_of is not None else _route_as_of(method, args, kwargs),
+        as_of=(
+            _route_as_of(method, args, kwargs)
+            if as_of is _INFER_AS_OF_FROM_REQUEST
+            else as_of
+        ),
         reason=reason,
     )
     records = _ROUTE_DIAGNOSTICS.get()
@@ -354,12 +374,20 @@ def _request_market(
     kwargs: dict[str, Any],
     context: RuntimeDataContext | None,
 ) -> Market | None:
+    if not registered:
+        return context.market if context is not None else None
+    if policy.date_policy == "market_session":
+        return context.market if context is not None else None
+    ticker = args[0] if args else kwargs.get("symbol") or kwargs.get("ticker")
+    if isinstance(ticker, str):
+        requested_market = infer_market(ticker)
+        if requested_market != "UNKNOWN":
+            return requested_market
     if context is not None:
         return context.market
-    if not registered or policy.date_policy == "market_session":
+    if not isinstance(ticker, str):
         return None
-    ticker = args[0] if args else kwargs.get("symbol") or kwargs.get("ticker")
-    return infer_market(ticker) if isinstance(ticker, str) else None
+    return infer_market(ticker)
 
 
 def _rewrite_policy_dates(
@@ -786,7 +814,8 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
             )
 
     last_no_data: NoMarketDataError | None = None
-    first_error: Exception | None = None
+    first_unavailable_error: Exception | None = None
+    first_failed_error: Exception | None = None
 
     # Track whether we are serving an A-share ticker for targeted logging
     is_ashare = isinstance(symbol, str) and is_a_share_ticker(symbol)
@@ -836,8 +865,8 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
                 vendor,
                 method,
             )
-            if first_error is None:
-                first_error = VendorNotConfiguredError(
+            if first_unavailable_error is None:
+                first_unavailable_error = VendorNotConfiguredError(
                     f"vendor {vendor!r} is disabled for {method} in this run context"
                 )
             continue
@@ -903,17 +932,21 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
                 reason=reason,
                 args=args,
                 kwargs=kwargs,
-                as_of=payload.as_of if payload is not None else None,
+                as_of=(
+                    payload.as_of
+                    if payload is not None
+                    else _INFER_AS_OF_FROM_REQUEST
+                ),
             )
         except VendorRateLimitError as exc:
             logger.warning("Vendor %r rate-limited for %s; trying next vendor.", vendor, method)
-            if first_error is None:
-                first_error = exc
+            if first_failed_error is None:
+                first_failed_error = exc
             continue
         except VendorNotConfiguredError as e:
             logger.warning("Vendor %r not configured for %s; trying next vendor.", vendor, method)
-            if first_error is None:
-                first_error = e
+            if first_unavailable_error is None:
+                first_unavailable_error = e
             if circuit_breakers is not None:
                 circuit_breakers.add((vendor, method))
             continue
@@ -935,8 +968,11 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
                 # Don't let one vendor's failure crash the call when another can
                 # serve it, but never swallow silently (#989).
                 logger.warning("Vendor %r failed for %s: %s", vendor, method, exc)
-            if first_error is None:
-                first_error = exc
+            if _is_provider_unavailable(exc):
+                if first_unavailable_error is None:
+                    first_unavailable_error = exc
+            elif first_failed_error is None:
+                first_failed_error = exc
             if circuit_breakers is not None and _should_circuit_break(vendor, exc):
                 circuit_breakers.add((vendor, method))
             continue  # Try next vendor in fallback chain
@@ -946,17 +982,23 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
     # empty string, so the agent reports "unavailable" instead of inventing a
     # value. This takes precedence over incidental fallback errors.
     if last_no_data is not None:
-        if first_error is not None:
+        provider_error = first_failed_error or first_unavailable_error
+        if provider_error is not None:
             # A vendor also hit a real error; surface it in logs so the no-data
             # verdict can't hide a broken primary (network/auth/etc.).
             logger.warning(
                 "Returning NO_DATA for %s, but a vendor errored earlier: %s",
-                method, first_error,
+                method, provider_error,
             )
-        status = "failed" if first_error is not None else "no_data"
+        if first_failed_error is not None:
+            status = "failed"
+        elif first_unavailable_error is not None:
+            status = "unavailable"
+        else:
+            status = "no_data"
         reason = last_no_data.detail or "all attempted vendors returned no usable rows"
-        if first_error is not None:
-            reason = f"{reason}; provider error: {first_error}"
+        if provider_error is not None:
+            reason = f"{reason}; provider error: {provider_error}"
         return _route_result(
             data=_format_no_data_sentinel(last_no_data, vendor_chain, method),
             vendor=None,
@@ -973,22 +1015,23 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
     # first real error (e.g. the primary vendor's network failure). Optional
     # enrichment categories degrade to a sentinel instead, so flavour data can't
     # abort the run.
-    if first_error is not None:
+    provider_error = first_failed_error or first_unavailable_error
+    if provider_error is not None:
         if category in OPTIONAL_CATEGORIES:
-            logger.warning("Optional %s unavailable for %s: %s", category, method, first_error)
-            status = "unavailable" if isinstance(first_error, VendorNotConfiguredError) else "failed"
+            logger.warning("Optional %s unavailable for %s: %s", category, method, provider_error)
+            status = "failed" if first_failed_error is not None else "unavailable"
             return _route_result(
-                data=_format_optional_unavailable(category, first_error, method),
+                data=_format_optional_unavailable(category, provider_error, method),
                 vendor=None,
                 method=method,
                 category=category,
                 status=status,
                 attempted_vendors=attempted_vendors,
-                reason=str(first_error),
+                reason=str(provider_error),
                 args=args,
                 kwargs=kwargs,
             )
-        raise first_error
+        raise provider_error
 
     logger.error("No available vendor for method='%s' symbol='%s'", method, symbol)
     raise RuntimeError(f"No available vendor for '{method}'")

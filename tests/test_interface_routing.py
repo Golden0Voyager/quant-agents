@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tradingagents.dataflows.errors import VendorNotConfiguredError
 from tradingagents.dataflows.runtime_context import (
     RuntimeDataContext,
     use_runtime_data_context,
@@ -1136,6 +1137,28 @@ def test_company_announcements_hk_is_not_applicable_without_vendor_calls():
 
 
 @pytest.mark.unit
+def test_runtime_context_does_not_override_requested_ticker_market():
+    from tradingagents.dataflows import interface
+
+    fake_vendor = MagicMock(return_value="must not run")
+    build_chain = MagicMock(side_effect=AssertionError("chain must not be built"))
+    with use_runtime_data_context(_runtime_context()), patch.dict(
+        interface.VENDOR_METHODS["get_company_announcements"],
+        {"cninfo": fake_vendor},
+        clear=True,
+    ), patch.object(interface, "_build_vendor_chain", build_chain):
+        result = interface.route_to_vendor_with_source(
+            "get_company_announcements", "0700.HK", "2026-08-01", "2026-08-16"
+        )
+
+    assert result.diagnostic is not None
+    assert result.diagnostic.status == "not_applicable"
+    assert result.diagnostic.attempted_vendors == ()
+    fake_vendor.assert_not_called()
+    build_chain.assert_not_called()
+
+
+@pytest.mark.unit
 def test_market_session_date_is_replaced_from_runtime_context():
     from tradingagents.dataflows import interface
 
@@ -1276,3 +1299,86 @@ def test_unregistered_method_with_runtime_context_preserves_legacy_arguments():
     assert result == "fundamentals"
     fake_vendor.assert_called_once_with("AAPL", "2026-08-20")
     legacy_policy.assert_called_once_with("get_fundamentals")
+
+
+@pytest.mark.unit
+def test_payload_with_unknown_as_of_does_not_infer_request_end_date():
+    from tradingagents.dataflows import interface
+
+    fake_vendor = MagicMock(
+        return_value=interface.VendorPayload(
+            data="partial news",
+            status="partial",
+            as_of=None,
+            reason="source did not establish freshness",
+        )
+    )
+    with patch.object(interface, "get_vendor", return_value="smartmoney_db"), patch.dict(
+        interface.VENDOR_METHODS["get_news"],
+        {"smartmoney_db": fake_vendor},
+        clear=True,
+    ):
+        result = interface.route_to_vendor_with_source(
+            "get_news", "600519.SS", "2026-08-01", "2026-08-16"
+        )
+
+    assert result.diagnostic is not None
+    assert result.diagnostic.as_of is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("vendors", "vendor_config", "expected_status"),
+    [
+        (
+            {"smartmoney_db": MagicMock(side_effect=PermissionError("unauthorized"))},
+            "smartmoney_db",
+            "unavailable",
+        ),
+        (
+            {
+                "smartmoney_db": MagicMock(
+                    side_effect=RuntimeError("provider schema changed")
+                )
+            },
+            "smartmoney_db",
+            "unavailable",
+        ),
+        (
+            {
+                "smartmoney_db": MagicMock(
+                    side_effect=VendorNotConfiguredError("missing API key")
+                ),
+                "akshare": MagicMock(
+                    side_effect=NoMarketDataError("600519.SS", detail="no rows")
+                ),
+            },
+            "smartmoney_db,akshare",
+            "unavailable",
+        ),
+        (
+            {
+                "smartmoney_db": MagicMock(
+                    side_effect=VendorNotConfiguredError("missing API key")
+                ),
+                "akshare": MagicMock(side_effect=ConnectionError("provider offline")),
+            },
+            "smartmoney_db,akshare",
+            "failed",
+        ),
+    ],
+)
+def test_provider_error_classification_is_stable_across_mixed_chains(
+    vendors, vendor_config, expected_status
+):
+    from tradingagents.dataflows import interface
+
+    with patch.object(interface, "get_vendor", return_value=vendor_config), patch.dict(
+        interface.VENDOR_METHODS["get_research_reports"], vendors, clear=True
+    ):
+        result = interface.route_to_vendor_with_source(
+            "get_research_reports", "600519.SS"
+        )
+
+    assert result.diagnostic is not None
+    assert result.diagnostic.status == expected_status
