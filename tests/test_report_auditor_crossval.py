@@ -291,5 +291,78 @@ class TestDataReliabilityAudit:
         data = json.loads(json_path.read_text(encoding="utf-8"))
 
         assert "## 数据可靠性" in md
+        assert "DATA-RELIABILITY-PARTIAL" in md
+        assert "[600519]" in md
         assert data["results"]["1810.HK"]["data_reliability"]["not_applicable"] == 3
         assert data["summary"]["data_reliability"]["missing"] == 1
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            [],
+            {"rows": None},
+            {"rows": [None, "bad row"]},
+        ],
+    )
+    def test_auditor_ignores_legacy_or_malformed_summary_shapes(
+        self, auditor, tmp_path, payload
+    ):
+        self._write_ticker(tmp_path, "600519")
+        (tmp_path / "batch_summary.json").write_text(
+            json.dumps(payload), encoding="utf-8"
+        )
+
+        results = auditor.ReportAuditor(str(tmp_path)).audit()
+
+        assert results["600519"].files_audited == 1
+        assert results["600519"].data_reliability == {}
+
+    def test_auditor_reads_legacy_list_summary_format(self, auditor, tmp_path):
+        self._write_ticker(tmp_path, "600519")
+        (tmp_path / "batch_summary.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "ticker": "600519",
+                        "data_reliability": {
+                            "confirmed": 1,
+                            "logical_requests": 1,
+                            "applicable_requests": 1,
+                            "call_count": 2,
+                        },
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        results = auditor.ReportAuditor(str(tmp_path)).audit()
+
+        assert results["600519"].data_reliability["confirmed"] == 1
+        assert results["600519"].data_reliability["call_count"] == 2
+
+    def test_auditor_recomputes_inconsistent_summary_denominators(
+        self, auditor, tmp_path
+    ):
+        self._write_ticker(tmp_path, "600519")
+        reliability = {
+            "confirmed": 2,
+            "fallback_success": 0,
+            "valid_empty": 0,
+            "not_applicable": 1,
+            "partial": 0,
+            "missing": 1,
+            "logical_requests": 999,
+            "applicable_requests": 999,
+            "call_count": 1,
+        }
+        (tmp_path / "batch_summary.json").write_text(
+            json.dumps({"rows": [{"ticker": "600519", "data_reliability": reliability}]}),
+            encoding="utf-8",
+        )
+
+        result = auditor.ReportAuditor(str(tmp_path)).audit()["600519"]
+
+        assert result.data_reliability["logical_requests"] == 4
+        assert result.data_reliability["applicable_requests"] == 3
+        assert result.data_reliability["call_count"] == 4

@@ -849,17 +849,35 @@ class ReportAuditor:
             payload = json.loads(summary_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return {}
+        if isinstance(payload, dict):
+            rows = payload.get("rows")
+        elif isinstance(payload, list):
+            rows = payload
+        else:
+            return {}
+        if not isinstance(rows, list):
+            return {}
         reliability_by_ticker = {}
-        for row in payload.get("rows", []):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
             raw_ticker = str(row.get("ticker") or "")
             ticker = _parse_ticker_dir_name(raw_ticker) or raw_ticker
             reliability = row.get("data_reliability")
             if ticker and isinstance(reliability, dict):
-                template = aggregate_data_reliability([])
-                reliability_by_ticker[ticker] = {
+                normalized = {
                     key: _nonnegative_int(reliability.get(key))
-                    for key in template
+                    for key in DATA_RELIABILITY_KEYS
                 }
+                normalized["logical_requests"] = sum(normalized.values())
+                normalized["applicable_requests"] = (
+                    normalized["logical_requests"] - normalized["not_applicable"]
+                )
+                normalized["call_count"] = max(
+                    normalized["logical_requests"],
+                    _nonnegative_int(reliability.get("call_count")),
+                )
+                reliability_by_ticker[ticker] = normalized
         return reliability_by_ticker
 
     def _apply_data_reliability(self, result: AuditResult) -> None:
@@ -1144,6 +1162,16 @@ class ReportAuditor:
                 "",
             ])
             for ticker, issue in warning_issues:
+                lines.extend(self._format_issue(ticker, issue))
+
+        # INFO 发现
+        info_issues = [(t, i) for t, i in all_issues if i.severity == "INFO"]
+        if info_issues:
+            lines.extend([
+                "## INFO 发现（数据限制说明）",
+                "",
+            ])
+            for ticker, issue in info_issues:
                 lines.extend(self._format_issue(ticker, issue))
 
         # 各股票详细结果

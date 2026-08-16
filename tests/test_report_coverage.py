@@ -2,6 +2,7 @@
 
 import pytest
 
+from tradingagents.dataflows.interface import VendorRouteDiagnostic
 from tradingagents.reporting import (
     aggregate_data_reliability,
     render_data_coverage_section,
@@ -47,6 +48,26 @@ def test_aggregate_data_reliability_excludes_neutral_hk_policy_from_missing():
 
     assert reliability["missing"] == 0
     assert reliability["applicable_requests"] == 1
+
+
+@pytest.mark.unit
+def test_aggregate_data_reliability_consumes_task4_collector_diagnostic():
+    diagnostic = VendorRouteDiagnostic(
+        method="get_news",
+        category="news_data",
+        status="ok_fallback",
+        attempted_vendors=("yfinance", "akshare"),
+        selected_vendor="akshare",
+        as_of="2026-08-14",
+        reason="fallback selected",
+        call_count=3,
+    )
+
+    reliability = aggregate_data_reliability([diagnostic])
+
+    assert reliability["fallback_success"] == 1
+    assert reliability["logical_requests"] == 1
+    assert reliability["call_count"] == 3
 
 
 @pytest.mark.unit
