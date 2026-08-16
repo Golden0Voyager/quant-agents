@@ -30,7 +30,10 @@ from cli.stats_handler import StatsCallbackHandler
 from tradingagents.default_config import default_config
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.llm_clients.pricing import get_usd_to_cny_rate
-from tradingagents.reporting import is_data_coverage_degraded
+from tradingagents.reporting import (
+    aggregate_data_reliability,
+    is_data_coverage_degraded,
+)
 
 console = Console()
 
@@ -506,6 +509,7 @@ class BatchRunner:
         fields["coverage_total"] = len(coverage)
         fields["coverage_degraded"] = len(degraded)
         fields["coverage_top_missing"] = sorted(categories)
+        fields["data_reliability"] = aggregate_data_reliability(coverage)
 
         self.summaries[ticker] = {"company": company or ticker, **fields}
 
@@ -1152,6 +1156,7 @@ class BatchRunner:
                         "cost_by_model": {},
                         "status": "failed",
                         "error": self.failures[ticker],
+                        "data_reliability": None,
                     }
                 )
             else:
@@ -1165,6 +1170,13 @@ class BatchRunner:
                 if degraded:
                     categories = ", ".join(s.get("coverage_top_missing", [])) or "unknown"
                     details += f" 数据覆盖降级 {degraded} 项（{categories}）"
+                reliability = s.get("data_reliability")
+                if reliability and reliability.get("logical_requests", 0):
+                    details += (
+                        f" 数据可靠性：适用 {reliability.get('applicable_requests', 0)} 项，"
+                        f"缺失 {reliability.get('missing', 0)} 项，"
+                        f"部分 {reliability.get('partial', 0)} 项"
+                    )
                 if has_stats:
                     lines.append(
                         f"| {ticker} | {s.get('company', ticker)} | {s.get('rating', '—')} | "
@@ -1190,6 +1202,7 @@ class BatchRunner:
                         "coverage_total": s.get("coverage_total", 0),
                         "coverage_degraded": s.get("coverage_degraded", 0),
                         "coverage_top_missing": s.get("coverage_top_missing", []),
+                        "data_reliability": s.get("data_reliability"),
                         "llm_calls": per_ticker_stats.get("llm_calls"),
                         "tokens_in": per_ticker_stats.get("tokens_in"),
                         "tokens_out": per_ticker_stats.get("tokens_out"),

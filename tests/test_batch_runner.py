@@ -116,6 +116,38 @@ class TestBatchRunnerFallbackDetection:
 
 @pytest.mark.unit
 class TestBatchRunnerSummaryOutput:
+    def test_extract_summary_adds_logical_data_reliability(self, tmp_path):
+        runner = BatchRunner(
+            tickers=["1810.HK"],
+            profile_config={"llm_provider": "openai", "output_language": "English"},
+            output_dir=tmp_path / "reports" / "batch_20260101_000000",
+            workers=1,
+        )
+        runner._extract_summary(
+            "1810.HK",
+            {
+                "final_trade_decision": "**Rating**: Hold\n",
+                "trader_investment_plan": "",
+                "data_coverage": [
+                    {"method": "get_news", "status": "ok_fallback", "call_count": 2},
+                    {"method": "get_announcements", "status": "valid_empty"},
+                    {"method": "get_pledge_ratio", "status": "not_applicable"},
+                ],
+            },
+        )
+
+        assert runner.summaries["1810.HK"]["data_reliability"] == {
+            "confirmed": 0,
+            "fallback_success": 1,
+            "valid_empty": 1,
+            "not_applicable": 1,
+            "partial": 0,
+            "missing": 0,
+            "logical_requests": 3,
+            "applicable_requests": 2,
+            "call_count": 4,
+        }
+
     def test_neutral_coverage_statuses_are_not_counted_as_degraded(self, tmp_path):
         runner = BatchRunner(
             tickers=["AAPL"],
@@ -252,6 +284,39 @@ class TestBatchRunnerSummaryOutput:
         row = data["rows"][0]
         assert row["fallback"] is True
         assert row["confidence"] == "low"
+
+    def test_generate_summary_outputs_data_reliability_json_and_markdown(self, tmp_path):
+        output_dir = tmp_path / "reports" / "batch_20260101_000000"
+        output_dir.mkdir(parents=True)
+        runner = BatchRunner(
+            tickers=["AAPL"],
+            profile_config={"llm_provider": "openai", "output_language": "English"},
+            output_dir=output_dir,
+            workers=1,
+        )
+        runner.summaries["AAPL"] = {
+            "company": "Apple",
+            "rating": "Hold",
+            "confidence": "medium",
+            "data_reliability": {
+                "confirmed": 2,
+                "fallback_success": 1,
+                "valid_empty": 1,
+                "not_applicable": 3,
+                "partial": 1,
+                "missing": 0,
+                "logical_requests": 8,
+                "applicable_requests": 5,
+                "call_count": 10,
+            },
+        }
+
+        md = runner.generate_summary().read_text(encoding="utf-8")
+        data = json.loads((output_dir / "batch_summary.json").read_text(encoding="utf-8"))
+
+        assert data["rows"][0]["data_reliability"]["not_applicable"] == 3
+        assert data["rows"][0]["data_reliability"]["logical_requests"] == 8
+        assert "数据可靠性：适用 5 项，缺失 0 项，部分 1 项" in md
 
 @pytest.mark.unit
 class TestParseSummaryFieldsFallbackFormats:

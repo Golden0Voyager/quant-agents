@@ -2,7 +2,51 @@
 
 import pytest
 
-from tradingagents.reporting import render_data_coverage_section, write_report_tree
+from tradingagents.reporting import (
+    aggregate_data_reliability,
+    render_data_coverage_section,
+    write_report_tree,
+)
+
+
+@pytest.mark.unit
+def test_aggregate_data_reliability_counts_logical_requests_and_calls():
+    coverage = [
+        {"method": "confirmed", "status": "ok", "call_count": 3},
+        {"method": "fallback", "status": "ok_fallback", "call_count": 2},
+        {"method": "empty", "status": "valid_empty", "call_count": 1},
+        {"method": "hk_only", "status": "not_applicable", "call_count": 4},
+        {"method": "partial", "status": "partial", "call_count": 1},
+        {"method": "stale", "status": "stale", "call_count": 1},
+        {"method": "no_data", "status": "no_data", "call_count": 1},
+        {"method": "unavailable", "status": "unavailable", "call_count": 1},
+        {"method": "failed", "status": "failed", "call_count": 1},
+    ]
+
+    assert aggregate_data_reliability(coverage) == {
+        "confirmed": 1,
+        "fallback_success": 1,
+        "valid_empty": 1,
+        "not_applicable": 1,
+        "partial": 2,
+        "missing": 3,
+        "logical_requests": 9,
+        "applicable_requests": 8,
+        "call_count": 15,
+    }
+
+
+@pytest.mark.unit
+def test_aggregate_data_reliability_excludes_neutral_hk_policy_from_missing():
+    reliability = aggregate_data_reliability(
+        [
+            {"method": "get_news", "status": "valid_empty"},
+            {"method": "get_pledge_ratio", "status": "not_applicable"},
+        ]
+    )
+
+    assert reliability["missing"] == 0
+    assert reliability["applicable_requests"] == 1
 
 
 @pytest.mark.unit
@@ -50,6 +94,8 @@ def test_report_renders_data_coverage_and_impact_levels(tmp_path):
     assert "高" in report
     assert "中" in report
     assert "低" in report
+    assert "逻辑请求 3 项" in report
+    assert "实际调用 3 次" in report
 
 
 @pytest.mark.unit

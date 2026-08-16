@@ -222,3 +222,74 @@ class TestZeroExtractionWarning:
         results = auditor.ReportAuditor(str(tmp_path)).audit()
         issues = results["600050"].issues
         assert not any(i.rule_id == "EXTRACT-001" for i in issues)
+
+
+@pytest.mark.unit
+class TestDataReliabilityAudit:
+    def _write_ticker(self, batch, ticker):
+        ticker_dir = batch / ticker
+        ticker_dir.mkdir()
+        (ticker_dir / "complete_report.md").write_text(
+            "ROE: 15.0%", encoding="utf-8"
+        )
+
+    def test_auditor_reports_missing_without_flagging_neutral_states(
+        self, auditor, tmp_path
+    ):
+        self._write_ticker(tmp_path, "600519")
+        self._write_ticker(tmp_path, "1810.HK")
+        rows = [
+            {
+                "ticker": "600519",
+                "data_reliability": {
+                    "confirmed": 2,
+                    "fallback_success": 1,
+                    "valid_empty": 0,
+                    "not_applicable": 0,
+                    "partial": 1,
+                    "missing": 1,
+                    "logical_requests": 5,
+                    "applicable_requests": 5,
+                    "call_count": 7,
+                },
+            },
+            {
+                "ticker": "1810.HK",
+                "data_reliability": {
+                    "confirmed": 1,
+                    "fallback_success": 0,
+                    "valid_empty": 1,
+                    "not_applicable": 3,
+                    "partial": 0,
+                    "missing": 0,
+                    "logical_requests": 5,
+                    "applicable_requests": 2,
+                    "call_count": 5,
+                },
+            },
+        ]
+        (tmp_path / "batch_summary.json").write_text(
+            json.dumps({"rows": rows}), encoding="utf-8"
+        )
+
+        report_auditor = auditor.ReportAuditor(str(tmp_path))
+        results = report_auditor.audit()
+
+        assert results["600519"].data_reliability["missing"] == 1
+        assert any(
+            issue.rule_id == "DATA-RELIABILITY-MISSING"
+            for issue in results["600519"].issues
+        )
+        assert not any(
+            issue.rule_id.startswith("DATA-RELIABILITY")
+            for issue in results["1810.HK"].issues
+        )
+
+        md_path = Path(report_auditor.generate_report(str(tmp_path / "audit")))
+        md = md_path.read_text(encoding="utf-8")
+        json_path = next((tmp_path / "audit").glob("audit_report_*.json"))
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+
+        assert "## 数据可靠性" in md
+        assert data["results"]["1810.HK"]["data_reliability"]["not_applicable"] == 3
+        assert data["summary"]["data_reliability"]["missing"] == 1
