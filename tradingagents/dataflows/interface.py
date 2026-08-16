@@ -65,7 +65,12 @@ from .errors import (
     VendorRateLimitError,
 )
 from .fred import get_macro_data as get_fred_macro_data
-from .runtime_context import RuntimeDataContext, get_runtime_data_context
+from .request_memo import RequestKey
+from .runtime_context import (
+    RuntimeDataContext,
+    get_request_memo,
+    get_runtime_data_context,
+)
 
 # Polymarket removed — prediction markets are US-only and inapplicable to A-shares.
 # The get_prediction_markets method degraded via OPTIONAL_CATEGORIES → DATA_UNAVAILABLE sentinel.
@@ -257,7 +262,7 @@ class VendorPayload:
             raise ValueError(f"Unsupported vendor payload status: {self.status}")
 
 
-@dataclass(frozen=True)
+@dataclass
 class VendorRouteDiagnostic:
     """Explain how one logical data request was resolved."""
 
@@ -268,6 +273,7 @@ class VendorRouteDiagnostic:
     selected_vendor: str | None
     as_of: str | None
     reason: str
+    call_count: int = 1
 
 
 @dataclass(frozen=True)
@@ -454,6 +460,77 @@ def _rewrite_policy_dates(
             )
 
     return tuple(rewritten_args), rewritten_kwargs
+
+
+def _date_like(value: Any) -> bool:
+    if isinstance(value, (_dt.date, _dt.datetime)):
+        return True
+    return isinstance(value, str) and bool(
+        _re.match(r"^\d{4}-?\d{2}-?\d{2}(?:[T\s].*)?$", value.strip())
+    )
+
+
+def _request_key(
+    method: str,
+    policy: ToolPolicy,
+    registered_policy: bool,
+    context: RuntimeDataContext,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> RequestKey:
+    """Build a stable key after policy ticker/date normalization."""
+    symbol = args[0] if args else kwargs.get("symbol") or kwargs.get("ticker")
+    ticker = (
+        context.ticker
+        if policy.date_policy == "market_session" or not isinstance(symbol, str)
+        else symbol
+    )
+    normalized_ticker = ticker.strip().upper()
+
+    start_date = next(
+        (
+            kwargs[name]
+            for name in ("start_date", "trade_date", "curr_date", "as_of")
+            if kwargs.get(name) is not None
+        ),
+        None,
+    )
+    end_date = next(
+        (
+            kwargs[name]
+            for name in ("end_date", "evidence_window_end")
+            if kwargs.get(name) is not None
+        ),
+        None,
+    )
+    positional_dates = [value for value in args if _date_like(value)]
+    if start_date is None and positional_dates:
+        start_date = positional_dates[0]
+    if end_date is None and len(positional_dates) > 1:
+        end_date = positional_dates[-1]
+    if start_date is None and end_date is None and registered_policy:
+        start_date, end_date = normalized_dates(method, context)
+
+    frozen_args = list(args)
+    if (
+        policy.date_policy != "market_session"
+        and frozen_args
+        and isinstance(frozen_args[0], str)
+    ):
+        frozen_args[0] = normalized_ticker
+    frozen_options = dict(kwargs)
+    for name in ("symbol", "ticker"):
+        if name in frozen_options:
+            frozen_options[name] = normalized_ticker
+
+    return RequestKey(
+        method=method,
+        ticker=normalized_ticker,
+        start_date=start_date,
+        end_date=end_date,
+        frozen_kwargs={"args": frozen_args, "kwargs": frozen_options},
+        policy_version=context.policy_version,
+    )
 
 # Mapping of methods to their vendor-specific implementations
 # method -> vendor -> implementation (a callable, or a list of callables
@@ -778,6 +855,49 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
     runtime_context = get_runtime_data_context()
     market = _request_market(policy, registered_policy, args, kwargs, runtime_context)
 
+    if registered_policy:
+        args, kwargs = _rewrite_policy_dates(
+            method, policy, runtime_context, args, kwargs
+        )
+
+    def resolver() -> VendorRouteResult:
+        return _resolve_route_with_source(
+            method=method,
+            category=category,
+            symbol=symbol,
+            policy=policy,
+            registered_policy=registered_policy,
+            market=market,
+            args=args,
+            kwargs=kwargs,
+        )
+
+    memo = get_request_memo()
+    if runtime_context is None or memo is None:
+        return resolver()
+    key = _request_key(
+        method,
+        policy,
+        registered_policy,
+        runtime_context,
+        args,
+        kwargs,
+    )
+    return memo.resolve(key, resolver)
+
+
+def _resolve_route_with_source(
+    *,
+    method: str,
+    category: str,
+    symbol: Any,
+    policy: ToolPolicy,
+    registered_policy: bool,
+    market: Market | None,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> VendorRouteResult:
+    """Resolve one complete vendor route after request normalization."""
     if (
         registered_policy
         and market is not None
@@ -796,11 +916,6 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
             reason=f"policy excludes market {market}",
             args=args,
             kwargs=kwargs,
-        )
-
-    if registered_policy:
-        args, kwargs = _rewrite_policy_dates(
-            method, policy, runtime_context, args, kwargs
         )
 
     if method not in VENDOR_METHODS:

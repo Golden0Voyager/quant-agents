@@ -14,6 +14,8 @@ from tradingagents.market_context import (
     resolve_analysis_dates,
 )
 
+from .request_memo import RequestMemo
+
 
 @dataclass(frozen=True)
 class RuntimeDataContext:
@@ -27,6 +29,9 @@ class RuntimeDataContext:
 
 _RUNTIME_DATA_CONTEXT: ContextVar[RuntimeDataContext | None] = ContextVar(
     "tradingagents_runtime_data_context", default=None
+)
+_REQUEST_MEMO: ContextVar[RequestMemo | None] = ContextVar(
+    "tradingagents_request_memo", default=None
 )
 
 
@@ -47,11 +52,18 @@ def get_runtime_data_context() -> RuntimeDataContext | None:
     return _RUNTIME_DATA_CONTEXT.get()
 
 
+def get_request_memo() -> RequestMemo | None:
+    """Return the request memo owned by the active runtime data scope."""
+    return _REQUEST_MEMO.get()
+
+
 @contextmanager
 def use_runtime_data_context(context: RuntimeDataContext) -> Iterator[RuntimeDataContext]:
     """Scope data context to one graph run without leaking to another worker."""
     token = _RUNTIME_DATA_CONTEXT.set(context)
+    memo_token = _REQUEST_MEMO.set(RequestMemo())
     try:
         yield context
     finally:
+        _REQUEST_MEMO.reset(memo_token)
         _RUNTIME_DATA_CONTEXT.reset(token)
