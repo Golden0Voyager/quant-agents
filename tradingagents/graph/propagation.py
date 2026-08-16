@@ -1,5 +1,6 @@
 # TradingAgents/graph/propagation.py
 
+from dataclasses import asdict
 from typing import Any
 
 from tradingagents.agents.utils.agent_states import (
@@ -45,7 +46,7 @@ class Propagator:
             "instrument_context": instrument_context,
             "trade_date": str(trade_date),
             "market": resolved_market,
-            "analysis_dates": resolved_dates,
+            "analysis_dates": asdict(resolved_dates),
             "past_context": past_context,
             "holdings_context": holdings_context or {},
             "transactions_context": transactions_context or [],

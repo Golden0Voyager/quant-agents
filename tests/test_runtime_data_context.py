@@ -76,8 +76,8 @@ def test_initial_state_carries_market_and_dates_with_checkpoint_safe_defaults():
     state = Propagator().create_initial_state("600519.SS", "2026-08-16")
 
     assert state["market"] == "XSHG"
-    assert state["analysis_dates"] == AnalysisDates(
-        analysis_date="2026-08-16",
-        market_as_of_date="2026-08-14",
-        evidence_window_end="2026-08-16",
-    )
+    assert state["analysis_dates"] == {
+        "analysis_date": "2026-08-16",
+        "market_as_of_date": "2026-08-14",
+        "evidence_window_end": "2026-08-16",
+    }

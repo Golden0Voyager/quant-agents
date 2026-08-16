@@ -52,6 +52,18 @@ class CreateInitialStateTests(unittest.TestCase):
         self.assertEqual(state["asset_type"], "stock")
         self.assertEqual(state["messages"], [("human", "Apple Inc.")])
 
+    def test_serializes_analysis_dates_in_fresh_graph_state(self):
+        state = Propagator().create_initial_state("600519.SS", "2026-08-16")
+
+        self.assertEqual(
+            state["analysis_dates"],
+            {
+                "analysis_date": "2026-08-16",
+                "market_as_of_date": "2026-08-14",
+                "evidence_window_end": "2026-08-16",
+            },
+        )
+
     def test_invest_debate_state_defaults(self):
         p = Propagator()
         state = p.create_initial_state(
