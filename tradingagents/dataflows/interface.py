@@ -662,6 +662,8 @@ def _canonicalize_route_call(
             invocation_arg_count = max(invocation_arg_count, index + 1)
         elif default is not _REQUIRED_PARAMETER:
             value = default
+            if default is not None:
+                invocation_arg_count = max(invocation_arg_count, index + 1)
         else:
             raise TypeError(f"{method} missing required argument: '{name}'")
         canonical_args.append(value)
