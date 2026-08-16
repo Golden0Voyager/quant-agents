@@ -17,6 +17,7 @@ from tradingagents.ticker_resolver import (
     _is_numeric_code,
     _load_name_cache,
     _resolve_chinese_name,
+    infer_market,
     resolve_ticker,
 )
 
@@ -415,6 +416,9 @@ class ResolveTickerChineseIntegrationTests(unittest.TestCase):
 
 @pytest.mark.unit
 class TickerSymbolHandlingTests(unittest.TestCase):
+    def test_canonical_market_inference_is_available_with_ticker_resolution(self):
+        self.assertEqual(infer_market("002413.SZ"), "XSHG")
+
     def test_normalize_ticker_symbol_preserves_exchange_suffix(self):
         self.assertEqual(normalize_ticker_symbol(" cnc.to "), "CNC.TO")
 

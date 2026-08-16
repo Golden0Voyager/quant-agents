@@ -13,6 +13,13 @@ import json
 import os
 import re
 
+from tradingagents.market_context import Market, infer_market as _infer_market
+
+
+def infer_market(ticker: str) -> Market:
+    """Expose canonical market identity beside ticker resolution."""
+    return _infer_market(ticker)
+
 # ---------------------------------------------------------------------------
 # Cache helpers
 # ---------------------------------------------------------------------------
