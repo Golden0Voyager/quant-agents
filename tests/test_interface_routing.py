@@ -1578,6 +1578,171 @@ def test_runtime_memo_normalizes_symbol_and_ticker_aliases():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("keyword_first", [False, True])
+def test_runtime_memo_normalizes_global_news_residual_parameters(keyword_first):
+    from tradingagents.dataflows import interface
+
+    calls = []
+
+    def strict_global_news(curr_date, look_back_days, limit):
+        calls.append((curr_date, look_back_days, limit))
+        return "global news"
+
+    def positional():
+        return interface.route_to_vendor("get_global_news", "2026-08-16", 7, 50)
+
+    def keyword():
+        return interface.route_to_vendor(
+            "get_global_news",
+            curr_date="2026-08-16",
+            look_back_days=7,
+            limit=50,
+        )
+    ordered_calls = (keyword, positional) if keyword_first else (positional, keyword)
+
+    with (
+        use_runtime_data_context(_runtime_context()),
+        interface.collect_route_diagnostics() as records,
+        patch.object(interface, "get_vendor", return_value="yfinance"),
+        patch.dict(
+            interface.VENDOR_METHODS["get_global_news"],
+            {"yfinance": strict_global_news},
+            clear=True,
+        ),
+    ):
+        results = [call() for call in ordered_calls]
+
+    assert results == ["global news", "global news"]
+    assert calls == [("2026-08-16", 7, 50)]
+    assert len(records) == 1
+    assert records[0].call_count == 2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("keyword_first", [False, True])
+def test_runtime_memo_normalizes_indicator_residual_parameters(keyword_first):
+    from tradingagents.dataflows import interface
+
+    calls = []
+
+    def strict_indicator(symbol, indicator, curr_date, look_back_days):
+        calls.append((symbol, indicator, curr_date, look_back_days))
+        return "indicator"
+
+    def positional():
+        return interface.route_to_vendor(
+            "get_indicators", "600519.SS", "rsi_14", "2026-08-16", 30
+        )
+
+    def keyword():
+        return interface.route_to_vendor(
+            "get_indicators",
+            symbol="600519.SS",
+            indicator="rsi_14",
+            curr_date="2026-08-16",
+            look_back_days=30,
+        )
+    ordered_calls = (keyword, positional) if keyword_first else (positional, keyword)
+
+    with (
+        use_runtime_data_context(_runtime_context()),
+        interface.collect_route_diagnostics() as records,
+        patch.object(interface, "get_vendor", return_value="smartmoney_db"),
+        patch.dict(
+            interface.VENDOR_METHODS["get_indicators"],
+            {"smartmoney_db": strict_indicator},
+            clear=True,
+        ),
+    ):
+        results = [call() for call in ordered_calls]
+
+    assert results == ["indicator", "indicator"]
+    assert calls == [("600519.SS", "rsi_14", "2026-08-16", 30)]
+    assert len(records) == 1
+    assert records[0].call_count == 2
+
+
+@pytest.mark.unit
+def test_keyword_ticker_owner_invokes_strict_symbol_vendor_positionally():
+    from tradingagents.dataflows import interface
+
+    calls = []
+
+    def strict_symbol_vendor(symbol, start_date, end_date):
+        calls.append((symbol, start_date, end_date))
+        return "news"
+
+    with (
+        use_runtime_data_context(_runtime_context()),
+        interface.collect_route_diagnostics() as records,
+        patch.object(interface, "get_vendor", return_value="smartmoney_db"),
+        patch.dict(
+            interface.VENDOR_METHODS["get_news"],
+            {"smartmoney_db": strict_symbol_vendor},
+            clear=True,
+        ),
+    ):
+        keyword_owner = interface.route_to_vendor(
+            "get_news",
+            ticker="600519.SS",
+            start_date="2026-08-01",
+            end_date="2026-08-16",
+        )
+        positional_hit = interface.route_to_vendor(
+            "get_news", "600519.SS", "2026-08-01", "2026-08-16"
+        )
+
+    assert keyword_owner == positional_hit == "news"
+    assert calls == [("600519.SS", "2026-08-01", "2026-08-16")]
+    assert len(records) == 1
+    assert records[0].call_count == 2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("args", "kwargs", "message"),
+    [
+        (
+            (),
+            {
+                "ticker": "600519.SS",
+                "symbol": "000001.SZ",
+                "start_date": "2026-08-01",
+                "end_date": "2026-08-16",
+            },
+            "conflicting aliases for 'ticker'",
+        ),
+        (
+            ("600519.SS", "2026-08-01", "2026-08-16"),
+            {"ticker": "600519.SS"},
+            "multiple values for 'ticker'",
+        ),
+    ],
+)
+def test_canonical_route_schema_rejects_conflicting_parameter_sources(
+    args, kwargs, message
+):
+    from tradingagents.dataflows import interface
+
+    with pytest.raises(TypeError, match=message):
+        interface.route_to_vendor("get_news", *args, **kwargs)
+
+
+@pytest.mark.unit
+def test_every_routed_method_has_a_canonical_parameter_schema():
+    from tradingagents.dataflows import interface
+
+    categorized = {
+        method
+        for category in interface.TOOLS_CATEGORIES.values()
+        for method in category["tools"]
+    }
+    expected = categorized | set(interface.VENDOR_METHODS)
+
+    assert expected <= set(interface._METHOD_PARAMETER_SCHEMAS)
+
+
+@pytest.mark.unit
 def test_runtime_memo_keeps_distinct_residual_options_separate():
     from tradingagents.dataflows import interface
 

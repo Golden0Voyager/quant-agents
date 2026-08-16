@@ -518,6 +518,159 @@ def _normalize_key_date(value: Any) -> Any:
         return value
 
 
+_REQUIRED_PARAMETER = object()
+_METHOD_PARAMETER_SCHEMAS: dict[str, tuple[tuple[str, Any], ...]] = {
+    "get_stock_data": (
+        ("symbol", _REQUIRED_PARAMETER),
+        ("start_date", _REQUIRED_PARAMETER),
+        ("end_date", _REQUIRED_PARAMETER),
+    ),
+    "get_index_daily": (
+        ("index_code", _REQUIRED_PARAMETER),
+        ("start_date", _REQUIRED_PARAMETER),
+        ("end_date", _REQUIRED_PARAMETER),
+    ),
+    "get_indicators": (
+        ("symbol", _REQUIRED_PARAMETER),
+        ("indicator", _REQUIRED_PARAMETER),
+        ("curr_date", _REQUIRED_PARAMETER),
+        ("look_back_days", 30),
+    ),
+    "get_fund_flow": (("ticker", _REQUIRED_PARAMETER), ("curr_date", None)),
+    "get_sector_fund_flow": (("sector_name", _REQUIRED_PARAMETER),),
+    "get_limit_up_down": (("trade_date", _REQUIRED_PARAMETER),),
+    "get_fundamentals": (
+        ("ticker", _REQUIRED_PARAMETER),
+        ("curr_date", None),
+    ),
+    "get_balance_sheet": (
+        ("ticker", _REQUIRED_PARAMETER),
+        ("freq", "quarterly"),
+        ("curr_date", None),
+    ),
+    "get_cashflow": (
+        ("ticker", _REQUIRED_PARAMETER),
+        ("freq", "quarterly"),
+        ("curr_date", None),
+    ),
+    "get_income_statement": (
+        ("ticker", _REQUIRED_PARAMETER),
+        ("freq", "quarterly"),
+        ("curr_date", None),
+    ),
+    "get_industry_valuation": (("ticker", _REQUIRED_PARAMETER),),
+    "get_earnings_estimates": (("ticker", _REQUIRED_PARAMETER),),
+    "get_shareholder_count": (
+        ("ticker", _REQUIRED_PARAMETER),
+        ("curr_date", None),
+    ),
+    "get_news": (
+        ("ticker", _REQUIRED_PARAMETER),
+        ("start_date", _REQUIRED_PARAMETER),
+        ("end_date", _REQUIRED_PARAMETER),
+    ),
+    "get_global_news": (
+        ("curr_date", _REQUIRED_PARAMETER),
+        ("look_back_days", None),
+        ("limit", None),
+    ),
+    "get_insider_transactions": (("ticker", _REQUIRED_PARAMETER),),
+    "get_company_announcements": (
+        ("ticker", _REQUIRED_PARAMETER),
+        ("start_date", _REQUIRED_PARAMETER),
+        ("end_date", _REQUIRED_PARAMETER),
+    ),
+    "get_restricted_release": (
+        ("ticker", _REQUIRED_PARAMETER),
+        ("start_date", _REQUIRED_PARAMETER),
+        ("end_date", _REQUIRED_PARAMETER),
+    ),
+    "get_institutional_holdings": (
+        ("ticker", _REQUIRED_PARAMETER),
+        ("curr_date", None),
+    ),
+    "get_northbound_hold": (
+        ("ticker", _REQUIRED_PARAMETER),
+        ("curr_date", None),
+    ),
+    "get_macro_indicators": (
+        ("indicator", _REQUIRED_PARAMETER),
+        ("curr_date", None),
+        ("look_back_days", None),
+    ),
+    "get_pledge_ratio": (("ticker", _REQUIRED_PARAMETER),),
+    "get_margin_trading": (
+        ("ticker", _REQUIRED_PARAMETER),
+        ("curr_date", None),
+    ),
+    "get_dragon_tiger": (
+        ("ticker", _REQUIRED_PARAMETER),
+        ("curr_date", None),
+    ),
+    "get_block_trade": (
+        ("ticker", _REQUIRED_PARAMETER),
+        ("curr_date", None),
+    ),
+    "get_dividend_history": (("ticker", _REQUIRED_PARAMETER),),
+    "get_research_reports": (
+        ("ticker", _REQUIRED_PARAMETER),
+        ("curr_date", None),
+    ),
+    "get_prediction_markets": (
+        ("topic", _REQUIRED_PARAMETER),
+        ("limit", None),
+    ),
+}
+
+
+def _parameter_aliases(name: str) -> tuple[str, ...]:
+    if name in {"ticker", "symbol"}:
+        return ("ticker", "symbol")
+    if name == "curr_date":
+        return ("curr_date", "as_of")
+    if name == "trade_date":
+        return ("trade_date", "curr_date", "as_of")
+    if name == "end_date":
+        return ("end_date", "evidence_window_end")
+    return (name,)
+
+
+def _canonicalize_route_call(
+    method: str, args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> tuple[tuple[Any, ...], dict[str, Any], int]:
+    """Bind public logical parameters once for both memo keys and vendors."""
+    schema = _METHOD_PARAMETER_SCHEMAS.get(method)
+    if schema is None:
+        return args, kwargs, len(args)
+
+    residual_kwargs = dict(kwargs)
+    canonical_args: list[Any] = []
+    invocation_arg_count = len(args)
+    for index, (name, default) in enumerate(schema):
+        aliases = _parameter_aliases(name)
+        supplied_aliases = [alias for alias in aliases if alias in residual_kwargs]
+        has_positional = index < len(args)
+        if has_positional and supplied_aliases:
+            raise TypeError(f"{method} received multiple values for '{name}'")
+        if len(supplied_aliases) > 1:
+            joined = ", ".join(supplied_aliases)
+            raise TypeError(f"{method} received conflicting aliases for '{name}': {joined}")
+        if has_positional:
+            value = args[index]
+        elif supplied_aliases:
+            value = residual_kwargs.pop(supplied_aliases[0])
+            invocation_arg_count = max(invocation_arg_count, index + 1)
+        elif default is not _REQUIRED_PARAMETER:
+            value = default
+        else:
+            raise TypeError(f"{method} missing required argument: '{name}'")
+        canonical_args.append(value)
+
+    canonical_args.extend(args[len(schema):])
+    invocation_arg_count = max(invocation_arg_count, len(args))
+    return tuple(canonical_args), residual_kwargs, invocation_arg_count
+
+
 def _request_key(
     method: str,
     policy: ToolPolicy,
@@ -901,6 +1054,9 @@ def _format_optional_unavailable(
 def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteResult:
     """Route a call and retain the vendor that produced the returned payload."""
     category = get_category_for_method(method)
+    args, kwargs, invocation_arg_count = _canonicalize_route_call(
+        method, args, kwargs
+    )
     symbol = args[0] if args else kwargs.get("symbol") or kwargs.get("ticker")
     policy, registered_policy = _request_policy(method)
     runtime_context = get_runtime_data_context()
@@ -910,6 +1066,7 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
         args, kwargs = _rewrite_policy_dates(
             method, policy, runtime_context, args, kwargs
         )
+    invocation_args = args[:invocation_arg_count]
 
     def resolver() -> VendorRouteResult:
         return _resolve_route_with_source(
@@ -919,7 +1076,7 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
             policy=policy,
             registered_policy=registered_policy,
             market=market,
-            args=args,
+            args=invocation_args,
             kwargs=kwargs,
         )
 
