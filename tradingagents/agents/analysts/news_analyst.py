@@ -10,9 +10,20 @@ from tradingagents.agents.utils.agent_utils import (
     get_research_reports,
     sanitize_company_name_in_report,
 )
+from tradingagents.agents.utils.tool_capabilities import tools_for_market
+from tradingagents.market_context import infer_market
 
 
 def create_news_analyst(llm):
+    tools = [
+        get_news,
+        get_global_news,
+        get_macro_indicators,
+        get_research_reports,
+        get_cailianpress_telegrams,
+    ]
+    bound_llms = {}
+
     def news_analyst_node(state):
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
@@ -20,14 +31,11 @@ def create_news_analyst(llm):
         asset_type = state.get("asset_type", "stock")
         asset_label = "company" if asset_type == "stock" else "asset"
         instrument_context = get_instrument_context_from_state(state)
-
-        tools = [
-            get_news,
-            get_global_news,
-            get_macro_indicators,
-            get_research_reports,
-            get_cailianpress_telegrams,
-        ]
+        market = state.get("market") or infer_market(ticker)
+        if market not in bound_llms:
+            market_tools = tools_for_market(tools, market)
+            bound_llms[market] = (market_tools, llm.bind_tools(market_tools))
+        market_tools, bound_llm = bound_llms[market]
 
         ticker_guard = (
             f"TICKER VERIFICATION — You are analyzing {company_name} ({ticker}). "
@@ -71,11 +79,11 @@ def create_news_analyst(llm):
         )
 
         prompt = prompt.partial(system_message=system_message)
-        prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
+        prompt = prompt.partial(tool_names=", ".join(tool.name for tool in market_tools))
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(instrument_context=instrument_context)
 
-        chain = prompt | llm.bind_tools(tools)
+        chain = prompt | bound_llm
         result = chain.invoke(state["messages"])
 
         report = result.content or ""

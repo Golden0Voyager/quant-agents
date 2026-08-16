@@ -13,26 +13,33 @@ from tradingagents.agents.utils.agent_utils import (
     get_verified_market_snapshot,
     sanitize_company_name_in_report,
 )
+from tradingagents.agents.utils.tool_capabilities import tools_for_market
+from tradingagents.market_context import infer_market
 
 
 def create_market_analyst(llm):
+    tools = [
+        get_stock_data,
+        get_indicators,
+        get_chip_distribution,
+        get_fund_flow,
+        get_sector_fund_flow,
+        get_limit_up_down,
+        get_index_daily,
+        get_verified_market_snapshot,
+    ]
+    bound_llms = {}
 
     def market_analyst_node(state):
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
         company_name = state.get("company_name", "")
         instrument_context = get_instrument_context_from_state(state)
-
-        tools = [
-            get_stock_data,
-            get_indicators,
-            get_chip_distribution,
-            get_fund_flow,
-            get_sector_fund_flow,
-            get_limit_up_down,
-            get_index_daily,
-            get_verified_market_snapshot,
-        ]
+        market = state.get("market") or infer_market(ticker)
+        if market not in bound_llms:
+            market_tools = tools_for_market(tools, market)
+            bound_llms[market] = (market_tools, llm.bind_tools(market_tools))
+        market_tools, bound_llm = bound_llms[market]
 
         ticker_guard = (
             f"TICKER VERIFICATION — You are analyzing {company_name} ({ticker}). "
@@ -105,11 +112,11 @@ Volume-Based Indicators:
         )
 
         prompt = prompt.partial(system_message=system_message)
-        prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
+        prompt = prompt.partial(tool_names=", ".join(tool.name for tool in market_tools))
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(instrument_context=instrument_context)
 
-        chain = prompt | llm.bind_tools(tools)
+        chain = prompt | bound_llm
 
         result = chain.invoke(state["messages"])
 

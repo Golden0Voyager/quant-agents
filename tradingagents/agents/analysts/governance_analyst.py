@@ -15,30 +15,38 @@ from tradingagents.agents.utils.agent_utils import (
     get_restricted_release,
     sanitize_company_name_in_report,
 )
+from tradingagents.agents.utils.tool_capabilities import tools_for_market
+from tradingagents.market_context import infer_market
 
 
 def create_governance_analyst(llm):
+    tools = [
+        get_company_announcements,
+        get_insider_transactions,
+        get_news,
+        get_restricted_release,
+        get_institutional_intelligence,
+        get_northbound_hold,
+        get_margin_trading,
+        get_pledge_ratio,
+        get_dragon_tiger,
+        get_block_trade,
+    ]
+    bound_llms = {}
+
     def governance_analyst_node(state):
         current_date = state["trade_date"]
         instrument_context = build_instrument_context(
             state["company_of_interest"], state.get("company_name", "")
         )
 
-        tools = [
-            get_company_announcements,
-            get_insider_transactions,
-            get_news,
-            get_restricted_release,
-            get_institutional_intelligence,
-            get_northbound_hold,
-            get_margin_trading,
-            get_pledge_ratio,
-            get_dragon_tiger,
-            get_block_trade,
-        ]
-
         company_name = state.get("company_name", "")
         ticker = state["company_of_interest"]
+        market = state.get("market") or infer_market(ticker)
+        if market not in bound_llms:
+            market_tools = tools_for_market(tools, market)
+            bound_llms[market] = (market_tools, llm.bind_tools(market_tools))
+        market_tools, bound_llm = bound_llms[market]
         company_line = f"Target company: {company_name} ({ticker}). " if company_name else ""
 
         system_message = (
@@ -98,11 +106,11 @@ def create_governance_analyst(llm):
         )
 
         prompt = prompt.partial(system_message=system_message)
-        prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
+        prompt = prompt.partial(tool_names=", ".join(tool.name for tool in market_tools))
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(instrument_context=instrument_context)
 
-        chain = prompt | llm.bind_tools(tools)
+        chain = prompt | bound_llm
         result = chain.invoke(state["messages"])
 
         report = ""

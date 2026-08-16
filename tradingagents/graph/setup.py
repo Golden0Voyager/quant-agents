@@ -70,7 +70,9 @@ class GraphSetup:
         # Create workflow
         workflow = StateGraph(AgentState)
 
-        # Add analyst nodes to the graph
+        # Add analyst nodes once. Each callable resolves market identity from
+        # state and caches its market-specific LLM binding at execution time;
+        # graph topology therefore remains static across markets.
         for spec in plan.specs:
             workflow.add_node(spec.agent_node, analyst_factories[spec.key]())
             workflow.add_node(spec.clear_node, create_msg_delete())
