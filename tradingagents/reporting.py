@@ -10,6 +10,18 @@ from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 
+NON_DEGRADED_COVERAGE_STATUSES = frozenset(
+    {"ok", "ok_fallback", "valid_empty", "not_applicable"}
+)
+DEGRADED_COVERAGE_STATUSES = frozenset(
+    {"partial", "stale", "no_data", "unavailable", "failed"}
+)
+
+
+def is_data_coverage_degraded(status: str) -> bool:
+    """Return whether a route status represents degraded evidence."""
+    return status in DEGRADED_COVERAGE_STATUSES
+
 
 def _coverage_value(item, key: str, default=""):
     if isinstance(item, Mapping):
@@ -40,6 +52,10 @@ def render_data_coverage_section(data_coverage) -> str:
     )
     status_labels = {
         "ok": "可用",
+        "ok_fallback": "回退可用",
+        "valid_empty": "确认无事件",
+        "not_applicable": "不适用",
+        "partial": "部分可用",
         "no_data": "无数据",
         "failed": "失败",
         "stale": "过期",

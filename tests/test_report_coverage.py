@@ -2,7 +2,7 @@
 
 import pytest
 
-from tradingagents.reporting import write_report_tree
+from tradingagents.reporting import render_data_coverage_section, write_report_tree
 
 
 @pytest.mark.unit
@@ -60,3 +60,33 @@ def test_report_without_diagnostics_is_explicit_about_coverage(tmp_path):
 
     assert "## 数据覆盖与限制" in report
     assert "未记录" in report
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("status", "label"),
+    [
+        ("ok", "可用"),
+        ("ok_fallback", "回退可用"),
+        ("valid_empty", "确认无事件"),
+        ("not_applicable", "不适用"),
+        ("partial", "部分可用"),
+        ("stale", "过期"),
+        ("no_data", "无数据"),
+        ("unavailable", "未配置/不可用"),
+        ("failed", "失败"),
+    ],
+)
+def test_report_renders_precise_coverage_status_labels(status, label):
+    report = render_data_coverage_section(
+        [
+            {
+                "method": "get_news",
+                "category": "news_data",
+                "status": status,
+                "reason": "matrix case",
+            }
+        ]
+    )
+
+    assert f"{label} ({status})" in report

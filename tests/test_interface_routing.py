@@ -3,7 +3,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tradingagents.dataflows.runtime_context import (
+    RuntimeDataContext,
+    use_runtime_data_context,
+)
 from tradingagents.dataflows.symbol_utils import NoMarketDataError
+from tradingagents.market_context import AnalysisDates
 
 
 @pytest.mark.unit
@@ -326,10 +331,9 @@ class TestRouteToVendorEdgeCases:
         assert result == "YFINANCE_RESULT"
         fake_yf.assert_called_once_with("AAPL")
 
-    def test_non_ashare_returns_data_unavailable_when_all_vendors_ashare_only(self):
+    def test_registered_method_returns_not_applicable_before_vendor_filtering(self):
         """
-        Non-A-share ticker with only A-share-only vendors returns DATA_UNAVAILABLE.
-        Covers lines 382-387.
+        A policy-excluded market returns the stronger not-applicable sentinel.
         """
         from tradingagents.dataflows import interface
 
@@ -339,8 +343,8 @@ class TestRouteToVendorEdgeCases:
                 "tool_vendors": {},
             }
             result = interface.route_to_vendor("get_pledge_ratio", "AAPL")
-        assert "DATA_UNAVAILABLE" in result
-        assert "A-share only" in result
+        assert "DATA_NOT_APPLICABLE" in result
+        assert "XNYS" in result
 
     def test_vendor_not_configured_falls_back_to_next_vendor(self):
         """
@@ -417,16 +421,20 @@ class TestRouteToVendorEdgeCases:
         # error handler, the sentinel is NO_DATA_AVAILABLE, not DATA_UNAVAILABLE.
         assert "NO_DATA_AVAILABLE" in result
 
-    def test_empty_vendor_chain_raises_runtime_error(self):
+    def test_empty_registered_vendor_chain_returns_unavailable(self):
         """
-        When no vendor is available and none raised errors, raise RuntimeError.
-        Covers lines 486-487.
+        A registered method with no policy-allowed source degrades explicitly.
         """
         from tradingagents.dataflows import interface
 
-        with patch.dict(interface.VENDOR_METHODS, {"get_pledge_ratio": {}}, clear=False), \
-             pytest.raises(RuntimeError, match="No available vendor"):
-            interface.route_to_vendor("get_pledge_ratio", "600519.SS")
+        with patch.dict(interface.VENDOR_METHODS, {"get_pledge_ratio": {}}, clear=False):
+            result = interface.route_to_vendor_with_source(
+                "get_pledge_ratio", "600519.SS"
+            )
+
+        assert result.diagnostic is not None
+        assert result.diagnostic.status == "unavailable"
+        assert "DATA_UNAVAILABLE" in result.data
 
 
 # ===========================================================================
@@ -975,3 +983,296 @@ class TestRouteToVendorWithSourceEdgeCases:
 
         with pytest.raises(ValueError, match="not found in any category"):
             interface.route_to_vendor_with_source("nonexistent_method", "AAPL")
+
+
+def _runtime_context(
+    ticker: str = "600519.SS",
+    market: str = "XSHG",
+) -> RuntimeDataContext:
+    return RuntimeDataContext(
+        ticker=ticker,
+        market=market,
+        dates=AnalysisDates(
+            analysis_date="2026-08-16",
+            market_as_of_date="2026-08-14",
+            evidence_window_end="2026-08-16",
+        ),
+        policy_version="v1",
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("scenario", "expected_status", "expected_vendor"),
+    [
+        ("primary_success", "ok", "smartmoney_db"),
+        ("fallback_success", "ok_fallback", "yfinance"),
+        ("covered_empty_event_window", "valid_empty", "smartmoney_db"),
+        ("unsupported_hk_tool", "not_applicable", None),
+        ("partial_evidence", "partial", "smartmoney_db"),
+        ("stale_snapshot", "stale", "smartmoney_db"),
+        ("clean_no_data", "no_data", None),
+        ("unconfigured_source", "unavailable", None),
+        ("provider_exception", "failed", None),
+    ],
+)
+def test_vendor_outcome_status_matrix(scenario, expected_status, expected_vendor):
+    from tradingagents.dataflows import interface
+    from tradingagents.dataflows.errors import VendorNotConfiguredError
+
+    method = "get_news"
+    args = ("600519.SS", "2026-08-01", "2026-08-16")
+    vendor_config = "smartmoney_db"
+
+    if scenario == "primary_success":
+        vendors = {"smartmoney_db": MagicMock(return_value="primary data")}
+    elif scenario == "fallback_success":
+        vendors = {
+            "smartmoney_db": MagicMock(
+                side_effect=NoMarketDataError("600519.SS", detail="not archived")
+            ),
+            "yfinance": MagicMock(return_value="fallback data"),
+        }
+        vendor_config = "smartmoney_db,yfinance"
+    elif scenario == "covered_empty_event_window":
+        method = "get_company_announcements"
+        vendors = {
+            "smartmoney_db": MagicMock(
+                return_value=interface.VendorPayload(
+                    data="",
+                    status="valid_empty",
+                    as_of="2026-08-15",
+                    reason="complete event window contained no announcements",
+                )
+            )
+        }
+    elif scenario == "unsupported_hk_tool":
+        method = "get_company_announcements"
+        args = ("0700.HK", "2026-08-01", "2026-08-16")
+        vendors = {"smartmoney_db": MagicMock(return_value="must not run")}
+    elif scenario == "partial_evidence":
+        vendors = {
+            "smartmoney_db": MagicMock(
+                return_value=interface.VendorPayload(
+                    data="partial data", status="partial", reason="one page missing"
+                )
+            )
+        }
+    elif scenario == "stale_snapshot":
+        vendors = {
+            "smartmoney_db": MagicMock(
+                return_value=interface.VendorPayload(
+                    data="stale data", status="stale", as_of="2026-08-01"
+                )
+            )
+        }
+    elif scenario == "clean_no_data":
+        vendors = {
+            "smartmoney_db": MagicMock(
+                side_effect=NoMarketDataError("600519.SS", detail="no rows")
+            )
+        }
+    else:
+        method = "get_research_reports"
+        args = ("600519.SS",)
+        error = (
+            VendorNotConfiguredError("missing API key")
+            if scenario == "unconfigured_source"
+            else ConnectionError("provider offline")
+        )
+        vendors = {"smartmoney_db": MagicMock(side_effect=error)}
+
+    with patch.object(interface, "get_vendor", return_value=vendor_config), patch.dict(
+        interface.VENDOR_METHODS[method], vendors, clear=True
+    ):
+        result = interface.route_to_vendor_with_source(method, *args)
+
+    assert result.diagnostic is not None
+    assert result.diagnostic.status == expected_status
+    assert result.diagnostic.selected_vendor == expected_vendor
+    if scenario == "covered_empty_event_window":
+        assert result.data == ""
+        assert result.diagnostic.as_of == "2026-08-15"
+        assert result.diagnostic.reason == "complete event window contained no announcements"
+
+
+@pytest.mark.unit
+def test_legacy_empty_string_is_ok_not_valid_empty():
+    from tradingagents.dataflows import interface
+
+    fake_vendor = MagicMock(return_value="")
+    with patch.object(interface, "get_vendor", return_value="smartmoney_db"), patch.dict(
+        interface.VENDOR_METHODS["get_news"], {"smartmoney_db": fake_vendor}, clear=True
+    ):
+        result = interface.route_to_vendor_with_source(
+            "get_news", "600519.SS", "2026-08-01", "2026-08-16"
+        )
+
+    assert result.data == ""
+    assert result.diagnostic is not None
+    assert result.diagnostic.status == "ok"
+
+
+@pytest.mark.unit
+def test_company_announcements_hk_is_not_applicable_without_vendor_calls():
+    from tradingagents.dataflows import interface
+
+    fake_vendor = MagicMock(return_value="must not run")
+    build_chain = MagicMock(side_effect=AssertionError("chain must not be built"))
+    with patch.dict(
+        interface.VENDOR_METHODS["get_company_announcements"],
+        {"smartmoney_db": fake_vendor},
+        clear=True,
+    ), patch.object(interface, "_build_vendor_chain", build_chain):
+        result = interface.route_to_vendor_with_source(
+            "get_company_announcements", "0700.HK", "2026-08-01", "2026-08-16"
+        )
+
+    assert result.diagnostic is not None
+    assert result.diagnostic.status == "not_applicable"
+    assert result.diagnostic.attempted_vendors == ()
+    fake_vendor.assert_not_called()
+    build_chain.assert_not_called()
+
+
+@pytest.mark.unit
+def test_market_session_date_is_replaced_from_runtime_context():
+    from tradingagents.dataflows import interface
+
+    fake_vendor = MagicMock(return_value="breadth")
+    with use_runtime_data_context(_runtime_context()), patch.object(
+        interface, "get_vendor", return_value="smartmoney_db"
+    ), patch.dict(
+        interface.VENDOR_METHODS["get_limit_up_down"],
+        {"smartmoney_db": fake_vendor},
+        clear=True,
+    ):
+        result = interface.route_to_vendor_with_source(
+            "get_limit_up_down", "2026-08-16"
+        )
+
+    assert result.data == "breadth"
+    assert result.diagnostic is not None
+    assert result.diagnostic.as_of == "2026-08-14"
+    fake_vendor.assert_called_once_with("2026-08-14")
+
+
+@pytest.mark.unit
+def test_date_only_direct_call_without_context_preserves_legacy_date():
+    from tradingagents.dataflows import interface
+
+    fake_vendor = MagicMock(return_value="breadth")
+    with patch.object(interface, "get_vendor", return_value="smartmoney_db"), patch.dict(
+        interface.VENDOR_METHODS["get_limit_up_down"],
+        {"smartmoney_db": fake_vendor},
+        clear=True,
+    ):
+        result = interface.route_to_vendor("get_limit_up_down", "2026-08-16")
+
+    assert result == "breadth"
+    fake_vendor.assert_called_once_with("2026-08-16")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("original_end", "expected_end"),
+    [("2026-08-20", "2026-08-16"), ("2026-08-10", "2026-08-10")],
+)
+def test_calendar_window_preserves_start_and_only_caps_end(original_end, expected_end):
+    from tradingagents.dataflows import interface
+
+    fake_vendor = MagicMock(return_value="news")
+    with use_runtime_data_context(_runtime_context()), patch.object(
+        interface, "get_vendor", return_value="smartmoney_db"
+    ), patch.dict(
+        interface.VENDOR_METHODS["get_news"], {"smartmoney_db": fake_vendor}, clear=True
+    ):
+        result = interface.route_to_vendor(
+            "get_news", "600519.SS", "2026-07-01", original_end
+        )
+
+    assert result == "news"
+    fake_vendor.assert_called_once_with("600519.SS", "2026-07-01", expected_end)
+
+
+@pytest.mark.unit
+def test_latest_snapshot_does_not_invent_date_argument():
+    from tradingagents.dataflows import interface
+
+    fake_vendor = MagicMock(return_value="holdings")
+    with use_runtime_data_context(_runtime_context()), patch.object(
+        interface, "get_vendor", return_value="smartmoney_db"
+    ), patch.dict(
+        interface.VENDOR_METHODS["get_northbound_hold"],
+        {"smartmoney_db": fake_vendor},
+        clear=True,
+    ):
+        result = interface.route_to_vendor("get_northbound_hold", "600519.SS")
+
+    assert result == "holdings"
+    fake_vendor.assert_called_once_with("600519.SS")
+
+
+@pytest.mark.unit
+def test_registered_policy_filters_disallowed_vendors_from_chain():
+    from tradingagents.dataflows import interface
+
+    disallowed = MagicMock(return_value="wrong source")
+    allowed = MagicMock(return_value="news")
+    with use_runtime_data_context(_runtime_context()), patch.object(
+        interface, "get_vendor", return_value="fred,yfinance"
+    ), patch.dict(
+        interface.VENDOR_METHODS["get_news"],
+        {"fred": disallowed, "yfinance": allowed},
+        clear=True,
+    ):
+        result = interface.route_to_vendor_with_source(
+            "get_news", "600519.SS", "2026-08-01", "2026-08-16"
+        )
+
+    assert result.vendor == "yfinance"
+    disallowed.assert_not_called()
+    allowed.assert_called_once()
+
+
+@pytest.mark.unit
+def test_unregistered_method_explicitly_uses_legacy_policy():
+    from tradingagents.dataflows import data_policy, interface
+
+    fake_vendor = MagicMock(return_value="fundamentals")
+    with patch.object(
+        interface, "legacy_policy_for", wraps=data_policy.legacy_policy_for
+    ) as legacy_policy, patch.object(
+        interface, "get_vendor", return_value="yfinance"
+    ), patch.dict(
+        interface.VENDOR_METHODS["get_fundamentals"],
+        {"yfinance": fake_vendor},
+        clear=True,
+    ):
+        result = interface.route_to_vendor("get_fundamentals", "AAPL")
+
+    assert result == "fundamentals"
+    legacy_policy.assert_called_once_with("get_fundamentals")
+
+
+@pytest.mark.unit
+def test_unregistered_method_with_runtime_context_preserves_legacy_arguments():
+    from tradingagents.dataflows import data_policy, interface
+
+    fake_vendor = MagicMock(return_value="fundamentals")
+    with use_runtime_data_context(_runtime_context()), patch.object(
+        interface, "legacy_policy_for", wraps=data_policy.legacy_policy_for
+    ) as legacy_policy, patch.object(
+        interface, "get_vendor", return_value="yfinance"
+    ), patch.dict(
+        interface.VENDOR_METHODS["get_fundamentals"],
+        {"yfinance": fake_vendor},
+        clear=True,
+    ):
+        result = interface.route_to_vendor(
+            "get_fundamentals", "AAPL", "2026-08-20"
+        )
+
+    assert result == "fundamentals"
+    fake_vendor.assert_called_once_with("AAPL", "2026-08-20")
+    legacy_policy.assert_called_once_with("get_fundamentals")

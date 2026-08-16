@@ -651,6 +651,14 @@ class TestDisplayReadinessReport:
 class TestCheckBatchReadiness:
     """Test batch readiness pre-loader."""
 
+    @pytest.fixture(autouse=True)
+    def _isolate_ticker_resolution(self):
+        with patch(
+            "tradingagents.agents.utils.data_readiness.resolve_ticker",
+            side_effect=lambda ticker: {"ticker": ticker},
+        ):
+            yield
+
     @patch("tradingagents.agents.utils.data_readiness.check_data_readiness")
     def test_all_tickers_ready(self, mock_check):
         """All tickers have OHLCV data."""

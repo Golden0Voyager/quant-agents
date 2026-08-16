@@ -30,6 +30,7 @@ from cli.stats_handler import StatsCallbackHandler
 from tradingagents.default_config import default_config
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.llm_clients.pricing import get_usd_to_cny_rate
+from tradingagents.reporting import is_data_coverage_degraded
 
 console = Console()
 
@@ -492,7 +493,11 @@ class BatchRunner:
         coverage = final_state.get("data_coverage") or []
         degraded = [
             item for item in coverage
-            if (item.get("status") if isinstance(item, dict) else getattr(item, "status", "")) != "ok"
+            if is_data_coverage_degraded(
+                item.get("status")
+                if isinstance(item, dict)
+                else getattr(item, "status", "")
+            )
         ]
         categories = Counter(
             (item.get("category") if isinstance(item, dict) else getattr(item, "category", "unknown"))

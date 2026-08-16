@@ -5,7 +5,9 @@ import re as _re
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
+
+from tradingagents.market_context import Market, infer_market
 
 # Import from vendor-specific modules
 from .akshare_common import is_a_share_ticker
@@ -50,12 +52,20 @@ from .alpha_vantage import (
 
 # Configuration and routing logic
 from .config import get_config
+from .data_policy import (
+    ToolPolicy,
+    UnknownToolPolicyError,
+    legacy_policy_for,
+    normalized_dates,
+    policy_for,
+)
 from .errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
     VendorRateLimitError,
 )
 from .fred import get_macro_data as get_fred_macro_data
+from .runtime_context import RuntimeDataContext, get_runtime_data_context
 
 # Polymarket removed — prediction markets are US-only and inapplicable to A-shares.
 # The get_prediction_markets method degraded via OPTIONAL_CATEGORIES → DATA_UNAVAILABLE sentinel.
@@ -207,6 +217,24 @@ VENDOR_LIST = [
 OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets", "research_opinion"}
 
 
+VendorPayloadStatus = Literal["ok", "valid_empty", "partial", "stale"]
+_VENDOR_PAYLOAD_STATUSES = frozenset({"ok", "valid_empty", "partial", "stale"})
+
+
+@dataclass(frozen=True)
+class VendorPayload:
+    """Explicit data and coverage metadata returned by policy-aware adapters."""
+
+    data: Any
+    status: VendorPayloadStatus = "ok"
+    as_of: str | None = None
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in _VENDOR_PAYLOAD_STATUSES:
+            raise ValueError(f"Unsupported vendor payload status: {self.status}")
+
+
 @dataclass(frozen=True)
 class VendorRouteDiagnostic:
     """Explain how one logical data request was resolved."""
@@ -274,6 +302,12 @@ def _route_as_of(method: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> 
             return str(value)[:10]
     if len(args) > 1:
         return str(args[-1])[:10]
+    if args:
+        try:
+            if policy_for(method).date_policy == "market_session":
+                return str(args[0])[:10]
+        except UnknownToolPolicyError:
+            pass
     return None
 
 
@@ -288,6 +322,7 @@ def _route_result(
     reason: str,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
+    as_of: str | None = None,
 ) -> VendorRouteResult:
     diagnostic = VendorRouteDiagnostic(
         method=method,
@@ -295,13 +330,70 @@ def _route_result(
         status=status,
         attempted_vendors=tuple(attempted_vendors),
         selected_vendor=vendor,
-        as_of=_route_as_of(method, args, kwargs),
+        as_of=as_of if as_of is not None else _route_as_of(method, args, kwargs),
         reason=reason,
     )
     records = _ROUTE_DIAGNOSTICS.get()
     if records is not None:
         records.append(diagnostic)
     return VendorRouteResult(data, vendor, diagnostic)
+
+
+def _request_policy(method: str) -> tuple[ToolPolicy, bool]:
+    """Return a policy and whether it came from the strict registry."""
+    try:
+        return policy_for(method), True
+    except UnknownToolPolicyError:
+        return legacy_policy_for(method), False
+
+
+def _request_market(
+    policy: ToolPolicy,
+    registered: bool,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    context: RuntimeDataContext | None,
+) -> Market | None:
+    if context is not None:
+        return context.market
+    if not registered or policy.date_policy == "market_session":
+        return None
+    ticker = args[0] if args else kwargs.get("symbol") or kwargs.get("ticker")
+    return infer_market(ticker) if isinstance(ticker, str) else None
+
+
+def _rewrite_policy_dates(
+    method: str,
+    policy: ToolPolicy,
+    context: RuntimeDataContext | None,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    """Apply policy date anchors without widening the caller's evidence window."""
+    if context is None:
+        return args, kwargs
+
+    rewritten_args = list(args)
+    rewritten_kwargs = dict(kwargs)
+    market_as_of, evidence_window_end = normalized_dates(method, context)
+
+    if policy.date_policy == "market_session":
+        if rewritten_args:
+            rewritten_args[0] = market_as_of
+        else:
+            for key in ("trade_date", "curr_date", "as_of"):
+                if key in rewritten_kwargs:
+                    rewritten_kwargs[key] = market_as_of
+                    break
+    elif policy.date_policy == "calendar_window" and evidence_window_end is not None:
+        if len(rewritten_args) >= 3:
+            rewritten_args[2] = min(str(rewritten_args[2]), evidence_window_end)
+        elif "end_date" in rewritten_kwargs:
+            rewritten_kwargs["end_date"] = min(
+                str(rewritten_kwargs["end_date"]), evidence_window_end
+            )
+
+    return tuple(rewritten_args), rewritten_kwargs
 
 # Mapping of methods to their vendor-specific implementations
 # method -> vendor -> implementation (a callable, or a list of callables
@@ -621,8 +713,35 @@ def _format_optional_unavailable(
 def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteResult:
     """Route a call and retain the vendor that produced the returned payload."""
     category = get_category_for_method(method)
-    vendor_config = get_vendor(category, method)
     symbol = args[0] if args else kwargs.get("symbol") or kwargs.get("ticker")
+    policy, registered_policy = _request_policy(method)
+    runtime_context = get_runtime_data_context()
+    market = _request_market(policy, registered_policy, args, kwargs, runtime_context)
+
+    if (
+        registered_policy
+        and market is not None
+        and market not in policy.applicable_markets
+    ):
+        return _route_result(
+            data=(
+                f"DATA_NOT_APPLICABLE: '{method}' does not apply to market "
+                f"'{market}'. Proceed without it; do not fabricate values."
+            ),
+            vendor=None,
+            method=method,
+            category=category,
+            status="not_applicable",
+            attempted_vendors=[],
+            reason=f"policy excludes market {market}",
+            args=args,
+            kwargs=kwargs,
+        )
+
+    if registered_policy:
+        args, kwargs = _rewrite_policy_dates(
+            method, policy, runtime_context, args, kwargs
+        )
 
     if method not in VENDOR_METHODS:
         if category in OPTIONAL_CATEGORIES:
@@ -644,7 +763,27 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
             )
         raise ValueError(f"Method '{method}' not supported")
 
+    vendor_config = get_vendor(category, method)
     vendor_chain = _build_vendor_chain(method, vendor_config, symbol)
+    if registered_policy:
+        vendor_chain = [
+            vendor for vendor in vendor_chain if vendor in policy.allowed_vendors
+        ]
+        if not vendor_chain:
+            return _route_result(
+                data=(
+                    f"DATA_UNAVAILABLE: No policy-allowed vendor is configured for "
+                    f"'{method}'. Proceed without it; do not fabricate values."
+                ),
+                vendor=None,
+                method=method,
+                category=category,
+                status="unavailable",
+                attempted_vendors=[],
+                reason="configured vendor chain contains no policy-allowed source",
+                args=args,
+                kwargs=kwargs,
+            )
 
     last_no_data: NoMarketDataError | None = None
     first_error: Exception | None = None
@@ -688,6 +827,7 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
         vendor_chain = filtered
 
     attempted_vendors: list[str] = []
+    primary_vendor = vendor_chain[0]
     circuit_breakers = _ROUTE_CIRCUIT_BREAKERS.get()
     for vendor in vendor_chain:
         if circuit_breakers is not None and (vendor, method) in circuit_breakers:
@@ -707,16 +847,18 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
 
         try:
             result = impl_func(*args, **kwargs)
+            payload = result if isinstance(result, VendorPayload) else None
+            data = payload.data if payload is not None else result
 
             # Safety net: legacy prose failure strings should not be returned as
             # successful data. Treat them as no-data and keep falling back.
-            if isinstance(result, str) and _is_failure_sentinel(result):
+            if isinstance(data, str) and _is_failure_sentinel(data):
                 logger.warning(
                     "Vendor %r returned a failure sentinel for %s; trying next vendor.",
                     vendor, method,
                 )
                 last_no_data = NoMarketDataError(
-                    symbol or method, detail=result[:200]
+                    symbol or method, detail=data[:200]
                 )
                 continue
 
@@ -734,7 +876,8 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
             if (
                 method == "get_research_reports"
                 and vendor == "smartmoney_db"
-                and _is_stale_research_data(result)
+                and isinstance(data, str)
+                and _is_stale_research_data(data)
             ):
                 logger.info(
                     "Stale research reports from smartmoney_db for '%s'; "
@@ -743,18 +886,24 @@ def _route_to_vendor_with_source(method: str, *args, **kwargs) -> VendorRouteRes
                 )
                 continue
             reason = "selected primary vendor"
-            if len(attempted_vendors) > 1:
+            status = payload.status if payload is not None else "ok"
+            if vendor != primary_vendor and status == "ok":
+                status = "ok_fallback"
+            if vendor != primary_vendor:
                 reason = f"selected after fallback from {attempted_vendors[:-1]}"
+            if payload is not None and payload.reason is not None:
+                reason = payload.reason
             return _route_result(
-                data=result,
+                data=data,
                 vendor=vendor,
                 method=method,
                 category=category,
-                status="ok",
+                status=status,
                 attempted_vendors=attempted_vendors,
                 reason=reason,
                 args=args,
                 kwargs=kwargs,
+                as_of=payload.as_of if payload is not None else None,
             )
         except VendorRateLimitError as exc:
             logger.warning("Vendor %r rate-limited for %s; trying next vendor.", vendor, method)

@@ -116,6 +116,45 @@ class TestBatchRunnerFallbackDetection:
 
 @pytest.mark.unit
 class TestBatchRunnerSummaryOutput:
+    def test_neutral_coverage_statuses_are_not_counted_as_degraded(self, tmp_path):
+        runner = BatchRunner(
+            tickers=["AAPL"],
+            profile_config={"llm_provider": "openai", "output_language": "English"},
+            output_dir=tmp_path / "reports" / "batch_20260101_000000",
+            workers=1,
+        )
+        neutral_statuses = ["ok", "ok_fallback", "valid_empty", "not_applicable"]
+        degraded_statuses = ["partial", "stale", "no_data", "unavailable", "failed"]
+        runner._extract_summary(
+            "AAPL",
+            {
+                "final_trade_decision": "**Rating**: Hold\n",
+                "trader_investment_plan": "",
+                "data_coverage": [
+                    {
+                        "method": f"neutral_{status}",
+                        "category": "news_data",
+                        "status": status,
+                    }
+                    for status in neutral_statuses
+                ]
+                + [
+                    {
+                        "method": f"degraded_{status}",
+                        "category": "governance_risk",
+                        "status": status,
+                    }
+                    for status in degraded_statuses
+                ],
+            },
+        )
+
+        assert runner.summaries["AAPL"]["coverage_total"] == 9
+        assert runner.summaries["AAPL"]["coverage_degraded"] == 5
+        assert runner.summaries["AAPL"]["coverage_top_missing"] == [
+            "governance_risk"
+        ]
+
     def test_generate_summary_includes_data_coverage_degradation(self, tmp_path):
         runner = BatchRunner(
             tickers=["AAPL"],

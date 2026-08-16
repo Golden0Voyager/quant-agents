@@ -1070,20 +1070,22 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
         max_debate = config.get("max_debate_rounds", 1)
         max_risk = config.get("max_risk_discuss_rounds", 1)
         try:
-            with use_runtime_data_context(runtime_context):
-                with collect_route_diagnostics() as route_diagnostics:
-                    for chunk in graph.graph.stream(init_agent_state, **args):
-                        sync_analyst_tracker_from_chunk(analyst_wall_time_tracker, chunk)
+            with (
+                use_runtime_data_context(runtime_context),
+                collect_route_diagnostics() as route_diagnostics,
+            ):
+                for chunk in graph.graph.stream(init_agent_state, **args):
+                    sync_analyst_tracker_from_chunk(analyst_wall_time_tracker, chunk)
 
-                        processed_ids = process_stream_chunk(
-                            dashboard,
-                            chunk,
-                            max_debate_rounds=max_debate,
-                            max_risk_rounds=max_risk,
-                            processed_ids=processed_ids,
-                        )
-                        update_dashboard_display(layout, dashboard, ticker=ticker, stats_handler=stats_handler, start_time=start_time)
-                        trace.append(chunk)
+                    processed_ids = process_stream_chunk(
+                        dashboard,
+                        chunk,
+                        max_debate_rounds=max_debate,
+                        max_risk_rounds=max_risk,
+                        processed_ids=processed_ids,
+                    )
+                    update_dashboard_display(layout, dashboard, ticker=ticker, stats_handler=stats_handler, start_time=start_time)
+                    trace.append(chunk)
 
         except Exception as exc:
             from openai import APIConnectionError, APITimeoutError, RateLimitError
