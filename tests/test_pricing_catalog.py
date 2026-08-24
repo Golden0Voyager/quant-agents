@@ -101,11 +101,22 @@ def test_deepseek_pricing_matches_published_rates():
 # ---- Provider-agnostic lookup (used by callback) -------------------------
 
 
-def test_get_price_for_model_finds_known_model():
-    """Spot-check the local catalog for two well-known rates.
-    Kimi K2.6 cache-miss rate is $0.95/$4.00 (verified 2026-07).
-    DeepSeek V4-Flash: LiteLLM catalog has $0.14/$0.28; local yaml has
-    ¥1/¥2 converted to USD. ``get_price_for_model`` checks LiteLLM first."""
+def _pin_litellm_overlay(monkeypatch, overlay: dict[str, tuple[float, float]]):
+    """Pin the LiteLLM overlay to a fixed fixture.
+
+    The real overlay is fetched live from GitHub (24h cache), so tests that
+    go through ``get_price_for_model`` must not depend on whatever the
+    upstream catalog happens to say today.
+    """
+    monkeypatch.setattr(pricing, "_load_litellm_overlay", lambda: overlay)
+
+
+def test_get_price_for_model_finds_known_model(monkeypatch):
+    """Spot-check two well-known rates through the provider-agnostic lookup.
+    Kimi K2.6 cache-miss rate is $0.95/$4.00 from the local yaml (verified
+    2026-07); DeepSeek V4-Flash comes from the pinned LiteLLM overlay, which
+    is checked before the yaml."""
+    _pin_litellm_overlay(monkeypatch, {"deepseek-v4-flash": (0.14, 0.28)})
     assert get_price_for_model("kimi-k2.6") == (0.95, 4.00)
     assert get_price_for_model("deepseek-v4-flash") == (0.14, 0.28)
 
@@ -115,12 +126,12 @@ def test_get_price_for_model_returns_none_for_unknown():
     assert get_price_for_model("custom") is None
 
 
-def test_get_price_for_model_uses_first_match_for_ambiguous_models():
+def test_get_price_for_model_uses_first_match_for_ambiguous_models(monkeypatch):
     """``deepseek-v4-flash`` appears under both deepseek and sensenova.
-    LiteLLM catalog is checked first and wins — pin the expected value
-    so a re-order accidentally doesn't change the displayed cost."""
-    # LiteLLM catalog has $0.14/$0.28 for deepseek-v4-flash
-    assert get_price_for_model("deepseek-v4-flash") == (0.14, 0.28)
+    LiteLLM catalog is checked first and wins — pin a sentinel overlay rate
+    distinct from the local yaml so a lookup re-order cannot pass silently."""
+    _pin_litellm_overlay(monkeypatch, {"deepseek-v4-flash": (1.11, 2.22)})
+    assert get_price_for_model("deepseek-v4-flash") == (1.11, 2.22)
 
 
 def test_get_price_returns_none_for_unknown_provider():
@@ -192,8 +203,9 @@ def _make_chat_result(model_name: str, in_tokens: int, out_tokens: int) -> LLMRe
     return LLMResult(generations=[[ChatGeneration(message=msg)]])
 
 
-def test_callback_prices_catalogue_model():
+def test_callback_prices_catalogue_model(monkeypatch):
     """A 1M-token call against a catalog model must use the catalog rate."""
+    _pin_litellm_overlay(monkeypatch, {"deepseek-v4-flash": (0.14, 0.28)})
     handler = StatsCallbackHandler()
     handler.on_chat_model_start(
         serialized={"kwargs": {"model_name": "deepseek-v4-flash"}},
@@ -206,10 +218,11 @@ def test_callback_prices_catalogue_model():
     assert stats["cost_by_model"] == {"deepseek-v4-flash": pytest.approx(0.14)}
 
 
-def test_callback_prices_multiple_models_independently():
+def test_callback_prices_multiple_models_independently(monkeypatch):
     """Mixed-provider run: each model gets its own bucket, the rolled-up
     ``cost`` is the sum. This is the headline improvement over the
     pre-catalog env-var-only behavior."""
+    _pin_litellm_overlay(monkeypatch, {"deepseek-v4-flash": (0.14, 0.28)})
     handler = StatsCallbackHandler()
     # DeepSeek V4-Flash: 1M in, 0 out → $0.14
     handler.on_chat_model_start(
