@@ -1089,12 +1089,16 @@ class TestConcurrentMemoryLog:
             log.store_decision(ticker, "2026-01-10", DECISION_BUY)
 
         def update_worker(ticker):
-            # Small retry window so updates that arrive before the store can retry
-            for _ in range(10):
+            # Retry until the store for this ticker has landed AND the update
+            # resolved it. An empty lookup (store not landed yet) must keep
+            # retrying — ``any([])`` is False, so checking only ``pending``
+            # would break immediately and leave the entry pending forever.
+            import time
+            for _ in range(20):
                 log.update_with_outcome(ticker, "2026-01-10", 0.05, 0.02, 5, "Good call.")
-                if not any(e["pending"] for e in log.load_entries() if e["ticker"] == ticker):
+                mine = [e for e in log.load_entries() if e["ticker"] == ticker]
+                if mine and not any(e["pending"] for e in mine):
                     break
-                import time
                 time.sleep(0.01)
 
         store_threads = [threading.Thread(target=store_worker, args=(t,)) for t in tickers]
