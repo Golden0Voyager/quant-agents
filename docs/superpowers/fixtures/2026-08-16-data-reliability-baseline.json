@@ -1,0 +1,26 @@
+{
+  "source_directory": "reports/20260816_batch_my",
+  "selection_reason": "The 18 complete reports present when the original reliability audit was performed",
+  "generated_at_cutoff": "2026-08-16 14:33:10",
+  "ticker_count": 18,
+  "tickers": [
+    "300562.SZ",
+    "002241.SZ",
+    "300002.SZ",
+    "002594.SZ",
+    "605299.SS",
+    "300760.SZ",
+    "300175.SZ",
+    "688239.SS",
+    "300408.SZ",
+    "1810.HK",
+    "002192.SZ",
+    "301031.SZ",
+    "000603.SZ",
+    "000975.SZ",
+    "002545.SZ",
+    "600901.SS",
+    "600050.SS",
+    "002179.SZ"
+  ]
+}
