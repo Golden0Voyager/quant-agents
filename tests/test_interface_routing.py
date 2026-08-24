@@ -1272,14 +1272,16 @@ def test_unregistered_method_explicitly_uses_legacy_policy():
     ) as legacy_policy, patch.object(
         interface, "get_vendor", return_value="yfinance"
     ), patch.dict(
-        interface.VENDOR_METHODS["get_fundamentals"],
-        {"yfinance": fake_vendor},
-        clear=True,
+        interface.TOOLS_CATEGORIES,
+        {"future_category": {"description": "x", "tools": ["get_future_unregistered"]}},
+    ), patch.dict(
+        interface.VENDOR_METHODS,
+        {"get_future_unregistered": {"yfinance": fake_vendor}},
     ):
-        result = interface.route_to_vendor("get_fundamentals", "AAPL")
+        result = interface.route_to_vendor("get_future_unregistered", "AAPL")
 
     assert result == "fundamentals"
-    legacy_policy.assert_called_once_with("get_fundamentals")
+    legacy_policy.assert_called_once_with("get_future_unregistered")
 
 
 @pytest.mark.unit
@@ -1292,17 +1294,19 @@ def test_unregistered_method_with_runtime_context_preserves_legacy_arguments():
     ) as legacy_policy, patch.object(
         interface, "get_vendor", return_value="yfinance"
     ), patch.dict(
-        interface.VENDOR_METHODS["get_fundamentals"],
-        {"yfinance": fake_vendor},
-        clear=True,
+        interface.TOOLS_CATEGORIES,
+        {"future_category": {"description": "x", "tools": ["get_future_unregistered"]}},
+    ), patch.dict(
+        interface.VENDOR_METHODS,
+        {"get_future_unregistered": {"yfinance": fake_vendor}},
     ):
         result = interface.route_to_vendor(
-            "get_fundamentals", "AAPL", "2026-08-20"
+            "get_future_unregistered", "AAPL", "2026-08-20"
         )
 
     assert result == "fundamentals"
     fake_vendor.assert_called_once_with("AAPL", "2026-08-20")
-    legacy_policy.assert_called_once_with("get_fundamentals")
+    legacy_policy.assert_called_once_with("get_future_unregistered")
 
 
 @pytest.mark.unit
@@ -1657,7 +1661,9 @@ def test_runtime_memo_normalizes_indicator_residual_parameters(keyword_first):
         results = [call() for call in ordered_calls]
 
     assert results == ["indicator", "indicator"]
-    assert calls == [("600519.SS", "rsi_14", "2026-08-16", 30)]
+    # latest_snapshot policy anchors curr_date to the last market session
+    # (2026-08-16 is a Sunday; market_as_of is Friday 2026-08-14).
+    assert calls == [("600519.SS", "rsi_14", "2026-08-14", 30)]
     assert len(records) == 1
     assert records[0].call_count == 2
 
@@ -1705,7 +1711,9 @@ def test_indicator_non_none_default_is_invoked_and_memoized(omitted_first):
         results = [call() for call in ordered_calls]
 
     assert results == ["indicator", "indicator"]
-    assert calls == [("600519.SS", "rsi_14", "2026-08-16", 30)]
+    # curr_date is anchored to the last market session (2026-08-14) by the
+    # latest_snapshot policy; both call shapes converge on the same request.
+    assert calls == [("600519.SS", "rsi_14", "2026-08-14", 30)]
     assert len(records) == 1
     assert records[0].call_count == 2
 

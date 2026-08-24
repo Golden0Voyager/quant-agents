@@ -98,6 +98,83 @@ from tradingagents.market_context import AnalysisDates
                 allowed_vendors=("smartmoney_db", "akshare", "tushare"),
             ),
         ),
+        *[
+            (
+                method,
+                ToolPolicy(
+                    applicable_markets=frozenset(
+                        {"XSHG", "XHKG", "XNYS", "CRYPTO", "UNKNOWN"}
+                    ),
+                    date_policy="latest_snapshot",
+                    empty_semantics="coverage_gap",
+                    impact="high",
+                    allowed_vendors=(
+                        "smartmoney_db",
+                        "alpha_vantage",
+                        "yfinance",
+                        "akshare",
+                    ),
+                ),
+            )
+            for method in (
+                "get_fundamentals",
+                "get_balance_sheet",
+                "get_cashflow",
+                "get_income_statement",
+                "get_indicators",
+            )
+        ],
+        (
+            "get_global_news",
+            ToolPolicy(
+                applicable_markets=frozenset(
+                    {"XSHG", "XHKG", "XNYS", "CRYPTO", "UNKNOWN"}
+                ),
+                date_policy="calendar_window",
+                empty_semantics="coverage_gap",
+                impact="high",
+                allowed_vendors=("yfinance", "alpha_vantage"),
+            ),
+        ),
+        (
+            "get_insider_transactions",
+            ToolPolicy(
+                applicable_markets=frozenset(
+                    {"XSHG", "XHKG", "XNYS", "CRYPTO", "UNKNOWN"}
+                ),
+                date_policy="latest_snapshot",
+                empty_semantics="confirmed_empty",
+                impact="medium",
+                allowed_vendors=(
+                    "smartmoney_db",
+                    "alpha_vantage",
+                    "yfinance",
+                    "akshare",
+                ),
+            ),
+        ),
+        (
+            "get_institutional_holdings",
+            ToolPolicy(
+                applicable_markets=frozenset({"XSHG"}),
+                date_policy="latest_snapshot",
+                empty_semantics="coverage_gap",
+                impact="medium",
+                allowed_vendors=("smartmoney_db", "akshare"),
+            ),
+        ),
+        (
+            "get_macro_indicators",
+            ToolPolicy(
+                applicable_markets=frozenset(
+                    {"XSHG", "XHKG", "XNYS", "CRYPTO", "UNKNOWN"}
+                ),
+                date_policy="latest_snapshot",
+                empty_semantics="coverage_gap",
+                impact="medium",
+                allowed_vendors=("smartmoney_db", "akshare", "fred"),
+            ),
+        ),
     ],
 )
 def test_policy_for_returns_the_centralized_immutable_policy(method, expected):
@@ -112,6 +189,21 @@ def test_policy_for_returns_the_centralized_immutable_policy(method, expected):
 def test_policy_for_unknown_method_is_strict():
     with pytest.raises(UnknownToolPolicyError, match="missing_tool"):
         policy_for("missing_tool")
+
+
+@pytest.mark.unit
+def test_every_routed_method_has_a_registered_policy_with_implemented_vendors():
+    """Guard against registry drift: every routed method must be registered,
+    and a policy may only name vendors that actually implement the method."""
+    from tradingagents.dataflows.interface import VENDOR_METHODS
+
+    for method, vendors in VENDOR_METHODS.items():
+        policy = policy_for(method)  # raises UnknownToolPolicyError if missing
+        unimplemented = set(policy.allowed_vendors) - set(vendors)
+        assert not unimplemented, (
+            f"{method}: policy allows vendors with no implementation: "
+            f"{sorted(unimplemented)}"
+        )
 
 
 @pytest.mark.unit
