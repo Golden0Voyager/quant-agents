@@ -9,6 +9,7 @@ description = "TradingAgents: Multi-Agents LLM Financial Trading Framework"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "exchange-calendars>=4.11",
     "langchain-core>=0.3.81",
     "pydantic>=2.0,<2.11",  # pydantic 2.11+ incompatible with langchain-core's AIMessage discriminated union
     "langchain-anthropic>=1.4.6",  # security floor: GHSA path traversal fixed in 1.4.6

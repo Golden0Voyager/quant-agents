@@ -47,11 +47,9 @@ from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
-from tradingagents.dataflows.eastmoney_sentiment import (
-    fetch_eastmoney_guba_sentiment,
-    fetch_eastmoney_hot_keywords,
-    fetch_eastmoney_hot_rank,
-)
+from tradingagents.dataflows.data_policy import is_applicable
+from tradingagents.dataflows.interface import route_to_vendor
+from tradingagents.market_context import Market, infer_market
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +74,18 @@ def _safe_prefetch(label: str, fetch: Callable[[], str]) -> str:
     )
 
 
+def _prefetch_for_market(
+    method: str, market: Market, label: str, fetch: Callable[[], str]
+) -> str:
+    """Run a manual prefetch only when the central policy permits it."""
+    if not is_applicable(method, market):
+        return (
+            f"DATA_NOT_APPLICABLE: {label} does not apply to market {market}. "
+            "Proceed without it; do not fabricate values."
+        )
+    return _safe_prefetch(label, fetch)
+
+
 def create_sentiment_analyst(llm):
     """Create a sentiment analyst node for the trading graph.
 
@@ -92,22 +102,32 @@ def create_sentiment_analyst(llm):
         end_date = state["trade_date"]
         start_date = _seven_days_back(end_date)
         instrument_context = get_instrument_context_from_state(state)
+        market = state.get("market") or infer_market(ticker)
 
         # Treat all three sources as optional enrichment. Vendor/network
         # failures become explicit prompt blocks instead of aborting the node.
-        news_block = _safe_prefetch(
+        news_block = _prefetch_for_market(
+            "get_news",
+            market,
             "news", lambda: get_news.func(ticker, start_date, end_date)
         )
-        hot_rank_block = _safe_prefetch(
-            "Eastmoney hot rank", lambda: fetch_eastmoney_hot_rank(ticker)
+        hot_rank_block = _prefetch_for_market(
+            "fetch_eastmoney_hot_rank",
+            market,
+            "Eastmoney hot rank",
+            lambda: route_to_vendor("fetch_eastmoney_hot_rank", ticker),
         )
-        guba_block = _safe_prefetch(
+        guba_block = _prefetch_for_market(
+            "fetch_eastmoney_guba_sentiment",
+            market,
             "Eastmoney Guba sentiment",
-            lambda: fetch_eastmoney_guba_sentiment(ticker),
+            lambda: route_to_vendor("fetch_eastmoney_guba_sentiment", ticker),
         )
-        hot_keywords_block = _safe_prefetch(
+        hot_keywords_block = _prefetch_for_market(
+            "fetch_eastmoney_hot_keywords",
+            market,
             "Eastmoney market hot keywords",
-            lambda: fetch_eastmoney_hot_keywords(),
+            lambda: route_to_vendor("fetch_eastmoney_hot_keywords"),
         )
 
         system_message = _build_system_message(

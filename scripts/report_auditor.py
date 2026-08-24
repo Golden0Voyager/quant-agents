@@ -16,10 +16,27 @@ import argparse
 import json
 import os
 import re
+import sys
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
+
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from tradingagents.reporting import (
+    DATA_RELIABILITY_KEYS,
+    aggregate_data_reliability,
+)
+
+
+def _nonnegative_int(value) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
 
 # =============================================================================
 # 数据模型
@@ -111,6 +128,7 @@ class AuditResult:
     files_audited: int = 0
     issues: list[AuditIssue] = field(default_factory=list)
     metrics: dict[str, FinancialMetrics] = field(default_factory=dict)
+    data_reliability: dict[str, int] = field(default_factory=dict)
 
     def critical_count(self) -> int:
         return sum(1 for i in self.issues if i.severity == "CRITICAL")
@@ -821,6 +839,70 @@ class ReportAuditor:
         self.batch_dir = Path(batch_dir)
         self.extractor = MetricsExtractor()
         self.results: dict[str, AuditResult] = {}
+        self._data_reliability = self._load_data_reliability()
+
+    def _load_data_reliability(self) -> dict[str, dict[str, int]]:
+        summary_path = self.batch_dir / "batch_summary.json"
+        if not summary_path.exists():
+            return {}
+        try:
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if isinstance(payload, dict):
+            rows = payload.get("rows")
+        elif isinstance(payload, list):
+            rows = payload
+        else:
+            return {}
+        if not isinstance(rows, list):
+            return {}
+        reliability_by_ticker = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            raw_ticker = str(row.get("ticker") or "")
+            ticker = _parse_ticker_dir_name(raw_ticker) or raw_ticker
+            reliability = row.get("data_reliability")
+            if ticker and isinstance(reliability, dict):
+                normalized = {
+                    key: _nonnegative_int(reliability.get(key))
+                    for key in DATA_RELIABILITY_KEYS
+                }
+                normalized["logical_requests"] = sum(normalized.values())
+                normalized["applicable_requests"] = (
+                    normalized["logical_requests"] - normalized["not_applicable"]
+                )
+                normalized["call_count"] = max(
+                    normalized["logical_requests"],
+                    _nonnegative_int(reliability.get("call_count")),
+                )
+                reliability_by_ticker[ticker] = normalized
+        return reliability_by_ticker
+
+    def _apply_data_reliability(self, result: AuditResult) -> None:
+        reliability = self._data_reliability.get(result.ticker)
+        if not reliability:
+            return
+        result.data_reliability = dict(reliability)
+        if reliability["missing"]:
+            result.issues.append(AuditIssue(
+                severity="WARNING",
+                rule_id="DATA-RELIABILITY-MISSING",
+                message=f"{reliability['missing']} 个适用逻辑请求缺少有效数据",
+                ticker=result.ticker,
+                file_path=str(self.batch_dir / "batch_summary.json"),
+                suggestion="检查缺失请求的数据源、策略适用性和 fallback 结果",
+            ))
+        if reliability["partial"]:
+            result.issues.append(AuditIssue(
+                severity="INFO",
+                rule_id="DATA-RELIABILITY-PARTIAL",
+                message=f"{reliability['partial']} 个适用逻辑请求仅部分可用或已过期",
+                ticker=result.ticker,
+                file_path=str(self.batch_dir / "batch_summary.json"),
+                suggestion="在投资结论中保留对应数据限制和较低置信度",
+            ))
 
     def audit(
         self,
@@ -862,6 +944,7 @@ class ReportAuditor:
 
         for ticker in sorted(ticker_dirs):
             result = self._audit_ticker(ticker, ticker_dirs[ticker])
+            self._apply_data_reliability(result)
             if snapshot_fn is not None:
                 self._apply_realtime_validation(ticker, result, snapshot_fn)
             self.results[ticker] = result
@@ -968,6 +1051,7 @@ class ReportAuditor:
                     "critical": r.critical_count(),
                     "errors": r.error_count(),
                     "warnings": r.warning_count(),
+                    "data_reliability": r.data_reliability,
                     "issues": [i.to_dict() for i in r.issues],
                 }
                 for ticker, r in self.results.items()
@@ -990,6 +1074,10 @@ class ReportAuditor:
         total_critical = sum(r.critical_count() for r in self.results.values())
         total_errors = sum(r.error_count() for r in self.results.values())
         total_warnings = sum(r.warning_count() for r in self.results.values())
+        data_reliability = aggregate_data_reliability([])
+        for result in self.results.values():
+            for key in data_reliability:
+                data_reliability[key] += result.data_reliability.get(key, 0)
 
         return {
             "total_tickers": len(self.results),
@@ -998,6 +1086,7 @@ class ReportAuditor:
             "total_errors": total_errors,
             "total_warnings": total_warnings,
             "health_score": max(0, 100 - total_critical * 10 - total_errors * 5 - total_warnings * 1),
+            "data_reliability": data_reliability,
         }
 
     def _generate_markdown_report(self) -> str:
@@ -1020,6 +1109,17 @@ class ReportAuditor:
             f"| ERROR | {summary['total_errors']} |",
             f"| WARNING | {summary['total_warnings']} |",
             f"| 健康评分 | {summary['health_score']}/100 |",
+            "",
+            "---",
+            "",
+            "## 数据可靠性",
+            "",
+            "| 指标 | 数量 |",
+            "|------|------|",
+            *[
+                f"| {key} | {summary['data_reliability'][key]} |"
+                for key in (*DATA_RELIABILITY_KEYS, "logical_requests", "applicable_requests", "call_count")
+            ],
             "",
             "---",
             "",
@@ -1062,6 +1162,16 @@ class ReportAuditor:
                 "",
             ])
             for ticker, issue in warning_issues:
+                lines.extend(self._format_issue(ticker, issue))
+
+        # INFO 发现
+        info_issues = [(t, i) for t, i in all_issues if i.severity == "INFO"]
+        if info_issues:
+            lines.extend([
+                "## INFO 发现（数据限制说明）",
+                "",
+            ])
+            for ticker, issue in info_issues:
                 lines.extend(self._format_issue(ticker, issue))
 
         # 各股票详细结果

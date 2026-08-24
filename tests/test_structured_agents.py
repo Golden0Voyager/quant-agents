@@ -464,6 +464,7 @@ def _make_sentiment_state():
         "company_of_interest": "NVDA",
         "trade_date": "2026-01-15",
         "asset_type": "stock",
+        "market": "XNYS",
         "messages": [],
     }
 
@@ -493,12 +494,12 @@ class TestSentimentAnalystAgent:
         from tradingagents.agents.analysts import sentiment_analyst as module
 
         monkeypatch.setattr(module.get_news, "func", lambda *args: "NEWS_DATA")
-        monkeypatch.setattr(
-            module, "fetch_eastmoney_hot_rank", lambda ticker: "HOT_RANK_DATA"
-        )
-        monkeypatch.setattr(
-            module, "fetch_eastmoney_guba_sentiment", lambda ticker: "GUBA_DATA"
-        )
+        results = {
+            "fetch_eastmoney_hot_rank": "HOT_RANK_DATA",
+            "fetch_eastmoney_guba_sentiment": "GUBA_DATA",
+            "fetch_eastmoney_hot_keywords": "HOT_KEYWORDS_DATA",
+        }
+        monkeypatch.setattr(module, "route_to_vendor", lambda method, *args: results[method])
 
     def test_structured_path_produces_rendered_markdown(self):
         captured = {}
@@ -575,6 +576,24 @@ class TestSentimentAnalystAgent:
         assert "sentiment_report" in result
         assert "DATA_UNAVAILABLE" in "\n".join(str(message) for message in captured["prompt"])
 
+    def test_hk_prefetch_skips_every_a_share_only_sentiment_source(self, monkeypatch):
+        from tradingagents.agents.analysts import sentiment_analyst as module
+
+        news = MagicMock(return_value="HK_NEWS")
+        enrichment_route = MagicMock(return_value="SHOULD_NOT_RUN")
+        monkeypatch.setattr(module.get_news, "func", news)
+        monkeypatch.setattr(module, "route_to_vendor", enrichment_route)
+        state = {
+            **_make_sentiment_state(),
+            "company_of_interest": "1810.HK",
+            "market": "XHKG",
+        }
+
+        create_sentiment_analyst(_structured_sentiment_llm({}))(state)
+
+        news.assert_called_once()
+        enrichment_route.assert_not_called()
+
 
 @pytest.mark.unit
 class TestSocialMediaAnalystShim:
@@ -588,12 +607,12 @@ class TestSocialMediaAnalystShim:
         from tradingagents.agents.analysts import sentiment_analyst as module
 
         monkeypatch.setattr(module.get_news, "func", lambda *args: "NEWS_DATA")
-        monkeypatch.setattr(
-            module, "fetch_eastmoney_hot_rank", lambda ticker: "HOT_RANK_DATA"
-        )
-        monkeypatch.setattr(
-            module, "fetch_eastmoney_guba_sentiment", lambda ticker: "GUBA_DATA"
-        )
+        results = {
+            "fetch_eastmoney_hot_rank": "HOT_RANK_DATA",
+            "fetch_eastmoney_guba_sentiment": "GUBA_DATA",
+            "fetch_eastmoney_hot_keywords": "HOT_KEYWORDS_DATA",
+        }
+        monkeypatch.setattr(module, "route_to_vendor", lambda method, *args: results[method])
 
     def test_returns_callable(self):
         from tradingagents.agents.analysts.sentiment_analyst import create_social_media_analyst

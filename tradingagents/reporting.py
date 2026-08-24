@@ -10,11 +10,71 @@ from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 
+NON_DEGRADED_COVERAGE_STATUSES = frozenset(
+    {"ok", "ok_fallback", "valid_empty", "not_applicable"}
+)
+DEGRADED_COVERAGE_STATUSES = frozenset(
+    {"partial", "stale", "no_data", "unavailable", "failed"}
+)
+DATA_RELIABILITY_KEYS = (
+    "confirmed",
+    "fallback_success",
+    "valid_empty",
+    "not_applicable",
+    "partial",
+    "missing",
+)
+_RELIABILITY_STATUS_BUCKETS = {
+    "ok": "confirmed",
+    "ok_fallback": "fallback_success",
+    "valid_empty": "valid_empty",
+    "not_applicable": "not_applicable",
+    "partial": "partial",
+    "stale": "partial",
+    "no_data": "missing",
+    "unavailable": "missing",
+    "failed": "missing",
+}
+
+
+def is_data_coverage_degraded(status: str) -> bool:
+    """Return whether a route status represents degraded evidence."""
+    return status in DEGRADED_COVERAGE_STATUSES
+
 
 def _coverage_value(item, key: str, default=""):
     if isinstance(item, Mapping):
         return item.get(key, default)
     return getattr(item, key, default)
+
+
+def aggregate_data_reliability(data_coverage) -> dict[str, int]:
+    """Aggregate normalized logical route diagnostics into stable counts.
+
+    The route collector has already collapsed equal normalized requests into
+    one row and records repeated physical observations in ``call_count``.
+    Therefore each input row contributes one logical request while call counts
+    remain available for duplicate-call auditing.
+    """
+    result = dict.fromkeys(DATA_RELIABILITY_KEYS, 0)
+    result.update(
+        logical_requests=0,
+        applicable_requests=0,
+        call_count=0,
+    )
+    for item in data_coverage or ():
+        status = str(_coverage_value(item, "status", "")).strip().lower()
+        bucket = _RELIABILITY_STATUS_BUCKETS.get(status, "missing")
+        result[bucket] += 1
+        result["logical_requests"] += 1
+        if status != "not_applicable":
+            result["applicable_requests"] += 1
+        try:
+            call_count = int(_coverage_value(item, "call_count", 1))
+        except (TypeError, ValueError):
+            call_count = 1
+        result["call_count"] += max(1, call_count)
+    return result
 
 
 def _coverage_impact(category: str, method: str) -> str:
@@ -32,6 +92,19 @@ def render_data_coverage_section(data_coverage) -> str:
         lines.append("本次运行未记录数据源降级或无数据项；具体覆盖范围仍以各分析师原始数据为准。")
         return "\n".join(lines)
 
+    reliability = aggregate_data_reliability(data_coverage)
+    lines.extend(
+        [
+            (
+                f"逻辑请求 {reliability['logical_requests']} 项（适用 "
+                f"{reliability['applicable_requests']} 项），实际调用 "
+                f"{reliability['call_count']} 次；缺失 {reliability['missing']} 项，"
+                f"部分可用 {reliability['partial']} 项。"
+            ),
+            "",
+        ]
+    )
+
     lines.extend(
         [
             "| 数据项 | 状态 | 来源 | 截止日期 | 尝试数据源 | 原因 | 影响 |",
@@ -40,6 +113,10 @@ def render_data_coverage_section(data_coverage) -> str:
     )
     status_labels = {
         "ok": "可用",
+        "ok_fallback": "回退可用",
+        "valid_empty": "确认无事件",
+        "not_applicable": "不适用",
+        "partial": "部分可用",
         "no_data": "无数据",
         "failed": "失败",
         "stale": "过期",

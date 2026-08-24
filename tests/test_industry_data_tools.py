@@ -88,20 +88,23 @@ class TestGetConceptBoard:
         from tradingagents.agents.utils.industry_data_tools import get_concept_board
 
         with patch(
-            "tradingagents.dataflows.smartmoney_vendor.get_concept_board",
+            "tradingagents.agents.utils.industry_data_tools.route_to_vendor",
             return_value="concept data: AI, cloud computing",
         ) as mock_cb:
             result = get_concept_board.invoke({"ticker": "600519.SS"})
 
-        mock_cb.assert_called_once_with("600519.SS")
+        mock_cb.assert_called_once_with("get_concept_board", "600519.SS")
         assert "concept data" in result
 
     def test_error_returns_no_data_message(self):
         from tradingagents.agents.utils.industry_data_tools import get_concept_board
 
         with patch(
-            "tradingagents.dataflows.smartmoney_vendor.get_concept_board",
-            side_effect=ValueError("API failure"),
+            "tradingagents.agents.utils.industry_data_tools.route_to_vendor",
+            return_value=(
+                "NO_DATA_AVAILABLE: get_concept_board unavailable for "
+                "000001.SZ: API failure"
+            ),
         ):
             result = get_concept_board.invoke({"ticker": "000001.SZ"})
 

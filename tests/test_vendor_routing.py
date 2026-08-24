@@ -130,7 +130,7 @@ class VendorRoutingTests(unittest.TestCase):
 
         assert result.data == "AK_DATA"
         assert result.diagnostic is not None
-        assert result.diagnostic.status == "ok"
+        assert result.diagnostic.status == "ok_fallback"
         assert result.diagnostic.attempted_vendors == ("smartmoney_db", "akshare")
         assert result.diagnostic.selected_vendor == "akshare"
         assert result.diagnostic.as_of == "2026-08-11"

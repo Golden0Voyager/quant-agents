@@ -215,20 +215,23 @@ class TestGetHistoricalValuation:
         from tradingagents.agents.utils.fundamental_data_tools import get_historical_valuation
 
         with patch(
-            "tradingagents.dataflows.smartmoney_vendor.get_historical_valuation",
+            "tradingagents.agents.utils.fundamental_data_tools.route_to_vendor",
             return_value="PE percentile: 25%",
         ) as mock_val:
             result = get_historical_valuation.invoke({"ticker": "600519.SS"})
 
-        mock_val.assert_called_once_with("600519.SS", None)
+        mock_val.assert_called_once_with("get_historical_valuation", "600519.SS")
         assert "PE percentile" in result
 
     def test_error_returns_no_data_message(self):
         from tradingagents.agents.utils.fundamental_data_tools import get_historical_valuation
 
         with patch(
-            "tradingagents.dataflows.smartmoney_vendor.get_historical_valuation",
-            side_effect=ValueError("API error"),
+            "tradingagents.agents.utils.fundamental_data_tools.route_to_vendor",
+            return_value=(
+                "NO_DATA_AVAILABLE: get_historical_valuation unavailable for "
+                "000001.SZ: API error"
+            ),
         ):
             result = get_historical_valuation.invoke({"ticker": "000001.SZ"})
 
@@ -253,25 +256,28 @@ class TestGetEarningsForecast:
         from tradingagents.agents.utils.fundamental_data_tools import get_earnings_forecast
 
         with patch(
-            "tradingagents.dataflows.smartmoney_vendor.get_earnings_forecast",
+            "tradingagents.agents.utils.fundamental_data_tools.route_to_vendor",
             return_value="EPS growth: 15% YoY",
         ) as mock_ef:
             result = get_earnings_forecast.invoke({"ticker": "600519.SS"})
 
-        mock_ef.assert_called_once_with("600519.SS")
+        mock_ef.assert_called_once_with("get_earnings_forecast", "600519.SS")
         assert "EPS growth" in result
 
     def test_error_returns_no_data_message(self):
         from tradingagents.agents.utils.fundamental_data_tools import get_earnings_forecast
 
         with patch(
-            "tradingagents.dataflows.smartmoney_vendor.get_earnings_forecast",
-            side_effect=RuntimeError("timeout"),
+            "tradingagents.agents.utils.fundamental_data_tools.route_to_vendor",
+            return_value=(
+                "NO_DATA_AVAILABLE: get_earnings_forecast unavailable for "
+                "600519.SS: timeout"
+            ),
         ):
-            result = get_earnings_forecast.invoke({"ticker": "TSLA"})
+            result = get_earnings_forecast.invoke({"ticker": "600519.SS"})
 
         assert "NO_DATA_AVAILABLE" in result
-        assert "TSLA" in result
+        assert "600519.SS" in result
 
     def test_is_structured_tool(self):
         from tradingagents.agents.utils.fundamental_data_tools import get_earnings_forecast

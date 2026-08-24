@@ -114,8 +114,17 @@ class TestFundamentalsAnalystPrompt:
         create_fundamentals_analyst(llm)(dict(_BASE_STATE))
         assert "2026-07-03" in captured["full"]
 
-    def test_prompt_mentions_earnings_estimates(self):
+    def test_prompt_mentions_earnings_estimates_only_when_market_supports_it(self):
         captured = {}
         llm = _make_capture_llm(captured)
         create_fundamentals_analyst(llm)(dict(_BASE_STATE))
+        assert "get_earnings_estimates" not in captured["full"]
+
+        a_share_state = {
+            **_BASE_STATE,
+            "company_of_interest": "600519.SS",
+            "company_name": "Kweichow Moutai",
+            "market": "XSHG",
+        }
+        create_fundamentals_analyst(llm)(a_share_state)
         assert "get_earnings_estimates" in captured["full"]

@@ -13,6 +13,7 @@ _BASE_STATE = {
     "trade_date": "2026-07-03",
     "company_name": "Apple Inc.",
     "asset_type": "stock",
+    "market": "XNYS",
     "instrument_context": "Company: Apple Inc.; Sector: Technology",
     "messages": [],
 }
@@ -87,6 +88,26 @@ class TestNewsAnalystExecution:
         result = create_news_analyst(_make_llm("News done"))(dict(_BASE_STATE))
         assert len(result["messages"]) == 1
         assert result["messages"][0].content == "News done"
+
+    def test_hk_binding_excludes_a_share_news_tools(self):
+        captured_tools = []
+        llm = _make_llm("HK news")
+        llm.bind_tools.side_effect = lambda tools: (
+            captured_tools.extend(tool.name for tool in tools)
+            or MagicMock(return_value=MagicMock(content="HK news", tool_calls=[]))
+        )
+        state = {
+            **_BASE_STATE,
+            "company_of_interest": "1810.HK",
+            "company_name": "Xiaomi Corporation",
+            "market": "XHKG",
+        }
+
+        create_news_analyst(llm)(state)
+
+        assert "get_research_reports" not in captured_tools
+        assert "get_cailianpress_telegrams" not in captured_tools
+        assert "get_news" in captured_tools
 
 
 @pytest.mark.unit

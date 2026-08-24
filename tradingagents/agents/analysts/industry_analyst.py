@@ -9,9 +9,28 @@ from tradingagents.agents.utils.agent_utils import (
     get_sector_fund_flow,
     sanitize_company_name_in_report,
 )
+from tradingagents.agents.utils.tool_capabilities import (
+    BoundToolsByMarket,
+    tool_guidance_for,
+)
+from tradingagents.market_context import infer_market
 
 
 def create_industry_analyst(llm):
+    tools = [
+        get_industry_valuation,
+        get_concept_board,
+        get_macro_indicators,
+        get_sector_fund_flow,
+    ]
+    bound_tools = BoundToolsByMarket(llm, tools)
+    tool_guidance = {
+        "get_industry_valuation": "Use get_industry_valuation for peer and historical valuation comparisons.",
+        "get_concept_board": "Use get_concept_board to identify concept themes, hot-sector topics, and theme momentum.",
+        "get_macro_indicators": "Use get_macro_indicators to assess the macro backdrop influencing sector valuation.",
+        "get_sector_fund_flow": "Use get_sector_fund_flow to track sector capital flows and rotation patterns.",
+    }
+
     def industry_analyst_node(state):
         current_date = state["trade_date"]
         company_name = state.get("company_name", "")
@@ -20,24 +39,16 @@ def create_industry_analyst(llm):
             ticker, company_name
         )
 
-        tools = [
-            get_industry_valuation,
-            get_concept_board,
-            get_macro_indicators,
-            get_sector_fund_flow,
-        ]
+        market = state.get("market") or infer_market(ticker)
+        market_tools, bound_llm = bound_tools.get(market)
 
         company_line = f"Target company: {company_name} ({ticker}). " if company_name else ""
         system_message = (
             company_line +
             "You are an Industry Analyst. Your job is to compare the target company's "
             "valuation (PE, PB, PS) against its industry peers and historical benchmarks. "
-            "Use `get_industry_valuation` to fetch comparative data. "
-            "Use `get_concept_board` to identify belonging concept themes, hot sector topics, and theme momentum. "
-            "Use `get_macro_indicators` to assess macroeconomic backdrop (CPI, PMI, M2, LPR, SHIBOR, "
-            "equity-bond spread, treasury yields) that may influence sector-wide valuation. "
-            "Use `get_sector_fund_flow` to track capital flows into/out of the stock's sector "
-            "and identify rotation patterns. "
+            + tool_guidance_for(market_tools, tool_guidance)
+            + " "
             "Assess whether the stock is relatively overvalued, undervalued, or fairly priced within its sector. "
             "Highlight any valuation anomalies or regime shifts. Provide specific, actionable "
             "insights with supporting evidence to help traders make informed decisions."
@@ -74,11 +85,11 @@ def create_industry_analyst(llm):
         )
 
         prompt = prompt.partial(system_message=system_message)
-        prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
+        prompt = prompt.partial(tool_names=", ".join(tool.name for tool in market_tools))
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(instrument_context=instrument_context)
 
-        chain = prompt | llm.bind_tools(tools)
+        chain = prompt | bound_llm
         result = chain.invoke(state["messages"])
 
         report = ""

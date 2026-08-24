@@ -460,19 +460,25 @@ class TestFetchCailianpressTelegrams:
         """Verify the get_cailianpress_telegrams tool calls into the vendor correctly."""
         from tradingagents.agents.utils.news_data_tools import get_cailianpress_telegrams
 
-        with patch.object(cailianpress_vendor, "fetch_cailianpress_telegrams") as mock_fetch:
+        with patch(
+            "tradingagents.agents.utils.news_data_tools.route_to_vendor"
+        ) as mock_fetch:
             mock_fetch.return_value = "# 财联社电报"
             result = get_cailianpress_telegrams.invoke({"limit": 10})
 
         assert result == "# 财联社电报"
-        mock_fetch.assert_called_once_with(limit=10)
+        mock_fetch.assert_called_once_with("get_cailianpress_telegrams", 10)
 
     def test_tool_invoke_error_returns_placeholder(self):
         """When the vendor raises, the tool should return NO_DATA_AVAILABLE."""
         from tradingagents.agents.utils.news_data_tools import get_cailianpress_telegrams
 
-        with patch.object(cailianpress_vendor, "fetch_cailianpress_telegrams") as mock_fetch:
-            mock_fetch.side_effect = RuntimeError("API down")
+        with patch(
+            "tradingagents.agents.utils.news_data_tools.route_to_vendor"
+        ) as mock_fetch:
+            mock_fetch.return_value = (
+                "NO_DATA_AVAILABLE: Cailianpress telegrams unavailable: RuntimeError API down"
+            )
             result = get_cailianpress_telegrams.invoke({})
 
         assert "NO_DATA_AVAILABLE" in result

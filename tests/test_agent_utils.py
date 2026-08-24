@@ -700,11 +700,12 @@ class TestDeprecatedSocialMediaAnalyst:
             "tradingagents.agents.analysts.sentiment_analyst.get_news.func",
             return_value="NEWS_DATA",
         ), patch(
-            "tradingagents.agents.analysts.sentiment_analyst.fetch_eastmoney_hot_rank",
-            return_value="HOT_RANK_DATA",
-        ), patch(
-            "tradingagents.agents.analysts.sentiment_analyst.fetch_eastmoney_guba_sentiment",
-            return_value="GUBA_DATA",
+            "tradingagents.agents.analysts.sentiment_analyst.route_to_vendor",
+            side_effect=lambda method, *args: {
+                "fetch_eastmoney_hot_rank": "HOT_RANK_DATA",
+                "fetch_eastmoney_guba_sentiment": "GUBA_DATA",
+                "fetch_eastmoney_hot_keywords": "HOT_KEYWORDS_DATA",
+            }[method],
         ):
             result = node({
                 "company_of_interest": "NVDA",

@@ -274,8 +274,8 @@ class TestIndustryAnalystPromptStructure:
         assert "NO_DATA_AVAILABLE" in full_text
         assert "data_availability" in full_text
 
-    def test_system_message_mentions_industry_valuation(self):
-        """The prompt mentions the industry valuation tool."""
+    def test_system_message_mentions_industry_valuation_only_for_supported_market(self):
+        """The prompt mentions industry valuation only when it is available."""
         llm = MagicMock()
         captured = {}
 
@@ -295,8 +295,18 @@ class TestIndustryAnalystPromptStructure:
         node(dict(_BASE_STATE))
 
         full_text = captured.get("full", "")
-        assert "get_industry_valuation" in full_text
+        assert "get_industry_valuation" not in full_text
         assert "Industry Analyst" in full_text
+
+        node(
+            {
+                **_BASE_STATE,
+                "company_of_interest": "600519.SS",
+                "company_name": "Kweichow Moutai",
+                "market": "XSHG",
+            }
+        )
+        assert "get_industry_valuation" in captured["full"]
 
     def test_prompt_includes_trade_date(self):
         """The prompt includes the trade date."""

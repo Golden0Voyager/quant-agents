@@ -145,11 +145,9 @@ def get_historical_valuation(
     Retrieve 3-year historical PE/PB valuation percentile rank and ROE matching.
     Helps identify deep value (PE percentile < 20% + solid ROE) vs value trap risks.
     """
-    from tradingagents.dataflows.smartmoney_vendor import get_historical_valuation as _get_val
-    try:
-        return _get_val(ticker, curr_date)
-    except Exception as exc:
-        return f"NO_DATA_AVAILABLE: Historical valuation percentile unavailable for {ticker} ({exc})"
+    if curr_date is None:
+        return route_to_vendor("get_historical_valuation", ticker)
+    return route_to_vendor("get_historical_valuation", ticker, curr_date)
 
 
 @tool
@@ -160,9 +158,4 @@ def get_earnings_forecast(
     Retrieve earnings pre-announcement and profit forecast data for a ticker.
     Provides YoY net profit change expectations and performance pre-announcements.
     """
-    from tradingagents.dataflows.smartmoney_vendor import get_earnings_forecast as _get_ef
-    try:
-        return _get_ef(ticker)
-    except Exception as exc:
-        return f"NO_DATA_AVAILABLE: Earnings forecast unavailable for {ticker} ({exc})"
-
+    return route_to_vendor("get_earnings_forecast", ticker)

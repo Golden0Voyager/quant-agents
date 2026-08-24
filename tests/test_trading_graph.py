@@ -1679,6 +1679,15 @@ class PropagateTests(unittest.TestCase):
             state, signal = self.g.propagate("AAPL", "2026-06-15")
             self.assertEqual(state["final_trade_decision"], "Buy")
             self.assertEqual(signal, "Buy")
+            self.assertEqual(state["market"], "XNYS")
+            self.assertEqual(
+                state["analysis_dates"],
+                {
+                    "analysis_date": "2026-06-15",
+                    "market_as_of_date": "2026-06-15",
+                    "evidence_window_end": "2026-06-15",
+                },
+            )
             mock_clear.assert_called_once()
 
     def test_with_checkpoint_enabled_resumes_from_step(self):

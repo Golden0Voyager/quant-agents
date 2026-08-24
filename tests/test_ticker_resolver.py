@@ -17,6 +17,7 @@ from tradingagents.ticker_resolver import (
     _is_numeric_code,
     _load_name_cache,
     _resolve_chinese_name,
+    infer_market,
     resolve_ticker,
 )
 
@@ -299,9 +300,10 @@ class ResolveTickerTests(unittest.TestCase):
         self.assertEqual(result["company_name"], "贵州茅台")
 
     @patch("tradingagents.ticker_resolver._fetch_company_name_from_db", return_value=None)
+    @patch("tradingagents.ticker_resolver._fetch_company_name_from_akshare", return_value=None)
     @patch("tradingagents.ticker_resolver._fetch_company_name")
     def test_suffix_match_extracts_ticker(
-        self, mock_fetch_name, mock_db
+        self, mock_fetch_name, mock_akshare, mock_db
     ):
         mock_fetch_name.return_value = "Apple Inc."
         result = resolve_ticker("AAPL.SS")
@@ -334,9 +336,10 @@ class ResolveTickerTests(unittest.TestCase):
 
     @patch("tradingagents.ticker_resolver._load_name_cache", return_value={"歌尔股份": "002241"})
     @patch("tradingagents.ticker_resolver._fetch_company_name_from_db", return_value="歌尔股份")
+    @patch("tradingagents.ticker_resolver._fetch_company_name_from_akshare", return_value=None)
     @patch("tradingagents.ticker_resolver._fetch_company_name", return_value=None)
     def test_chinese_name_resolution(
-        self, mock_fetch, mock_db, mock_cache
+        self, mock_fetch, mock_akshare, mock_db, mock_cache
     ):
         result = resolve_ticker("歌尔股份")
         self.assertEqual(result["ticker"], "002241.SZ")
@@ -394,9 +397,10 @@ class ResolveTickerChineseIntegrationTests(unittest.TestCase):
 
     @patch("tradingagents.ticker_resolver._load_name_cache", return_value={"歌尔股份": "002241"})
     @patch("tradingagents.ticker_resolver._fetch_company_name_from_db", return_value="歌尔股份")
+    @patch("tradingagents.ticker_resolver._fetch_company_name_from_akshare", return_value=None)
     @patch("tradingagents.ticker_resolver._fetch_company_name", return_value=None)
     def test_chinese_name_uses_db_first(
-        self, mock_fetch, mock_db, mock_cache
+        self, mock_fetch, mock_akshare, mock_db, mock_cache
     ):
         result = resolve_ticker("歌尔股份")
         self.assertEqual(result["company_name"], "歌尔股份")
@@ -415,6 +419,9 @@ class ResolveTickerChineseIntegrationTests(unittest.TestCase):
 
 @pytest.mark.unit
 class TickerSymbolHandlingTests(unittest.TestCase):
+    def test_canonical_market_inference_is_available_with_ticker_resolution(self):
+        self.assertEqual(infer_market("002413.SZ"), "XSHG")
+
     def test_normalize_ticker_symbol_preserves_exchange_suffix(self):
         self.assertEqual(normalize_ticker_symbol(" cnc.to "), "CNC.TO")
 

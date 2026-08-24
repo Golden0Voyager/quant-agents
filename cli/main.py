@@ -28,6 +28,7 @@ from cli.stats_handler import StatsCallbackHandler
 from cli.utils import *
 from cli.watchlists import list_watchlists, load_watchlist, save_watchlist
 from tradingagents.dataflows.interface import collect_route_diagnostics
+from tradingagents.dataflows.runtime_context import runtime_data_context_for, use_runtime_data_context
 from tradingagents.default_config import DEFAULT_CONFIG, default_config
 from tradingagents.graph.analyst_execution import (
     AnalystWallTimeTracker,
@@ -1037,11 +1038,14 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
             selections["asset_type"],
             confirmed_name=selections.get("company_name"),
         )
+        runtime_context = runtime_data_context_for(ticker, date)
         init_agent_state = graph.propagator.create_initial_state(
             ticker,
             date,
             asset_type=selections["asset_type"],
             instrument_context=instrument_context,
+            market=runtime_context.market,
+            analysis_dates=runtime_context.dates,
         )
         if holdings:
             init_agent_state["holdings_context"] = holdings
@@ -1066,7 +1070,10 @@ def run_analysis(checkpoint: bool = False, selections: dict | None = None, holdi
         max_debate = config.get("max_debate_rounds", 1)
         max_risk = config.get("max_risk_discuss_rounds", 1)
         try:
-            with collect_route_diagnostics() as route_diagnostics:
+            with (
+                use_runtime_data_context(runtime_context),
+                collect_route_diagnostics() as route_diagnostics,
+            ):
                 for chunk in graph.graph.stream(init_agent_state, **args):
                     sync_analyst_tracker_from_chunk(analyst_wall_time_tracker, chunk)
 
