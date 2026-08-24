@@ -174,11 +174,14 @@ class VendorRoutingTests(unittest.TestCase):
         assert records[0].method == "get_macro_indicators"
 
     def test_not_configured_vendor_is_circuit_broken_for_context(self):
-        set_config({"data_vendors": {"fundamental_data": "tushare,akshare"}})
+        # Both vendors must be policy-allowed for get_fundamentals so the
+        # chain filter does not drop the failing one before it can trip the
+        # circuit breaker.
+        set_config({"data_vendors": {"fundamental_data": "alpha_vantage,akshare"}})
         unavailable = mock.Mock(side_effect=VendorNotConfiguredError("missing token"))
         fallback = mock.Mock(return_value="AK_DATA")
         with self._route_method(
-            "get_fundamentals", {"tushare": unavailable, "akshare": fallback}
+            "get_fundamentals", {"alpha_vantage": unavailable, "akshare": fallback}
         ), interface.collect_route_diagnostics() as records:
             first = interface.route_to_vendor_with_source(
                 "get_fundamentals", "600519.SS", "2026-08-11"

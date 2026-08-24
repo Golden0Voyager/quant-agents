@@ -52,6 +52,80 @@ _POLICIES: dict[str, ToolPolicy] = {
             "akshare",
         ),
     ),
+    # Cross-market fundamentals and indicators keep the full market set: the
+    # vendors themselves decide per-ticker coverage (akshare/smartmoney_db for
+    # A-shares, yfinance/alpha_vantage for US/HK), same convention as
+    # get_stock_data. UNKNOWN stays applicable so non-US/HK/CN tickers still
+    # attempt yfinance instead of degrading to not_applicable.
+    "get_fundamentals": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="high",
+        allowed_vendors=("smartmoney_db", "alpha_vantage", "yfinance", "akshare"),
+    ),
+    "get_balance_sheet": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="high",
+        allowed_vendors=("smartmoney_db", "alpha_vantage", "yfinance", "akshare"),
+    ),
+    "get_cashflow": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="high",
+        allowed_vendors=("smartmoney_db", "alpha_vantage", "yfinance", "akshare"),
+    ),
+    "get_income_statement": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="high",
+        allowed_vendors=("smartmoney_db", "alpha_vantage", "yfinance", "akshare"),
+    ),
+    "get_indicators": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="high",
+        allowed_vendors=("smartmoney_db", "alpha_vantage", "yfinance", "akshare"),
+    ),
+    # Global news takes a window end (curr_date) as its first argument rather
+    # than a ticker, so market resolution falls back to the runtime context or
+    # UNKNOWN; keep UNKNOWN applicable for direct callers without a context.
+    "get_global_news": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="calendar_window",
+        empty_semantics="coverage_gap",
+        impact="high",
+        allowed_vendors=("yfinance", "alpha_vantage"),
+    ),
+    "get_insider_transactions": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="confirmed_empty",
+        impact="medium",
+        allowed_vendors=("smartmoney_db", "alpha_vantage", "yfinance", "akshare"),
+    ),
+    # A-share-only coverage: both vendors read Chinese institutional data.
+    "get_institutional_holdings": ToolPolicy(
+        applicable_markets=frozenset({"XSHG"}),
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db", "akshare"),
+    ),
+    # Macro context is market-agnostic enrichment (China via smartmoney_db /
+    # akshare, US via fred); applicable wherever the industry analyst runs.
+    "get_macro_indicators": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db", "akshare", "fred"),
+    ),
     "get_limit_up_down": ToolPolicy(
         applicable_markets=frozenset({"XSHG"}),
         date_policy="market_session",

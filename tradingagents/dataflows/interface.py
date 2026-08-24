@@ -591,12 +591,34 @@ def _rewrite_policy_dates(
                     rewritten_kwargs[key] = min(normalized[:10], market_as_of)
                 break
     elif policy.date_policy == "calendar_window" and evidence_window_end is not None:
-        if len(rewritten_args) >= 3:
-            rewritten_args[2] = min(str(rewritten_args[2]), evidence_window_end)
-        elif "end_date" in rewritten_kwargs:
-            rewritten_kwargs["end_date"] = min(
-                str(rewritten_kwargs["end_date"]), evidence_window_end
-            )
+        # Cap the window-END parameter only. The schema names it explicitly
+        # (``end_date`` for ticker/start/end methods, ``curr_date`` for
+        # window-back methods like get_global_news); blindly capping args[2]
+        # would clobber a non-date third argument such as ``limit``.
+        schema = _METHOD_PARAMETER_SCHEMAS.get(method, ())
+        window_end_names = ("end_date", "curr_date")
+        for index, (name, _default) in enumerate(schema):
+            if name not in window_end_names or index >= len(rewritten_args):
+                continue
+            requested = rewritten_args[index]
+            if requested is not None:
+                normalized = _normalize_key_date(requested)
+                if isinstance(normalized, str) and _date_like(normalized):
+                    rewritten_args[index] = min(normalized[:10], evidence_window_end)
+            break
+        else:
+            for key in window_end_names:
+                requested = rewritten_kwargs.get(key)
+                if requested is None:
+                    continue
+                normalized = _normalize_key_date(requested)
+                if isinstance(normalized, str) and _date_like(normalized):
+                    rewritten_kwargs[key] = min(normalized[:10], evidence_window_end)
+                break
+            else:
+                # Schema-less legacy call: assume (symbol, start, end).
+                if len(rewritten_args) >= 3:
+                    rewritten_args[2] = min(str(rewritten_args[2]), evidence_window_end)
 
     return tuple(rewritten_args), rewritten_kwargs
 
