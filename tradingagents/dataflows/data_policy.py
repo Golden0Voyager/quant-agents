@@ -37,7 +37,7 @@ class UnknownToolPolicyError(KeyError):
     """Raised when a production caller omitted a required data policy."""
 
 
-_ALL_MARKETS = frozenset({"XSHG", "XHKG", "XNYS", "CRYPTO", "UNKNOWN"})
+_ALL_MARKETS: frozenset[Market] = frozenset({"XSHG", "XHKG", "XNYS", "CRYPTO", "UNKNOWN"})
 _POLICIES: dict[str, ToolPolicy] = {
     "get_stock_data": ToolPolicy(
         applicable_markets=_ALL_MARKETS,

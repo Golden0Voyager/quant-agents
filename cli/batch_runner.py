@@ -497,9 +497,14 @@ class BatchRunner:
         degraded = [
             item for item in coverage
             if is_data_coverage_degraded(
-                item.get("status")
-                if isinstance(item, dict)
-                else getattr(item, "status", "")
+                str(
+                    (
+                        item.get("status")
+                        if isinstance(item, dict)
+                        else getattr(item, "status", "")
+                    )
+                    or ""
+                )
             )
         ]
         categories = Counter(

@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from threading import Lock
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from tradingagents.market_context import Market, infer_market
 
@@ -505,7 +505,7 @@ def _route_result(
         as_of=(
             _route_as_of(method, args, kwargs)
             if as_of is _INFER_AS_OF_FROM_REQUEST
-            else as_of
+            else cast("str | None", as_of)
         ),
         reason=reason,
     )
@@ -1443,7 +1443,7 @@ def _resolve_route_with_source(
                 )
                 continue
             reason = "selected primary vendor"
-            status = payload.status if payload is not None else "ok"
+            status: str = payload.status if payload is not None else "ok"
             if vendor != primary_vendor and status == "ok":
                 status = "ok_fallback"
             if vendor != primary_vendor:
