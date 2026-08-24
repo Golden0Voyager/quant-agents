@@ -764,11 +764,13 @@ class TradingAgentsGraph:
 
         # Build the verified market snapshot once, with a forced refresh, so
         # every downstream agent shares the same ground-truth data. The Market
-        # Analyst's tool path now also uses load_ohlcv, so this snapshot and
-        # the analyst's raw data come from the same source. If the initial state
-        # already carries a snapshot (e.g. programmatic callers or tests), keep
-        # it instead of recomputing. On a checkpoint resume the snapshot is
-        # already in the checkpointed state, so skip the refresh entirely.
+        # Analyst's get_stock_data tool goes through the unified vendor router,
+        # whose OHLCV vendors share the same load_ohlcv cache, so this snapshot
+        # and the analyst's raw data still come from the same source. If the
+        # initial state already carries a snapshot (e.g. programmatic callers or
+        # tests), keep it instead of recomputing. On a checkpoint resume the
+        # snapshot is already in the checkpointed state, so skip the refresh
+        # entirely.
         if not resume_from_checkpoint and not init_agent_state.get("verified_market_snapshot"):
             try:
                 from tradingagents.dataflows.market_data_validator import (
