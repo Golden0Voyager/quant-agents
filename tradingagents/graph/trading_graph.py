@@ -124,6 +124,7 @@ class TradingAgentsGraph:
 
         self.deep_thinking_llm = self._create_fallback_llm("deep_think_fallback", llm_kwargs)
         self.quick_thinking_llm = self._create_fallback_llm("quick_think_fallback", llm_kwargs)
+        self.deep_think_role_llms = self._create_role_llms(llm_kwargs)
 
         self.memory_log = TradingMemoryLog(self.config)
         self.node_timings: list[dict[str, Any]] = []
@@ -141,6 +142,7 @@ class TradingAgentsGraph:
             self.deep_thinking_llm,
             self.tool_nodes,
             self.conditional_logic,
+            role_llms=self.deep_think_role_llms,
         )
 
         self.propagator = Propagator(
@@ -200,12 +202,40 @@ class TradingAgentsGraph:
 
         return kwargs
 
-    def _create_fallback_llm(self, config_key: str, llm_kwargs: dict):
+    def _create_role_llms(self, llm_kwargs: dict) -> dict[str, Any]:
+        """Build per-role deep-think LLMs for the structured decision roles.
+
+        Reads ``config["deep_think_llm_roles"]`` — a mapping of role name
+        (``research_manager`` / ``trader`` / ``portfolio_manager``) to a
+        model override. Roles without an override, or whose override equals
+        the base ``deep_think_llm`` model, share the base deep-think chain
+        so no duplicate clients are created.
+        """
+        roles = ("research_manager", "trader", "portfolio_manager")
+        role_llms: dict[str, Any] = dict.fromkeys(roles, self.deep_thinking_llm)
+        base_model = self.config.get("deep_think_llm")
+        for role, model in (self.config.get("deep_think_llm_roles") or {}).items():
+            if role not in role_llms:
+                logger.warning("Unknown deep_think_llm_roles entry %r ignored", role)
+                continue
+            if not model or model == base_model:
+                continue
+            role_llms[role] = self._create_fallback_llm(
+                "deep_think_fallback", llm_kwargs, model_override=model
+            )
+        return role_llms
+
+    def _create_fallback_llm(self, config_key: str, llm_kwargs: dict, model_override: str | None = None):
         """Create an LLM instance with provider fallback chain.
 
-        Builds the full LLM chain (primary + fallbacks) from the config entry
-        at ``config_key``, then patches the primary's ``invoke`` to try each
-        fallback on transient provider errors.
+        The primary tier comes from the explicit model configuration —
+        ``config["deep_think_llm"]`` / ``config["quick_think_llm"]`` (or
+        *model_override* for per-role deep-think variants) combined with
+        ``config["llm_provider"]`` and ``config["backend_url"]``. The
+        fallback entries at ``config_key`` are appended after it, skipping
+        any entry whose provider+model duplicates the primary, and the
+        primary's ``invoke`` is patched to try each fallback on transient
+        provider errors.
 
         Fallback tiers whose API key is not set in the environment are
         silently skipped so the graph can start even when only the primary
@@ -215,10 +245,22 @@ class TradingAgentsGraph:
         if not fallback_config:  # pragma: no cover  -- legacy config without fallback
             return self._fallback_to_legacy(config_key, llm_kwargs)
 
-        primary_provider = fallback_config[0]["provider"]
+        model_key = "deep_think_llm" if "deep" in config_key else "quick_think_llm"
+        primary_provider = self.config.get("llm_provider")
+        primary_model = model_override or self.config.get(model_key)
+        if not primary_provider or not primary_model:  # pragma: no cover  -- defensive; both are set in default config
+            return self._fallback_to_legacy(config_key, llm_kwargs)
+
+        tiers = [{"provider": primary_provider, "model": primary_model}]
+        tiers.extend(
+            entry
+            for entry in fallback_config
+            if (entry["provider"], entry["model"]) != (primary_provider, primary_model)
+        )
+
         rpm_map = self.config.get("llm_requests_per_minute") or {}
         llm_chain = []
-        for i, entry in enumerate(fallback_config):
+        for i, entry in enumerate(tiers):
             tier_base_url = (
                 self.config.get("backend_url")
                 if entry["provider"] == primary_provider

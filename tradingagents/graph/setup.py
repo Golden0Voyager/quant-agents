@@ -21,12 +21,24 @@ class GraphSetup:
         deep_thinking_llm: Any,
         tool_nodes: dict[str, ToolNode],
         conditional_logic: ConditionalLogic,
+        role_llms: dict[str, Any] | None = None,
     ):
-        """Initialize with required components."""
+        """Initialize with required components.
+
+        ``role_llms`` optionally maps the structured decision roles
+        (``research_manager`` / ``trader`` / ``portfolio_manager``) to a
+        dedicated deep-think LLM; roles absent from the mapping use
+        ``deep_thinking_llm``.
+        """
         self.quick_thinking_llm = quick_thinking_llm
         self.deep_thinking_llm = deep_thinking_llm
         self.tool_nodes = tool_nodes
         self.conditional_logic = conditional_logic
+        self.role_llms = role_llms or {}
+
+    def _role_llm(self, role: str) -> Any:
+        """Return the LLM bound to a decision role (base deep LLM by default)."""
+        return self.role_llms.get(role, self.deep_thinking_llm)
 
     def setup_graph(
         self, selected_analysts=None
@@ -58,14 +70,14 @@ class GraphSetup:
         # Create researcher and manager nodes
         bull_researcher_node = create_bull_researcher(self.deep_thinking_llm)
         bear_researcher_node = create_bear_researcher(self.deep_thinking_llm)
-        research_manager_node = create_research_manager(self.deep_thinking_llm)
-        trader_node = create_trader(self.deep_thinking_llm)
+        research_manager_node = create_research_manager(self._role_llm("research_manager"))
+        trader_node = create_trader(self._role_llm("trader"))
 
         # Create risk analysis nodes
         aggressive_analyst = create_aggressive_debator(self.deep_thinking_llm)
         neutral_analyst = create_neutral_debator(self.deep_thinking_llm)
         conservative_analyst = create_conservative_debator(self.deep_thinking_llm)
-        portfolio_manager_node = create_portfolio_manager(self.deep_thinking_llm)
+        portfolio_manager_node = create_portfolio_manager(self._role_llm("portfolio_manager"))
 
         # Create workflow
         workflow = StateGraph(AgentState)

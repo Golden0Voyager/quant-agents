@@ -177,6 +177,68 @@ class SetupGraphTests(unittest.TestCase):
             if short in tool_node_short_keys:
                 self.assertIn(short, self.tools)
 
+    @patch("tradingagents.graph.setup.StateGraph")
+    @patch("tradingagents.graph.setup.create_market_analyst")
+    @patch("tradingagents.graph.setup.create_sentiment_analyst")
+    @patch("tradingagents.graph.setup.create_news_analyst")
+    @patch("tradingagents.graph.setup.create_fundamentals_analyst")
+    @patch("tradingagents.graph.setup.create_bull_researcher")
+    @patch("tradingagents.graph.setup.create_bear_researcher")
+    @patch("tradingagents.graph.setup.create_research_manager")
+    @patch("tradingagents.graph.setup.create_trader")
+    @patch("tradingagents.graph.setup.create_aggressive_debator")
+    @patch("tradingagents.graph.setup.create_neutral_debator")
+    @patch("tradingagents.graph.setup.create_conservative_debator")
+    @patch("tradingagents.graph.setup.create_portfolio_manager")
+    @patch("tradingagents.graph.setup.create_msg_delete")
+    def test_role_llms_route_to_matching_factories(
+        self,
+        mock_delete,
+        mock_pm,
+        mock_cons,
+        mock_neutral,
+        mock_agg,
+        mock_trader,
+        mock_rm,
+        mock_bear,
+        mock_bull,
+        mock_fund,
+        mock_news,
+        mock_sent,
+        mock_market,
+        mock_stategraph,
+    ):
+        rm_llm, trader_llm, pm_llm = _mock_llm(), _mock_llm(), _mock_llm()
+        gs = GraphSetup(
+            self.quick,
+            self.deep,
+            self.tools,
+            self.cl,
+            role_llms={
+                "research_manager": rm_llm,
+                "trader": trader_llm,
+                "portfolio_manager": pm_llm,
+            },
+        )
+        mock_stategraph.return_value = MagicMock()
+        gs.setup_graph()
+
+        # Structured decision roles get their dedicated LLMs; debaters and
+        # researchers stay on the base deep-thinking LLM.
+        mock_rm.assert_called_once_with(rm_llm)
+        mock_trader.assert_called_once_with(trader_llm)
+        mock_pm.assert_called_once_with(pm_llm)
+        mock_bull.assert_called_once_with(self.deep)
+        mock_bear.assert_called_once_with(self.deep)
+        mock_agg.assert_called_once_with(self.deep)
+        mock_neutral.assert_called_once_with(self.deep)
+        mock_cons.assert_called_once_with(self.deep)
+
+    def test_role_llms_default_to_base_deep_llm(self):
+        gs = GraphSetup(self.quick, self.deep, self.tools, self.cl)
+        for role in ("research_manager", "trader", "portfolio_manager"):
+            self.assertIs(gs._role_llm(role), self.deep)
+
 
 if __name__ == "__main__":
     unittest.main()
