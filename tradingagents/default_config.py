@@ -71,6 +71,17 @@ _BASE_CONFIG = {
     "llm_provider": "sensenova",
     "deep_think_llm": "glm-5.2",
     "quick_think_llm": "sensenova-6.8-flash-lite",
+    # Per-role deep-think model overrides for the three structured serial
+    # decision roles (research_manager / trader / portfolio_manager). Roles
+    # not listed — or mapped to None / the base model — share the
+    # ``deep_think_llm`` chain; bull/bear researchers and risk debaters
+    # always use ``deep_think_llm``. Splitting roles across models spreads
+    # per-model quota (SenseNova plan: each model has its own 5h bucket).
+    "deep_think_llm_roles": {
+        "research_manager": "deepseek-v4-flash",
+        "trader": "glm-5.2",
+        "portfolio_manager": "glm-5.2",
+    },
     # SenseNova Token Plan endpoint; upstream default is None (per-provider fallback)
     "backend_url": "https://token.sensenova.cn/v1",
     # Provider-specific thinking configuration
