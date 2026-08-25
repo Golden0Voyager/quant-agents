@@ -172,7 +172,9 @@ MODEL_OPTIONS: ProviderModeOptions = {
             ("Custom model ID", "custom"),
         ],
     },
-    # SenseNova: Token Plan endpoint with DeepSeek reasoning support.
+    # SenseNova: Token Plan endpoint. Text models only — the plan's
+    # sensenova-u1.5-lite / sensenova-u1-fast entries are image-creation
+    # models (Neo-unify) and cannot serve the text pipeline.
     "sensenova": {
         "quick": [
             ("sensenova-6.8-flash-lite - Lightweight multimodal, 256K ctx", "sensenova-6.8-flash-lite"),
@@ -180,6 +182,7 @@ MODEL_OPTIONS: ProviderModeOptions = {
             ("Custom model ID", "custom"),
         ],
         "deep": [
+            ("GLM-5.2 - Zhipu flagship via SenseNova, 1M ctx, 128K output", "glm-5.2"),
             ("deepseek-v4-flash - High-performance chat, reasoning mode", "deepseek-v4-flash"),
             ("sensenova-6.8-flash-lite - Lightweight multimodal, 256K ctx", "sensenova-6.8-flash-lite"),
             ("Custom model ID", "custom"),

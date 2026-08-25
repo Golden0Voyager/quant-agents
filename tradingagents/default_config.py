@@ -69,7 +69,7 @@ _BASE_CONFIG = {
     "memory_log_max_entries": None,
     # LLM settings (defaults aligned with personal usage: SenseNova Token Plan)
     "llm_provider": "sensenova",
-    "deep_think_llm": "deepseek-v4-flash",
+    "deep_think_llm": "glm-5.2",
     "quick_think_llm": "sensenova-6.8-flash-lite",
     # SenseNova Token Plan endpoint; upstream default is None (per-provider fallback)
     "backend_url": "https://token.sensenova.cn/v1",
