@@ -18,6 +18,10 @@ LLM 客户端层：多提供商接入、能力探测、定价与限流。
   `NotImplementedError`，上层必须走自由文本回退
 - MiniMax M2.x 用 `reasoning_split` 提取 `reasoning_content`（不是 sidecar 模式）
 - `NormalizedChatOpenAI` 负责 Responses API 归一化
+- ModelScope 的 `deepseek-ai/DeepSeek-V4-Pro` / `Qwen/Qwen3.5-397B-A17B` 自由文本正常，
+  但带 `tool_choice` 的结构化请求返回 `choices: null`（langchain 抛 TypeError）——
+  不能放进会服务结构化角色的 fallback 链；`deepseek-ai/DeepSeek-V4-Flash` 与
+  `MiniMax/MiniMax-M3` 已被 ModelScope 下架（400 "no provider supported"）
 - 新提供商密钥入 `.env`：如 `AGNES_API_KEY`、`MODELSCOPE_API_KEY`、`NVIDIA_API_KEY`；
   远程 Ollama 用 `OLLAMA_BASE_URL`
 
