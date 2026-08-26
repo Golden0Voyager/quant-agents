@@ -17,14 +17,16 @@ Endpoint contract (docs/tonghuashun_api.md):
   fiscal_year/fiscal_period/period_end_ms metadata; amounts in yuan; ``null``
   means undisclosed (passed through, never zero-filled).
 - financials/indicators: params thscode + report={yyyy}-{1|2|3|4}; response
-  rows in ``data.abilities[]`` (NOT ``item[]``).
-- special-data/hot-stock-list:当日热股 Top30（无个股历史，字段名以实测为准，
-  解析侧做多键容错）。
+  in ``data.abilities[]`` (NOT ``item[]``), each entry {"ability": group,
+  "indicators": [{"index_id", "value"}]} — verified live 2026-08-26.
+- special-data/hot-stock-list: 当日热股 Top30, rows {thscode, ticker, name,
+  rank, heat, rank_change, rank_trend} — verified live 2026-08-26; no
+  per-ticker history (falls back to Eastmoney for non-Top30 names).
 """
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 
 from .akshare_common import format_money_cn, is_a_share_ticker, safe_float
@@ -198,20 +200,22 @@ def get_cashflow(
 # Financial indicators (financials/indicators — five categories, 23 ratios)
 # ---------------------------------------------------------------------------
 
-# alias -> (candidate payload keys, display label). The exact key names inside
-# data.abilities[] are taken from the API docs; parsing is tolerant (recursive
-# flatten + case-insensitive match) so unknown nesting still resolves.
+# alias -> (candidate payload index_ids, display label). index_ids verified
+# against the live API (2026-08-26, 600519.SH): abilities[] groups by ability
+# (growth/profitability/solvency/operation/cash-flow), each holding
+# indicators[] = {"index_id": ..., "value": "..."}; values are stringified
+# percentages (e.g. "89.7592" = 89.76%), None means undisclosed.
 _FINANCIAL_INDICATORS: dict[str, tuple[tuple[str, ...], str]] = {
-    "roe": (("roe", "净资产收益率"), "净资产收益率(ROE)"),
-    "roa": (("roa", "总资产收益率", "总资产报酬率"), "总资产收益率(ROA)"),
-    "gross_margin": (("gross_margin", "毛利率", "销售毛利率"), "毛利率"),
-    "net_margin": (("net_margin", "净利率", "销售净利率"), "净利率"),
-    "debt_ratio": (("debt_ratio", "资产负债率"), "资产负债率"),
+    "roe": (("index_weighted_avg_roe", "index_deduct_weighted_avg_roe", "加权roe", "净资产收益率"), "净资产收益率(ROE,加权)"),
+    "roa": (("total_assets_net_ratio", "总资产净利率", "总资产收益率"), "总资产净利率(ROA)"),
+    "gross_margin": (("sale_gross_margin", "毛利率", "销售毛利率"), "毛利率"),
+    "net_margin": (("sale_net_interest_ratio", "净利率", "销售净利率"), "净利率"),
+    "debt_ratio": (("assets_debt_ratio", "资产负债率"), "资产负债率"),
     "current_ratio": (("current_ratio", "流动比率"), "流动比率"),
     "quick_ratio": (("quick_ratio", "速动比率"), "速动比率"),
-    "revenue_growth": (("revenue_growth", "营收增长率", "营业收入增长率"), "营收增长率"),
-    "profit_growth": (("profit_growth", "净利润增长率"), "净利润增长率"),
-    "ocf_to_profit": (("ocf_to_profit", "经营现金流净额与净利润比"), "经营现金流/净利润"),
+    "revenue_growth": (("calculate_operating_income_yoy_growth_ratio", "营收增长率", "营业收入增长率"), "营收增长率(同比)"),
+    "profit_growth": (("calculate_parent_holder_net_profit_yoy_growth_ratio", "净利润增长率"), "归母净利润增长率(同比)"),
+    "ocf_to_profit": (("net_profit_cash_content", "净现比", "经营现金流净额与净利润比"), "净现比(经营现金流/净利润)"),
 }
 
 def _build_alias_lookup() -> dict[str, tuple[tuple[str, ...], str]]:
@@ -251,19 +255,26 @@ def _report_period_for(curr_date: str | None) -> str:
     return f"{y - 1}-3"
 
 
-def _flatten_numeric(node: Any, out: dict[str, float]) -> None:
-    """Collect numeric leaves of a nested dict/list into ``out`` (first wins)."""
-    if isinstance(node, dict):
-        for key, value in node.items():
-            if isinstance(value, (dict, list)):
-                _flatten_numeric(value, out)
-            elif isinstance(key, str):
-                f = safe_float(value)
-                if f is not None:
-                    out.setdefault(key.lower(), f)
-    elif isinstance(node, list):
-        for item in node:
-            _flatten_numeric(item, out)
+def _index_values(abilities: list[Any]) -> dict[str, float]:
+    """Map each indicator's ``index_id`` to its numeric value (first wins).
+
+    Real payload shape: ``abilities[] = {"ability": "growth", "indicators":
+    [{"index_id": "...", "value": "6.538"}, ...]}`` — values arrive as strings
+    and None means undisclosed (skipped). Keying by ``index_id`` (not by the
+    generic ``value`` leaf key, which would collide across indicators).
+    """
+    out: dict[str, float] = {}
+    for group in abilities:
+        if not isinstance(group, dict):
+            continue
+        for ind in group.get("indicators") or []:
+            if not isinstance(ind, dict):
+                continue
+            key = ind.get("index_id")
+            val = safe_float(ind.get("value"))
+            if isinstance(key, str) and val is not None:
+                out.setdefault(key.lower(), val)
+    return out
 
 
 def get_indicators(
@@ -307,8 +318,7 @@ def get_indicators(
             detail=f"no financial indicators for report={report} via hithink",
         )
 
-    flat: dict[str, float] = {}
-    _flatten_numeric(abilities, flat)
+    flat = _index_values(abilities)
     value = next(
         (flat[key] for key in (k.lower() for k in candidate_keys) if key in flat),
         None,
@@ -333,6 +343,9 @@ def get_indicators(
 # ---------------------------------------------------------------------------
 # Hot rank (special-data/hot-stock-list — 当日热股 Top30)
 # ---------------------------------------------------------------------------
+
+_TREND_LABELS = {"up": "上升", "down": "下降", "flat": "持平"}
+
 
 def _first_present(row: dict[str, Any], *keys: str) -> Any:
     """Return the first non-None value among *keys* (case-insensitive)."""
@@ -389,10 +402,18 @@ def get_hot_rank(ticker: str, limit: int = 20) -> str:
     heat = _first_present(match, "heat", "热度", "hot_value", "popularity")
     price = _first_present(match, "price", "最新价", "last_price")
     change_pct = _first_present(match, "change_pct", "涨跌幅", "pct_change")
+    rank_change = _first_present(match, "rank_change", "排名变动")
+    trend = _TREND_LABELS.get(
+        str(_first_present(match, "rank_trend") or "").lower()
+    )
 
     parts = [f"整体热度排名: #{rank if rank is not None else 'N/A'}", f"{name}({thscode})"]
     if heat is not None:
         parts.append(f"热度: {heat}")
+    if rank_change is not None:
+        parts.append(f"排名变动: {rank_change}" + (f"（{trend}）" if trend else ""))
+    elif trend:
+        parts.append(f"排名趋势: {trend}")
     if price is not None:
         parts.append(f"最新价: {price}")
     if change_pct is not None:
@@ -402,3 +423,239 @@ def get_hot_rank(ticker: str, limit: int = 20) -> str:
         f"同花顺热榜 — {ticker} (source: hithink hot-stock-list, 当日Top{len(rows)})\n"
         + "  |  ".join(parts)
     )
+
+
+# ---------------------------------------------------------------------------
+# Dragon tiger (special-data/dragon-tiger-list — 按交易日的全市场龙虎榜)
+# ---------------------------------------------------------------------------
+
+# Endpoint contracts verified live 2026-08-26:
+# - dragon-tiger-list: params board_type=all|org|hot_money, date=yyyy-MM-dd
+#   (MUST be a trading day — explicit non-trading days return code=1002;
+#   omitting returns the latest available trading day). Response data:
+#   trade_date/count/stock_count + stock_items[] = {thscode, ticker, name,
+#   concept_list, change (小数), net_value/net_rate (元/小数), hot_rank,
+#   buy_value, sell_value, limit_reason, range_days (1=当日榜, 3=3日榜),
+#   org_net_value, hot_money_net_value}. Same stock may appear twice
+#   (当日榜 + 3日榜). Amounts in yuan.
+# - limit-up-pool / limit-down-pool: param date_ms (Asia/Shanghai 00:00 毫秒戳
+#   — 注意 overview 文档里的 trade_date=YYYYMMDD 会被静默忽略并返回当日数据，
+#   实测确认必须用 date_ms); page/size(1..200)/sort_field/sort_dir; 非交易日
+#   返回 total=0 空池（不报错）。Response data: pagination{total,pages,size,
+#   page} + item[]。
+# - calendar/trading-days: data.item[] = {"date_ms", "date": "YYYYMMDD"},
+#   近一年序列，升序。
+
+_SH_TZ = timezone(timedelta(hours=8))  # Asia/Shanghai
+
+
+def _snap_to_trade_date(curr_date: str) -> str:
+    """Snap *curr_date* to the latest A-share trading day ≤ it (yyyy-MM-dd).
+
+    dragon-tiger-list rejects explicit non-trading days with code=1002 (no
+    auto-fallback), so snap via the trading-days calendar (~1-year window).
+    Dates older than the window are passed through — the endpoint then answers
+    with code=1003 and the router falls back to the next vendor.
+    """
+    digits = "".join(ch for ch in str(curr_date) if ch.isdigit())[:8]
+    data = hithink_get("/api/a-share/calendar/trading-days")
+    days = sorted(
+        str(it["date"])
+        for it in (data.get("item") or [])
+        if isinstance(it, dict) and it.get("date")
+    )
+    eligible = [d for d in days if d <= digits]
+    chosen = eligible[-1] if eligible else digits
+    return f"{chosen[:4]}-{chosen[4:6]}-{chosen[6:8]}"
+
+
+def get_dragon_tiger(
+    symbol: str,
+    curr_date: str | None = None,
+) -> str:
+    """Fetch A-share dragon-tiger-board (龙虎榜) data via HiThink.
+
+    The endpoint is a market-wide per-day board, so this filters the day
+    (snapped to the latest trading day ≤ curr_date) down to *symbol*. A stock
+    not on the board that day raises NoMarketDataError and the router falls
+    back to akshare, which discovers the stock's most recent appearance ever —
+    the richer answer for names that have not been listed lately.
+    """
+    thscode = _require_a_share(symbol)
+    params: dict[str, Any] = {"board_type": "all"}
+    if curr_date:
+        params["date"] = _snap_to_trade_date(curr_date)
+
+    data = hithink_get("/api/a-share/special-data/dragon-tiger-list", params)
+    items = data.get("stock_items")
+    rows = [
+        r
+        for r in (items if isinstance(items, list) else [])
+        if isinstance(r, dict) and str(r.get("thscode", "")).upper() == thscode
+    ]
+    trade_date = data.get("trade_date") or params.get("date") or "N/A"
+    if not rows:
+        raise NoMarketDataError(
+            symbol,
+            canonical=thscode,
+            detail=f"not on dragon-tiger board on {trade_date} via hithink",
+        )
+
+    lines = [
+        f"## {symbol.upper()} Dragon Tiger Board (龙虎榜) (source: hithink / 同花顺)",
+        f"Date: {trade_date}",
+        f"Total records: {len(rows)} entries",
+        "",
+    ]
+    for r in rows:
+        period = "当日榜" if r.get("range_days") == 1 else f"{r.get('range_days')}日榜"
+        lines.append(f"**{period}** ({r.get('name', 'N/A')}):")
+        change = safe_float(r.get("change"))
+        if change is not None:
+            lines.append(f"- 涨跌幅: {change * 100:+.2f}%")
+        net_value = safe_float(r.get("net_value"))
+        net_rate = safe_float(r.get("net_rate"))
+        if net_value is not None:
+            rate = f" (占成交 {net_rate * 100:.2f}%)" if net_rate is not None else ""
+            lines.append(f"- 龙虎榜净买入: {format_money_cn(net_value)}{rate}")
+        buy = safe_float(r.get("buy_value"))
+        sell = safe_float(r.get("sell_value"))
+        if buy is not None or sell is not None:
+            lines.append(
+                f"- 买入/卖出: {format_money_cn(buy)} / {format_money_cn(sell)}"
+            )
+        org_net = safe_float(r.get("org_net_value"))
+        if org_net is not None:
+            lines.append(f"- 机构净买入: {format_money_cn(org_net)}")
+        hm_net = safe_float(r.get("hot_money_net_value"))
+        if hm_net is not None:
+            lines.append(f"- 游资净买入: {format_money_cn(hm_net)}")
+        if r.get("hot_rank") is not None:
+            lines.append(f"- 同花顺人气排名: #{r['hot_rank']}")
+        if r.get("limit_reason"):
+            lines.append(f"- 上榜原因: {r['limit_reason']}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Limit-up / limit-down pools (special-data/limit-up-pool + limit-down-pool)
+# ---------------------------------------------------------------------------
+
+
+def _date_ms_for(trade_date: str) -> int:
+    """Convert a trade date (YYYY-MM-DD or YYYYMMDD) to Shanghai-midnight ms."""
+    digits = "".join(ch for ch in str(trade_date) if ch.isdigit())
+    if len(digits) < 8:
+        raise NoMarketDataError(
+            str(trade_date), detail=f"unparseable trade_date {trade_date!r}"
+        )
+    dt = datetime.strptime(digits[:8], "%Y%m%d").replace(tzinfo=_SH_TZ)
+    return int(dt.timestamp() * 1000)
+
+
+def _dashed_date(trade_date: str) -> str:
+    digits = "".join(ch for ch in str(trade_date) if ch.isdigit())[:8]
+    return f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}" if len(digits) == 8 else str(trade_date)
+
+
+def _fetch_pool(path: str, date_ms: int, sort_field: str) -> list[dict[str, Any]]:
+    """Fetch all pages of a limit pool (size=200, capped at 10 pages)."""
+    rows: list[dict[str, Any]] = []
+    page = 1
+    while True:
+        data = hithink_get(
+            path,
+            {
+                "date_ms": date_ms,
+                "page": page,
+                "size": 200,
+                "sort_field": sort_field,
+                "sort_dir": "desc",
+            },
+        )
+        items = data.get("item")
+        if not isinstance(items, list) or not items:
+            break
+        rows.extend(it for it in items if isinstance(it, dict))
+        pagination = data.get("pagination") or {}
+        pages = safe_float(pagination.get("pages")) or 1
+        if page >= int(pages) or page >= 10:
+            break
+        page += 1
+    return rows
+
+
+def get_limit_up_down(trade_date: str) -> str:
+    """Fetch market-wide limit-up/limit-down stats for a trading date via HiThink.
+
+    Output mirrors smartmoney_vendor.get_limit_up_down: counts + up/down ratio
+    + 连板分布 + sample stocks. The industry-distribution section is omitted —
+    the HiThink pool payload carries no industry field (涨停原因 is shown in
+    the samples instead).
+    """
+    date_ms = _date_ms_for(trade_date)
+    up_rows = _fetch_pool(
+        "/api/a-share/special-data/limit-up-pool", date_ms, "continue_day_cnt"
+    )
+    down_rows = _fetch_pool(
+        "/api/a-share/special-data/limit-down-pool", date_ms, "last_limit_time"
+    )
+
+    if not up_rows and not down_rows:
+        raise NoMarketDataError(
+            trade_date,
+            trade_date,
+            f"no limit-up/limit-down data for {trade_date} via hithink",
+        )
+
+    lines = [
+        f"## A-Share Limit-Up / Limit-Down Stats for {_dashed_date(trade_date)} "
+        f"(source: hithink / 同花顺)",
+        "",
+        f"- **Limit-up stocks (涨停)**: {len(up_rows)}",
+        f"- **Limit-down stocks (跌停)**: {len(down_rows)}",
+        f"- **Up/Down ratio**: {len(up_rows)}:{len(down_rows)}",
+    ]
+
+    # 连板分布 (board-count distribution) — limit-up only
+    boards: dict[int, list[str]] = {}
+    for r in up_rows:
+        cnt = safe_float(r.get("continue_day_cnt"))
+        bc = int(cnt) if cnt is not None and cnt >= 1 else 1
+        boards.setdefault(bc, []).append(str(r.get("name") or "N/A"))
+    if boards:
+        lines.append("")
+        lines.append("**连板分布 (Board-count distribution):**")
+        for bc in sorted(boards, reverse=True):
+            names = ", ".join(boards[bc])[:80]
+            label = f"{bc}连板" if bc > 1 else "首板"
+            lines.append(f"- {label}: {len(boards[bc])} 只 ({names})")
+
+    # Sample limit-up stocks (top 10 by board count, then seal money)
+    if up_rows:
+        sample = sorted(
+            up_rows,
+            key=lambda r: (
+                -(safe_float(r.get("continue_day_cnt")) or 1),
+                -(safe_float(r.get("seal_money")) or 0),
+            ),
+        )[:10]
+        lines.append("")
+        lines.append("**Sample limit-up stocks:**")
+        for r in sample:
+            cnt = safe_float(r.get("continue_day_cnt")) or 1
+            bc_str = f" ({int(cnt)}连板)" if cnt > 1 else ""
+            reason = f" [{r['limit_up_reason']}]" if r.get("limit_up_reason") else ""
+            lines.append(f"- {r.get('name', 'N/A')}{bc_str}{reason}")
+
+    # Sample limit-down stocks
+    if down_rows:
+        lines.append("")
+        lines.append("**Sample limit-down stocks:**")
+        for r in down_rows[:10]:
+            pct = safe_float(r.get("price_change_ratio_pct"))
+            pct_str = f" ({pct:.2f}%)" if pct is not None else ""
+            lines.append(f"- {r.get('name', 'N/A')}{pct_str}")
+
+    return "\n".join(lines)

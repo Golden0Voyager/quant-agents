@@ -131,7 +131,7 @@ _POLICIES: dict[str, ToolPolicy] = {
         date_policy="market_session",
         empty_semantics="coverage_gap",
         impact="high",
-        allowed_vendors=("smartmoney_db",),
+        allowed_vendors=("smartmoney_db", "hithink"),
     ),
     "get_restricted_release": ToolPolicy(
         applicable_markets=frozenset({"XSHG"}),
@@ -180,7 +180,7 @@ _POLICIES: dict[str, ToolPolicy] = {
         date_policy="latest_snapshot",
         empty_semantics="confirmed_empty",
         impact="medium",
-        allowed_vendors=("smartmoney_db", "akshare"),
+        allowed_vendors=("smartmoney_db", "hithink", "akshare"),
     ),
     "get_block_trade": ToolPolicy(
         applicable_markets=frozenset({"XSHG"}),

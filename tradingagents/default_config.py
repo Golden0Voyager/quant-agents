@@ -196,7 +196,7 @@ _BASE_CONFIG = {
     "tool_vendors": {
         # Redirect database-backed tools to use local DB (smartmoney_db) first
         "get_margin_trading": "smartmoney_db,akshare",
-        "get_dragon_tiger": "smartmoney_db,akshare",
+        "get_dragon_tiger": "smartmoney_db,hithink,akshare",
         "get_block_trade": "smartmoney_db,akshare",
         "get_institutional_holdings": "smartmoney_db,akshare",
         "get_northbound_hold": "smartmoney_db,akshare",

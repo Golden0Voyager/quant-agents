@@ -79,9 +79,11 @@ from .fred import get_macro_data as get_fred_macro_data
 from .hithink_vendor import (
     get_balance_sheet as get_hithink_balance_sheet,
     get_cashflow as get_hithink_cashflow,
+    get_dragon_tiger as get_hithink_dragon_tiger,
     get_hot_rank as get_hithink_hot_rank,
     get_income_statement as get_hithink_income_statement,
     get_indicators as get_hithink_indicators,
+    get_limit_up_down as get_hithink_limit_up_down,
 )
 from .request_memo import RequestKey
 from .runtime_context import (
@@ -938,6 +940,7 @@ VENDOR_METHODS: dict[str, dict[str, Any]] = {
     },
     "get_dragon_tiger": {
         "smartmoney_db": get_smartmoney_dragon_tiger,
+        "hithink": get_hithink_dragon_tiger,
         "akshare": get_akshare_dragon_tiger,
     },
     "get_block_trade": {
@@ -950,6 +953,7 @@ VENDOR_METHODS: dict[str, dict[str, Any]] = {
     },
     "get_limit_up_down": {
         "smartmoney_db": get_smartmoney_limit_up_down,
+        "hithink": get_hithink_limit_up_down,
     },
     "get_shareholder_count": {
         "smartmoney_db": get_smartmoney_shareholder_count,
