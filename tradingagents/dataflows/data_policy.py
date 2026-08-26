@@ -316,7 +316,10 @@ _POLICIES: dict[str, ToolPolicy] = {
     "get_anomaly_reason": ToolPolicy(
         applicable_markets=frozenset({"XSHG"}),
         date_policy="latest_snapshot",
-        empty_semantics="coverage_gap",
+        # 空 item = 官方确认"今日无异动"，是有意义的否定结果而非数据缺口；
+        # coverage_gap 会让每只无异动的票都计 missing，虚增 coverage_degraded
+        # (20260826 批次 22/23 只 A 股全部中招)。
+        empty_semantics="confirmed_empty",
         impact="medium",
         allowed_vendors=("hithink",),
     ),

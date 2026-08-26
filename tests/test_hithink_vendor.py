@@ -908,3 +908,29 @@ class TestP2ChainRegistration:
         probe = args[0] if args else "600519.SS"
         chain = interface._build_vendor_chain(method, "default", probe)
         assert chain == ["hithink"]
+
+
+class TestAnomalyEmptySemantics:
+    def test_no_anomaly_today_is_valid_empty_not_missing(self):
+        """官方确认"今日无异动"必须计 valid_empty，而非 missing 虚增降级。"""
+        from unittest.mock import MagicMock
+
+        from tradingagents.dataflows import interface
+
+        vendor = MagicMock(
+            side_effect=NoMarketDataError("600519.SS", detail="no anomaly record today")
+        )
+        with (
+            patch.object(interface, "get_vendor", return_value="hithink"),
+            patch.dict(
+                interface.VENDOR_METHODS["get_anomaly_reason"],
+                {"hithink": vendor},
+                clear=True,
+            ),
+        ):
+            result = interface.route_to_vendor_with_source(
+                "get_anomaly_reason", "600519.SS"
+            )
+
+        assert result.diagnostic is not None
+        assert result.diagnostic.status == "valid_empty"
