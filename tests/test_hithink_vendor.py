@@ -719,3 +719,192 @@ class TestAnomalyReason:
             "get_anomaly_reason", "default", "600519.SS"
         )
         assert chain == ["hithink"]
+
+
+# Real payload shapes verified live 2026-08-26.
+_VALUATION = {
+    "timestamp": 1787731442000,
+    "total": 2,
+    "item": [
+        {
+            "thscode": "600519.SH",
+            "ticker": "600519",
+            "name": "贵州茅台",
+            "pe_ttm": 19.999099,
+            "pe_mrq": 18.292008,
+            "pb_mrq": 6.481922,
+            "ps_ttm": 9.40095,
+            "pcf_ttm": 13.674977,
+        },
+        {
+            "thscode": "002731.SZ",
+            "ticker": "002731",
+            "name": "*ST萃华",
+            "pe_ttm": 0.972831,
+            "pe_mrq": 1.149244,
+            "pb_mrq": 0.142426,
+            "ps_ttm": 0.059257,
+            "pcf_ttm": -16.707277,
+        },
+    ],
+}
+
+_AUCTION = {
+    "timestamp": 1787731443061,
+    "auction_phase": "closed",
+    "data_status": "final",
+    "total": 1,
+    "item": [
+        {
+            "thscode": "600519.SH",
+            "ticker": "600519",
+            "name": "贵州茅台",
+            "auction_price": 1300.0,
+            "auction_pct": -0.3067,
+            "auction_volume": 176.0,
+            "auction_amount": 22880000.0,
+            "auction_unmatched": 0.0,
+            "auction_turnover_pct": 0.0014,
+            "auction_yesterday_ratio_pct": 0.8337,
+            "auction_volume_ratio": 1.1656,
+            "pre_close_price": 1304.0,
+            "open_price": 1300.0,
+            "last_price": 1302.8,
+            "float_market_cap": 1628606309782.8,
+        }
+    ],
+}
+
+_BENCHMARK = {
+    "timestamp": 1787731481139,
+    "date": "2026-08-26",
+    "item": [
+        {
+            "thscode": "002412.SZ",
+            "ticker": "002412",
+            "name": "汉森制药",
+            "auction_pct": 9.0835,
+            "tags": ["中药Ⅲ", "仿制药一致性评价"],
+        },
+        {
+            "thscode": "600127.SH",
+            "ticker": "600127",
+            "name": "金健米业",
+            "auction_pct": -1.6112,
+            "tags": ["粮油加工", "玉米"],
+        },
+    ],
+}
+
+
+class TestValuationSnapshot:
+    def test_fetch_metrics_picks_matching_row(self):
+        with _patch_get(_VALUATION) as mock_get:
+            metrics = hithink_vendor.fetch_valuation_metrics("600519.SS")
+
+        mock_get.assert_called_once_with(
+            "/api/a-share/valuations/snapshot", {"thscodes": "600519.SH"}
+        )
+        assert metrics == {
+            "pe_ttm": 19.999099,
+            "pe_mrq": 18.292008,
+            "pb_mrq": 6.481922,
+            "ps_ttm": 9.40095,
+            "pcf_ttm": 13.674977,
+        }
+
+    def test_snapshot_renders_table(self):
+        with _patch_get(_VALUATION):
+            result = hithink_vendor.get_valuation_snapshot("002731.SZ")
+
+        assert "同花顺估值快照 — 002731.SZ" in result
+        assert "| PE(TTM) | 0.97 |" in result
+        assert "| PCF(TTM) | -16.71 |" in result
+
+    def test_empty_item_raises(self):
+        with (
+            _patch_get({"item": []}),
+            pytest.raises(NoMarketDataError, match="no valuation snapshot"),
+        ):
+            hithink_vendor.fetch_valuation_metrics("600519.SS")
+
+    def test_row_without_multiples_raises(self):
+        with (
+            _patch_get({"item": [{"thscode": "600519.SH", "name": "贵州茅台"}]}),
+            pytest.raises(NoMarketDataError, match="no usable multiples"),
+        ):
+            hithink_vendor.fetch_valuation_metrics("600519.SS")
+
+    def test_non_a_share_fails_fast_without_http(self):
+        with patch(
+            "tradingagents.dataflows.hithink_vendor.hithink_get"
+        ) as mock_get, pytest.raises(NoMarketDataError, match="A-shares only"):
+            hithink_vendor.fetch_valuation_metrics("AAPL")
+        mock_get.assert_not_called()
+
+
+class TestAuctionSnapshot:
+    def test_renders_phase_and_fields(self):
+        with _patch_get(_AUCTION) as mock_get:
+            result = hithink_vendor.get_auction_snapshot("600519.SS")
+
+        mock_get.assert_called_once_with(
+            "/api/a-share/auction/snapshot", {"thscodes": "600519.SH"}
+        )
+        assert "phase=closed/final" in result
+        assert "竞价价格: 1300.00 (-0.31%)" in result
+        assert "昨收: 1304.00" in result
+        assert "176 手" in result
+        assert "量比: 1.17" in result
+
+    def test_missing_row_raises(self):
+        payload = {"auction_phase": "live", "item": []}
+        with (
+            _patch_get(payload),
+            pytest.raises(NoMarketDataError, match="no auction snapshot"),
+        ):
+            hithink_vendor.get_auction_snapshot("600519.SS")
+
+    def test_non_a_share_fails_fast_without_http(self):
+        with patch(
+            "tradingagents.dataflows.hithink_vendor.hithink_get"
+        ) as mock_get, pytest.raises(NoMarketDataError, match="A-shares only"):
+            hithink_vendor.get_auction_snapshot("AAPL")
+        mock_get.assert_not_called()
+
+
+class TestShortTermBenchmark:
+    def test_renders_benchmark_table(self):
+        with _patch_get(_BENCHMARK) as mock_get:
+            result = hithink_vendor.get_short_term_benchmark()
+
+        mock_get.assert_called_once_with(
+            "/api/a-share/auction/short-term-benchmark", {}
+        )
+        assert "date=2026-08-26" in result
+        assert "| 汉森制药 (002412) | +9.08% | 中药Ⅲ/仿制药一致性评价 |" in result
+        assert "| 金健米业 (600127) | -1.61% | 粮油加工/玉米 |" in result
+
+    def test_empty_item_raises(self):
+        with (
+            _patch_get({"item": []}),
+            pytest.raises(NoMarketDataError, match="short-term-benchmark"),
+        ):
+            hithink_vendor.get_short_term_benchmark()
+
+
+class TestP2ChainRegistration:
+    @pytest.mark.parametrize(
+        "method,args",
+        [
+            ("get_valuation_snapshot", ("600519.SS",)),
+            ("get_auction_snapshot", ("600519.SS",)),
+            ("get_short_term_benchmark", ()),
+        ],
+    )
+    def test_chain_is_hithink_only(self, method, args):
+        from tradingagents.dataflows import interface
+
+        probe = args[0] if args else "600519.SS"
+        chain = interface._build_vendor_chain(method, "default", probe)
+        assert chain == ["hithink"]

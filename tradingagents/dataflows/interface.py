@@ -78,6 +78,7 @@ from .errors import (
 from .fred import get_macro_data as get_fred_macro_data
 from .hithink_vendor import (
     get_anomaly_reason as get_hithink_anomaly_reason,
+    get_auction_snapshot as get_hithink_auction_snapshot,
     get_balance_sheet as get_hithink_balance_sheet,
     get_cashflow as get_hithink_cashflow,
     get_dragon_tiger as get_hithink_dragon_tiger,
@@ -85,6 +86,8 @@ from .hithink_vendor import (
     get_income_statement as get_hithink_income_statement,
     get_indicators as get_hithink_indicators,
     get_limit_up_down as get_hithink_limit_up_down,
+    get_short_term_benchmark as get_hithink_short_term_benchmark,
+    get_valuation_snapshot as get_hithink_valuation_snapshot,
 )
 from .request_memo import RequestKey
 from .runtime_context import (
@@ -272,6 +275,9 @@ TOOLS_CATEGORIES = {
             "fetch_eastmoney_guba_sentiment",
             "fetch_eastmoney_hot_keywords",
             "get_anomaly_reason",
+            "get_valuation_snapshot",
+            "get_auction_snapshot",
+            "get_short_term_benchmark",
         ],
     }
 }
@@ -729,6 +735,9 @@ _METHOD_PARAMETER_SCHEMAS: dict[str, tuple[tuple[str, Any], ...]] = {
     ),
     "fetch_eastmoney_hot_keywords": (("limit", 15),),
     "get_anomaly_reason": (("ticker", _REQUIRED_PARAMETER),),
+    "get_valuation_snapshot": (("ticker", _REQUIRED_PARAMETER),),
+    "get_auction_snapshot": (("ticker", _REQUIRED_PARAMETER),),
+    "get_short_term_benchmark": (),
     "get_earnings_estimates": (("ticker", _REQUIRED_PARAMETER),),
     "get_shareholder_count": (
         ("ticker", _REQUIRED_PARAMETER),
@@ -1025,6 +1034,15 @@ VENDOR_METHODS: dict[str, dict[str, Any]] = {
     },
     "get_anomaly_reason": {
         "hithink": get_hithink_anomaly_reason,
+    },
+    "get_valuation_snapshot": {
+        "hithink": get_hithink_valuation_snapshot,
+    },
+    "get_auction_snapshot": {
+        "hithink": get_hithink_auction_snapshot,
+    },
+    "get_short_term_benchmark": {
+        "hithink": get_hithink_short_term_benchmark,
     },
     "get_earnings_estimates": {
         "smartmoney_db": get_smartmoney_earnings_estimates,

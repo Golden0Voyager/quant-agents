@@ -26,6 +26,13 @@ Endpoint contract (docs/tonghuashun_api.md):
   (``thscode`` errors 1001), rows {thscode, stock_name, tag_name,
   keyword_list, analysis_content} — verified live 2026-08-26; empty item =
   no anomaly today (standard NoMarketDataError degradation).
+- valuations/snapshot: batch ``thscodes``, rows {pe_ttm, pe_mrq, pb_mrq,
+  ps_ttm, pcf_ttm} as plain numbers — verified live 2026-08-26.
+- auction/snapshot: batch ``thscodes``, top-level auction_phase/data_status
+  plus rows {auction_price, auction_pct, auction_volume (手),
+  auction_amount (元), ...} — verified live 2026-08-26.
+- auction/short-term-benchmark: no params; ``date`` + ~6 benchmark stocks
+  {name, ticker, auction_pct, tags} — verified live 2026-08-26.
 """
 from __future__ import annotations
 
@@ -681,6 +688,29 @@ def _strip_anomaly_disclaimer(text: str) -> str:
     return text.strip()
 
 
+def _match_thscode_row(
+    rows: Any, thscode: str, ticker: str, label: str
+) -> dict[str, Any]:
+    """Pick the row matching thscode out of a batch ``item[]`` payload."""
+    if not isinstance(rows, list) or not rows:
+        raise NoMarketDataError(
+            ticker, canonical=thscode, detail=f"no {label} record today via hithink"
+        )
+    match = next(
+        (
+            r
+            for r in rows
+            if isinstance(r, dict) and str(r.get("thscode", "")).upper() == thscode
+        ),
+        None,
+    )
+    if match is None:
+        raise NoMarketDataError(
+            ticker, canonical=thscode, detail=f"{label} payload missing ticker row"
+        )
+    return match
+
+
 def get_anomaly_reason(ticker: str) -> str:
     """Official per-stock anomaly explanation (为什么动) via HiThink.
 
@@ -697,23 +727,7 @@ def get_anomaly_reason(ticker: str) -> str:
         "/api/a-share/special-data/anomaly-analysis-stock",
         {"thscodes": thscode},
     )
-    rows = data.get("item")
-    if not isinstance(rows, list) or not rows:
-        raise NoMarketDataError(
-            ticker, canonical=thscode, detail="no anomaly record today via hithink"
-        )
-    match = next(
-        (
-            r
-            for r in rows
-            if isinstance(r, dict) and str(r.get("thscode", "")).upper() == thscode
-        ),
-        None,
-    )
-    if match is None:
-        raise NoMarketDataError(
-            ticker, canonical=thscode, detail="anomaly payload missing ticker row"
-        )
+    match = _match_thscode_row(data.get("item"), thscode, ticker, "anomaly")
 
     content = _strip_anomaly_disclaimer(str(match.get("analysis_content") or ""))
     if len(content) > _ANOMALY_MAX_CHARS:
@@ -729,3 +743,136 @@ def get_anomaly_reason(ticker: str) -> str:
     if content:
         parts.append(content)
     return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Valuation snapshot (valuations/snapshot — 官方估值快照)
+# ---------------------------------------------------------------------------
+
+_VALUATION_FIELDS: tuple[tuple[str, str], ...] = (
+    ("pe_ttm", "PE(TTM)"),
+    ("pe_mrq", "PE(MRQ)"),
+    ("pb_mrq", "PB(MRQ)"),
+    ("ps_ttm", "PS(TTM)"),
+    ("pcf_ttm", "PCF(TTM)"),
+)
+
+
+def fetch_valuation_metrics(ticker: str) -> dict[str, float]:
+    """Structured official valuation multiples (PE/PB/PS/PCF) for a ticker.
+
+    Verified live 2026-08-26: batch param ``thscodes``; item[] rows carry
+    pe_ttm/pe_mrq/pb_mrq/ps_ttm/pcf_ttm as plain numbers. Returns a sparse
+    dict (only multiples the API actually returned); raises NoMarketDataError
+    for non-A-shares (before any HTTP call), a missing row, or a row with no
+    usable multiples. Used by market_data_validator as the cross-validation
+    anchor and by get_valuation_snapshot for prompt rendering.
+    """
+    thscode = _require_a_share(ticker)
+    data = hithink_get("/api/a-share/valuations/snapshot", {"thscodes": thscode})
+    row = _match_thscode_row(data.get("item"), thscode, ticker, "valuation snapshot")
+    metrics: dict[str, float] = {}
+    for key, _label in _VALUATION_FIELDS:
+        value = safe_float(row.get(key))
+        if value is not None:
+            metrics[key] = value
+    if not metrics:
+        raise NoMarketDataError(
+            ticker, canonical=thscode, detail="valuation snapshot has no usable multiples"
+        )
+    return metrics
+
+
+def get_valuation_snapshot(ticker: str) -> str:
+    """Prompt-ready rendering of the official valuation snapshot."""
+    metrics = fetch_valuation_metrics(ticker)
+    lines = [
+        f"同花顺估值快照 — {ticker} (source: hithink valuations/snapshot, 最新)",
+        "| 指标 | 值 |",
+        "|---|---:|",
+    ]
+    for key, label in _VALUATION_FIELDS:
+        if key in metrics:
+            lines.append(f"| {label} | {metrics[key]:.2f} |")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Auction data (auction/snapshot + short-term-benchmark — 集合竞价/短线风向标)
+# ---------------------------------------------------------------------------
+
+
+def get_auction_snapshot(ticker: str) -> str:
+    """Call-auction snapshot for a ticker (盘前集合竞价强弱).
+
+    Verified live 2026-08-26: batch param ``thscodes``; top-level
+    ``auction_phase``/``data_status`` tell whether the auction is live
+    (pre-open) or already closed/final; item[] rows carry auction_price /
+    auction_pct / auction_volume (手) / auction_amount (元) /
+    auction_unmatched / auction_turnover_pct / auction_yesterday_ratio_pct /
+    auction_volume_ratio / pre_close_price / open_price. After the close the
+    block describes that morning's auction — still useful context for the
+    day's open strength.
+    """
+    thscode = _require_a_share(ticker)
+    data = hithink_get("/api/a-share/auction/snapshot", {"thscodes": thscode})
+    row = _match_thscode_row(data.get("item"), thscode, ticker, "auction snapshot")
+
+    def _pct(key: str) -> str:
+        value = safe_float(row.get(key))
+        return f"{value:+.2f}%" if value is not None else "N/A"
+
+    def _num(key: str) -> str:
+        value = safe_float(row.get(key))
+        return f"{value:.2f}" if value is not None else "N/A"
+
+    amount = safe_float(row.get("auction_amount"))
+    volume = safe_float(row.get("auction_volume"))
+    unmatched = safe_float(row.get("auction_unmatched"))
+    lines = [
+        f"同花顺集合竞价 — {ticker} (source: hithink auction/snapshot, "
+        f"phase={data.get('auction_phase') or 'unknown'}/"
+        f"{data.get('data_status') or 'unknown'})",
+        f"- 竞价价格: {_num('auction_price')} ({_pct('auction_pct')})"
+        f"  |  昨收: {_num('pre_close_price')}  |  今开: {_num('open_price')}",
+        f"- 竞价量: {f'{volume:.0f} 手' if volume is not None else 'N/A'}"
+        f"  |  竞价额: {format_money_cn(amount) if amount is not None else 'N/A'}"
+        f"  |  未匹配量: {f'{unmatched:.0f} 手' if unmatched is not None else 'N/A'}",
+        f"- 竞价换手: {_pct('auction_turnover_pct')}"
+        f"  |  竞价量/昨日竞价: {_pct('auction_yesterday_ratio_pct')}"
+        f"  |  量比: {_num('auction_volume_ratio')}",
+    ]
+    return "\n".join(lines)
+
+
+def get_short_term_benchmark() -> str:
+    """Market-wide short-term sentiment gauge (短线风向标) via HiThink.
+
+    Verified live 2026-08-26: no params (``/api/a-share/auction/short-term-
+    benchmark``); returns ``date`` plus ~6 benchmark stocks with their
+    call-auction pct change and sector tags. Empty item -> NoMarketDataError.
+    """
+    data = hithink_get("/api/a-share/auction/short-term-benchmark", {})
+    rows = data.get("item")
+    if not isinstance(rows, list) or not rows:
+        raise NoMarketDataError(
+            "MARKET", detail="empty short-term-benchmark list via hithink"
+        )
+    lines = [
+        "同花顺短线风向标 (source: hithink auction/short-term-benchmark, "
+        f"date={data.get('date') or 'unknown'})",
+        "| 标的 | 竞价涨跌幅 | 标签 |",
+        "|---|---:|---|",
+    ]
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        pct = safe_float(row.get("auction_pct"))
+        pct_str = f"{pct:+.2f}%" if pct is not None else "N/A"
+        tags = row.get("tags")
+        tag_str = "/".join(str(t) for t in tags) if isinstance(tags, list) else ""
+        lines.append(
+            f"| {row.get('name', 'N/A')} ({row.get('ticker', '')})"
+            f" | {pct_str} | {tag_str} |"
+        )
+    return "\n".join(lines)
