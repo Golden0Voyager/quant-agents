@@ -121,7 +121,7 @@ tushare 为 opt-in，仅当 `tushare_enabled` 配置或 `TUSHARE_ENABLED=1` 时�
 | ticker_resolver 的 akshare 模糊匹配 | `meta/tickers/search` | 🔥 强匹配 | 0825 批次 9 只票公司名解析失败（8 只 A 股 + 1810.HK 显示 `--`）正是此环节；官方消歧根治 |
 | `get_historical_valuation` / `get_industry_valuation`（部分） | `valuations/snapshot` | 增强 | 官方估值快照可作本地分位计算的交叉校验源，喂给 `market_data_validator` |
 | `get_dividend_history` | `adjustment-factors` | 部分 | 事件流含现金分红/送股/配股，够复权与分红历史用 |
-| （无现有对应） | `anomaly-analysis-stock` | 全新增量 | "个股异动原因"是现有管线没有的维度，可增强 News/Governance 分析师 |
+| （无现有对应） | `anomaly-analysis-stock` | 全新增量 ✅ 已落地 | "个股异动原因"维度：`get_anomaly_reason`，Sentiment 分析师预取注入（查不到=DATA_UNAVAILABLE 降级） |
 | （无现有对应） | `auction/snapshot` + `short-term-benchmark` | 全新增量 | 支持盘前决策场景 |
 
 #### 🟡 部分匹配
@@ -181,7 +181,7 @@ vendor chain 示例（以 get_income_statement 为例）：
 | 优先级 | 内容 | 解决的现实痛点 |
 |---|---|---|
 | **P0** | 三表×3 + indicators + hot_rank 替代 + tickers/search 接入 resolver | 最近两批报告中出现频率最高的降级项 |
-| P1 | dragon_tiger + limit_up_down + 异动原因（新增 prompt 维度） | Governance / Sentiment 增强 |
+| P1 ✅ | dragon_tiger + limit_up_down + 异动原因（新增 prompt 维度） | Governance / Sentiment 增强 |
 | P2 | valuations 交叉校验、竞价数据盘前模式 | validator 增强、盘前决策 |
 
 ---

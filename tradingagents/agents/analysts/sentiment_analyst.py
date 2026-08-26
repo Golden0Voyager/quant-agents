@@ -90,8 +90,9 @@ def create_sentiment_analyst(llm):
     """Create a sentiment analyst node for the trading graph.
 
     Pre-fetches news (Yahoo Finance) + Eastmoney hot rank + Eastmoney Guba
-    sentiment indicators, injects them into the prompt as structured blocks,
-    and produces a deterministic sentiment report via structured output
+    sentiment indicators + market hot keywords + HiThink anomaly explanation,
+    injects them into the prompt as structured blocks, and produces a
+    deterministic sentiment report via structured output
     (with a free-text fallback for providers that do not support it).
     """
     structured_llm = bind_structured(llm, SentimentReport, "Sentiment Analyst")
@@ -129,6 +130,12 @@ def create_sentiment_analyst(llm):
             "Eastmoney market hot keywords",
             lambda: route_to_vendor("fetch_eastmoney_hot_keywords"),
         )
+        anomaly_block = _prefetch_for_market(
+            "get_anomaly_reason",
+            market,
+            "HiThink anomaly explanation",
+            lambda: route_to_vendor("get_anomaly_reason", ticker),
+        )
 
         system_message = _build_system_message(
             ticker=ticker,
@@ -139,6 +146,7 @@ def create_sentiment_analyst(llm):
             hot_rank_block=hot_rank_block,
             guba_block=guba_block,
             hot_keywords_block=hot_keywords_block,
+            anomaly_block=anomaly_block,
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -197,6 +205,7 @@ def _build_system_message(
     hot_rank_block: str,
     guba_block: str,
     hot_keywords_block: str,
+    anomaly_block: str,
 ) -> str:
     """Assemble the sentiment-analyst system message with structured data blocks."""
     ticker_guard = (
@@ -239,6 +248,13 @@ Market-wide signal: which concepts (板块/概念) are attracting the most atten
 {hot_keywords_block}
 <end_of_hot_keywords>
 
+### 同花顺异动解读 — official event attribution for today's price move
+HiThink (同花顺) anomaly analysis: when the stock hit a limit or moved abnormally today, this block carries the tag (涨停/跌停/…), keywords, and an official AI-generated explanation citing the underlying announcements/events. It complements the hot rank: a hot stock WITH an anomaly attribution has a concrete catalyst; a hot stock WITHOUT one (placeholder below) is attention without a confirmed driver — treat that as higher uncertainty.
+
+<start_of_anomaly>
+{anomaly_block}
+<end_of_anomaly>
+
 ## How to analyze this data (best practices)
 
 1. **Read the 人气排名 trend as a retail-attention signal.** A stock rising in rank (lower number = better) with increasing 铁杆粉丝 ratio suggests growing retail conviction. A sudden spike into the top 10 without a news catalyst may indicate coordinated retail attention (contrarian risk).
@@ -253,7 +269,7 @@ Market-wide signal: which concepts (板块/概念) are attracting the most atten
 
 6. **Be honest about data limits.** If one or more sources returned an "<unavailable>" placeholder, the sentiment read is less robust — flag this explicitly in the `confidence` field and the narrative. For non-A-share tickers, the Eastmoney sources will return a clear placeholder — explain that the analysis is based on news alone.
 
-7. **Identify catalysts and risks** that emerge across sources — news of upcoming earnings, product launches, competitive threats, macro headlines, etc.
+7. **Identify catalysts and risks** that emerge across sources — news of upcoming earnings, product launches, competitive threats, macro headlines, etc. When the 异动解读 block has content, treat it as the primary catalyst attribution (it cites official announcements); cross-check it against the news flow rather than repeating it verbatim.
 
 8. **Past sentiment is not predictive.** Frame your conclusions as signal for the trader to weigh alongside fundamentals and technicals, not as a price call.
 

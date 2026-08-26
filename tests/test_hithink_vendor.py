@@ -642,3 +642,80 @@ class TestP1ChainRegistration:
 
         chain = default_config()["tool_vendors"]["get_dragon_tiger"].split(",")
         assert chain == ["smartmoney_db", "hithink", "akshare"]
+
+
+# Real payload shape verified live 2026-08-26 (002731.SZ, *ST萃华 跌停):
+# batch param thscodes; item[] rows carry thscode/stock_name/tag_name/
+# keyword_list/analysis_content (always ending with a fixed disclaimer).
+_ANOMALY = {
+    "item": [
+        {
+            "thscode": "002731.SZ",
+            "stock_name": "萃华珠宝",
+            "tag_name": "跌停",
+            "keyword_list": ["ST板块", "退市风险", "资金出逃"],
+            "analysis_content": (
+                "萃华珠宝今日跌停。市场担忧其退市风险，资金持续流出。\n"
+                "短线情绪偏弱，注意风险控制。"
+                "（免责声明：本内容由AI生成，仅供参考，不构成投资建议。）"
+            ),
+        }
+    ]
+}
+
+
+class TestAnomalyReason:
+    def test_formats_tag_keywords_and_strips_disclaimer(self):
+        with _patch_get(_ANOMALY) as mock_get:
+            result = hithink_vendor.get_anomaly_reason("002731.SZ")
+
+        mock_get.assert_called_once_with(
+            "/api/a-share/special-data/anomaly-analysis-stock",
+            {"thscodes": "002731.SZ"},
+        )
+        assert "同花顺异动解读 — 002731.SZ" in result
+        assert "标签: 跌停" in result
+        assert "关键词: ST板块、退市风险、资金出逃" in result
+        assert "退市风险" in result
+        assert "免责声明" not in result
+
+    def test_empty_item_raises_no_market_data(self):
+        with (
+            _patch_get({"item": []}),
+            pytest.raises(NoMarketDataError, match="no anomaly"),
+        ):
+            hithink_vendor.get_anomaly_reason("600519.SS")
+
+    def test_missing_ticker_row_raises(self):
+        payload = {"item": [{**_ANOMALY["item"][0], "thscode": "000001.SZ"}]}
+        with (
+            _patch_get(payload),
+            pytest.raises(NoMarketDataError, match="missing ticker row"),
+        ):
+            hithink_vendor.get_anomaly_reason("002731.SZ")
+
+    def test_non_a_share_fails_fast_without_http(self):
+        with patch(
+            "tradingagents.dataflows.hithink_vendor.hithink_get"
+        ) as mock_get, pytest.raises(NoMarketDataError, match="A-shares only"):
+            hithink_vendor.get_anomaly_reason("AAPL")
+        mock_get.assert_not_called()
+
+    def test_overlong_content_is_truncated(self):
+        long_row = {
+            **_ANOMALY["item"][0],
+            "analysis_content": "很长的解读" * 400,
+        }
+        with _patch_get({"item": [long_row]}):
+            result = hithink_vendor.get_anomaly_reason("002731.SZ")
+
+        assert "…" in result
+        assert len(result) < 1200
+
+    def test_chain_is_hithink_only(self):
+        from tradingagents.dataflows import interface
+
+        chain = interface._build_vendor_chain(
+            "get_anomaly_reason", "default", "600519.SS"
+        )
+        assert chain == ["hithink"]
