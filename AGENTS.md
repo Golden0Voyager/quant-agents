@@ -48,7 +48,7 @@ Analyst execution timing via `tradingagents/graph/analyst_execution.py`.
 
 Routing via `interface.py` → yfinance / alpha_vantage / akshare (A-share Eastmoney).
 A-share: `akshare_vendor.py` + `akshare_common.py` (`format_money_cn`, `to_akshare_symbol`, `no_proxy`).
-HiThink (同花顺官方 API): `hithink_vendor.py` + `hithink_common.py` (env `HITHINK_FINANCE_API_KEY`, see `docs/tonghuashun_api.md`) — sits between `smartmoney_db` and `akshare` for income/balance/cashflow/financial-indicators/hot-rank; backoff on business code 4001/5xxx, thscode uses `.SH` (converted via `ticker_to_thscode`).
+HiThink (同花顺官方 API): `hithink_vendor.py` + `hithink_common.py` (env `HITHINK_FINANCE_API_KEY`, see `docs/tonghuashun_api.md`) — sits between `smartmoney_db` and `akshare` for income/balance/cashflow/financial-indicators/hot-rank/dragon-tiger/limit-up-down; anomaly-reason (hithink-only) is prefetched into the Sentiment prompt; backoff on business code 4001/5xxx, thscode uses `.SH` (converted via `ticker_to_thscode`).
 Local-first archive: `smartmoney_vendor.py` reads `~/Code/quant_data/quant_core.db` (env `QUANT_DB_PATH`) — A-shares via `daily_bars` (vendor `smartmoney_db`), US stocks / crypto via `global_assets_bars` (vendor `quant_db_global`, registered separately because the router skips the `smartmoney_db` name for non-A-share tickers). Stale local OHLCV (latest row lags > `MAX_OHLCV_STALE_DAYS`) falls back to online vendors.
 Market data validation via `market_data_validator.py` (grounding numerical claims).
 
