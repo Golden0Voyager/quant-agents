@@ -26,7 +26,7 @@ without manual conversion work.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -58,9 +58,9 @@ def is_deepseek_peak(at: datetime | None = None) -> bool:
     ``None`` means "now". Naive datetimes are assumed to already be UTC.
     """
     if at is None:
-        at = datetime.now(timezone.utc)
+        at = datetime.now(UTC)
     elif at.tzinfo is not None:
-        at = at.astimezone(timezone.utc)
+        at = at.astimezone(UTC)
     if at.weekday() >= 5:  # Saturday/Sunday are entirely off-peak
         return False
     return any(start <= at.hour < end for start, end in _DEEPSEEK_PEAK_WINDOWS_UTC)

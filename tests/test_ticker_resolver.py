@@ -449,5 +449,157 @@ class TickerSymbolHandlingTests(unittest.TestCase):
         )
 
 
+@pytest.mark.unit
+class ResolveChineseNameHithinkTests(unittest.TestCase):
+    """HiThink official search is the preferred tier for name → code."""
+
+    def setUp(self):
+        _reset_cache()
+
+    def tearDown(self):
+        _reset_cache()
+
+    @patch("tradingagents.dataflows.hithink_common.is_available", return_value=True)
+    @patch("tradingagents.dataflows.hithink_common.search_tickers")
+    @patch("tradingagents.ticker_resolver._load_name_cache")
+    def test_hithink_exact_match_short_circuits_cache(
+        self, mock_load, mock_search, mock_avail
+    ):
+        mock_search.return_value = [
+            {"ticker": "002241", "name": "歌尔股份", "asset_type": "a-share"},
+        ]
+        result = _resolve_chinese_name("歌尔股份")
+        self.assertEqual(result, "002241")
+        mock_load.assert_not_called()
+
+    @patch("tradingagents.dataflows.hithink_common.is_available", return_value=True)
+    @patch("tradingagents.dataflows.hithink_common.search_tickers")
+    def test_hithink_prefers_exact_over_ranked(self, mock_search, mock_avail):
+        mock_search.return_value = [
+            {"ticker": "601318", "name": "中国平安", "asset_type": "a-share"},
+            {"ticker": "000001", "name": "平安银行", "asset_type": "a-share"},
+        ]
+        self.assertEqual(_resolve_chinese_name("平安银行"), "000001")
+
+    @patch("tradingagents.dataflows.hithink_common.is_available", return_value=True)
+    @patch("tradingagents.dataflows.hithink_common.search_tickers")
+    def test_hithink_falls_back_to_top_a_share_hit(self, mock_search, mock_avail):
+        mock_search.return_value = [
+            {"ticker": "510300", "name": "沪深300ETF", "asset_type": "fund-etf"},
+            {"ticker": "601318", "name": "中国平安", "asset_type": "a-share"},
+        ]
+        self.assertEqual(_resolve_chinese_name("平安"), "601318")
+
+    @patch("tradingagents.dataflows.hithink_common.is_available", return_value=False)
+    @patch("tradingagents.ticker_resolver._load_name_cache")
+    def test_no_key_falls_back_to_cache(self, mock_load, mock_avail):
+        mock_load.return_value = {"歌尔股份": "002241"}
+        self.assertEqual(_resolve_chinese_name("歌尔股份"), "002241")
+
+    @patch("tradingagents.dataflows.hithink_common.is_available", return_value=True)
+    @patch(
+        "tradingagents.dataflows.hithink_common.search_tickers",
+        side_effect=Exception("network down"),
+    )
+    @patch("tradingagents.ticker_resolver._load_name_cache")
+    def test_hithink_error_falls_back_to_cache(self, mock_load, mock_search, mock_avail):
+        mock_load.return_value = {"歌尔股份": "002241"}
+        self.assertEqual(_resolve_chinese_name("歌尔股份"), "002241")
+
+    @patch("tradingagents.dataflows.hithink_common.is_available", return_value=True)
+    @patch("tradingagents.dataflows.hithink_common.search_tickers", return_value=[])
+    @patch("tradingagents.ticker_resolver._load_name_cache")
+    @patch("tradingagents.ticker_resolver._build_name_map")
+    def test_hithink_empty_result_falls_back(
+        self, mock_build, mock_load, mock_search, mock_avail
+    ):
+        mock_load.return_value = {}
+        mock_build.return_value = {}
+        with self.assertRaises(ValueError):
+            _resolve_chinese_name("完全不存在的股票")
+
+
+@pytest.mark.unit
+class FetchCompanyNameFromHithinkTests(unittest.TestCase):
+    """Code → name lookup via HiThink, the rescue tier in _resolve_name."""
+
+    @patch("tradingagents.dataflows.hithink_common.is_available", return_value=True)
+    @patch("tradingagents.dataflows.hithink_common.search_tickers")
+    def test_returns_name_for_matching_code(self, mock_search, mock_avail):
+        from tradingagents.ticker_resolver import _fetch_company_name_from_hithink
+
+        mock_search.return_value = [
+            {"ticker": "600901", "name": "江苏金租", "asset_type": "a-share"},
+        ]
+        self.assertEqual(_fetch_company_name_from_hithink("600901.SS"), "江苏金租")
+        mock_search.assert_called_once_with("600901", asset_type="a-share", limit=10)
+
+    @patch("tradingagents.dataflows.hithink_common.search_tickers")
+    def test_non_a_share_suffix_skips_api(self, mock_search):
+        from tradingagents.ticker_resolver import _fetch_company_name_from_hithink
+
+        self.assertIsNone(_fetch_company_name_from_hithink("1810.HK"))
+        mock_search.assert_not_called()
+
+    @patch("tradingagents.dataflows.hithink_common.is_available", return_value=False)
+    def test_no_key_returns_none(self, mock_avail):
+        from tradingagents.ticker_resolver import _fetch_company_name_from_hithink
+
+        self.assertIsNone(_fetch_company_name_from_hithink("600519.SS"))
+
+    @patch("tradingagents.dataflows.hithink_common.is_available", return_value=True)
+    @patch(
+        "tradingagents.dataflows.hithink_common.search_tickers",
+        side_effect=Exception("boom"),
+    )
+    def test_exception_returns_none(self, mock_search, mock_avail):
+        from tradingagents.ticker_resolver import _fetch_company_name_from_hithink
+
+        self.assertIsNone(_fetch_company_name_from_hithink("600519.SS"))
+
+    @patch("tradingagents.dataflows.hithink_common.is_available", return_value=True)
+    @patch("tradingagents.dataflows.hithink_common.search_tickers")
+    def test_skips_non_matching_items(self, mock_search, mock_avail):
+        from tradingagents.ticker_resolver import _fetch_company_name_from_hithink
+
+        mock_search.return_value = [
+            {"ticker": "600519", "name": "贵州茅台", "asset_type": "a-share"},
+        ]
+        self.assertIsNone(_fetch_company_name_from_hithink("600901.SS"))
+
+
+@pytest.mark.unit
+class ResolveTickerHithinkChainTests(unittest.TestCase):
+    """End-to-end: hithink rescues name resolution when earlier tiers miss."""
+
+    @patch("tradingagents.ticker_resolver._fetch_company_name", return_value=None)
+    @patch(
+        "tradingagents.ticker_resolver._fetch_company_name_from_hithink",
+        return_value="江苏金租",
+    )
+    @patch("tradingagents.ticker_resolver._fetch_company_name_from_db", return_value=None)
+    @patch("tradingagents.ticker_resolver._fetch_company_name_from_akshare", return_value=None)
+    def test_hithink_rescues_name_when_akshare_and_db_miss(
+        self, mock_akshare, mock_db, mock_hithink, mock_yf
+    ):
+        result = resolve_ticker("600901")
+        self.assertEqual(result["ticker"], "600901.SS")
+        self.assertEqual(result["company_name"], "江苏金租")
+
+    @patch("tradingagents.ticker_resolver._fetch_company_name", return_value=None)
+    @patch(
+        "tradingagents.ticker_resolver._fetch_company_name_from_hithink",
+        return_value=None,
+    )
+    @patch("tradingagents.ticker_resolver._fetch_company_name_from_db", return_value="贵州茅台")
+    @patch("tradingagents.ticker_resolver._fetch_company_name_from_akshare", return_value=None)
+    def test_db_still_wins_over_hithink(
+        self, mock_akshare, mock_db, mock_hithink, mock_yf
+    ):
+        result = resolve_ticker("600519")
+        self.assertEqual(result["company_name"], "贵州茅台")
+        mock_hithink.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -110,6 +111,25 @@ def _pin_litellm_overlay(monkeypatch, overlay: dict[str, tuple[float, float]]):
     upstream catalog happens to say today.
     """
     monkeypatch.setattr(pricing, "_load_litellm_overlay", lambda: overlay)
+
+
+def _pin_peak_clock(monkeypatch):
+    """Pin ``cli.stats_handler``'s clock to a fixed DeepSeek *peak* instant.
+
+    ``StatsCallbackHandler._price_tokens`` prices each call at
+    ``datetime.now(timezone.utc)``, and DeepSeek-family rates are halved
+    off-peak — so without a pinned clock, callback cost assertions flip
+    depending on the wall-clock time the suite happens to run.
+    Monday 2026-08-24 02:00 UTC sits squarely inside a peak window.
+    """
+    import cli.stats_handler as stats_handler
+
+    class _FixedDatetime:
+        @staticmethod
+        def now(tz=None):
+            return datetime(2026, 8, 24, 2, 0, tzinfo=UTC)
+
+    monkeypatch.setattr(stats_handler, "datetime", _FixedDatetime)
 
 
 def test_get_price_for_model_finds_known_model(monkeypatch):
@@ -207,6 +227,7 @@ def _make_chat_result(model_name: str, in_tokens: int, out_tokens: int) -> LLMRe
 def test_callback_prices_catalogue_model(monkeypatch):
     """A 1M-token call against a catalog model must use the catalog rate."""
     _pin_litellm_overlay(monkeypatch, {"deepseek-v4-flash": (0.14, 0.28)})
+    _pin_peak_clock(monkeypatch)
     handler = StatsCallbackHandler()
     handler.on_chat_model_start(
         serialized={"kwargs": {"model_name": "deepseek-v4-flash"}},
@@ -224,6 +245,7 @@ def test_callback_prices_multiple_models_independently(monkeypatch):
     ``cost`` is the sum. This is the headline improvement over the
     pre-catalog env-var-only behavior."""
     _pin_litellm_overlay(monkeypatch, {"deepseek-v4-flash": (0.14, 0.28)})
+    _pin_peak_clock(monkeypatch)
     handler = StatsCallbackHandler()
     # DeepSeek V4-Flash: 1M in, 0 out → $0.14
     handler.on_chat_model_start(
@@ -1078,14 +1100,13 @@ class TestLitellmOverlayEdgeCases:
 
 # ---- DeepSeek peak/off-peak schedule ---------------------------------------
 
-from datetime import datetime, timezone  # noqa: E402
 
 from tradingagents.llm_clients.pricing import is_deepseek_peak  # noqa: E402
 
 
 def _utc(day: int, hour: int) -> datetime:
     """2026-08-24 is a Monday; day offsets stay within that week."""
-    return datetime(2026, 8, 24 + day, hour, 0, tzinfo=timezone.utc)
+    return datetime(2026, 8, 24 + day, hour, 0, tzinfo=UTC)
 
 
 class TestIsDeepSeekPeak:

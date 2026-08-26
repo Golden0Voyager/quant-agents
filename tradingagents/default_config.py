@@ -183,8 +183,11 @@ _BASE_CONFIG = {
     # 如需完全禁用 yfinance fallback，可设置环境变量 DISABLE_YFINANCE_FALLBACK=1。
     "data_vendors": {
         "core_stock_apis": "smartmoney_db,quant_db_global,akshare,yfinance",
-        "technical_indicators": "smartmoney_db,akshare,yfinance",
-        "fundamental_data": "smartmoney_db,akshare,yfinance",
+        # hithink (同花顺官方 API) sits between the local DB and akshare for the
+        # methods it implements (financial statements / financial indicators);
+        # methods it does not implement filter it out at chain-build time.
+        "technical_indicators": "smartmoney_db,hithink,akshare,yfinance",
+        "fundamental_data": "smartmoney_db,hithink,akshare,yfinance",
         "news_data": "akshare,yfinance",  # news not stored locally
         "macro_data": "akshare,fred",        # akshare → FRED fallback
         "research_opinion": "akshare,smartmoney_db",  # analyst reports: AkShare online → local DB fallback
