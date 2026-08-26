@@ -26,10 +26,53 @@ without manual conversion work.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 Price = tuple[float, float]
+
+# ---- DeepSeek peak/off-peak schedule ----------------------------------------
+# DeepSeek official pricing has a 50% off-peak discount. Peak hours are
+# 01:00-04:00 and 06:00-10:00 UTC, Monday-Friday; everything else (including
+# all of Saturday/Sunday) is off-peak. SenseNova-routed and ModelScope-routed
+# DeepSeek models mirror the official rate, so the schedule is keyed by model
+# name rather than provider. Pass ``at=`` to get_price / get_price_for_model
+# to apply it; ``at=None`` always returns the peak (standard) rate.
+
+_DEEPSEEK_PEAK_MODELS = frozenset({
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "deepseek-v4-flash-vision-exp",
+    "deepseek-ai/DeepSeek-V4-Flash",
+    "deepseek-ai/DeepSeek-V4-Pro",
+})
+
+# Peak windows as UTC hour ranges [start, end), weekdays only.
+_DEEPSEEK_PEAK_WINDOWS_UTC = ((1, 4), (6, 10))
+
+
+def is_deepseek_peak(at: datetime | None = None) -> bool:
+    """Return True when *at* falls in DeepSeek's peak (full-price) window.
+
+    ``None`` means "now". Naive datetimes are assumed to already be UTC.
+    """
+    if at is None:
+        at = datetime.now(timezone.utc)
+    elif at.tzinfo is not None:
+        at = at.astimezone(timezone.utc)
+    if at.weekday() >= 5:  # Saturday/Sunday are entirely off-peak
+        return False
+    return any(start <= at.hour < end for start, end in _DEEPSEEK_PEAK_WINDOWS_UTC)
+
+
+def _apply_deepseek_schedule(model: str, price: Price | None, at: datetime | None) -> Price | None:
+    """Halve DeepSeek-family rates when *at* is off-peak; pass through otherwise."""
+    if price is None or at is None or model not in _DEEPSEEK_PEAK_MODELS:
+        return price
+    if is_deepseek_peak(at):
+        return price
+    return (price[0] / 2, price[1] / 2)
 
 # ---- Default pricing -------------------------------------------------------
 # Used only for first-time YAML generation (when pricing.yaml doesn't exist).
@@ -44,11 +87,12 @@ _DEFAULT_PRICING: dict[str, dict[str, Price | dict[str, Any]]] = {
     "agnes": {
         "agnes-2.0-flash": (0.00, 0.00),
     },
-    # DeepSeek: official public pricing (cache miss rates) — verified
-    # 2026-07 against https://api-docs.deepseek.com/quick_start/pricing.
+    # DeepSeek: official public pricing (cache-miss PEAK rates) — verified
+    # 2026-08 against https://api-docs.deepseek.com/quick_start/pricing.
+    # Off-peak is 50% off; cache-hit input is $0.014 (flash) / $0.044 (pro).
     "deepseek": {
-        "deepseek-v4-flash": (0.14, 0.28),
-        "deepseek-v4-pro":   (0.435, 0.87),
+        "deepseek-v4-flash": (0.44, 1.32),
+        "deepseek-v4-pro":   (1.32, 3.96),
     },
     # Kimi (Moonshot AI): verified 2026-07 against
     # https://platform.kimi.ai/docs/pricing/chat-k26 and
@@ -63,12 +107,12 @@ _DEFAULT_PRICING: dict[str, dict[str, Price | dict[str, Any]]] = {
     # model's official provider rate since ModelScope passes through at
     # approximately the original model cost.
     "modelscope": {
-        "deepseek-ai/DeepSeek-V4-Flash":   (0.14,  0.28),
-        "deepseek-ai/DeepSeek-V4-Pro":     (0.435, 0.87),
+        "deepseek-ai/DeepSeek-V4-Flash":   (0.44,  1.32),
+        "deepseek-ai/DeepSeek-V4-Pro":     (1.32,  3.96),
         "stepfun-ai/Step-3.7-Flash":       (0.20,  1.15),
         "MiniMax/MiniMax-M3":              (0.30,  1.20),
         "Qwen/Qwen3.5-397B-A17B":         (0.60,  3.60),
-        "ZhipuAI/GLM-5.2":                (1.20,  4.10),
+        "ZhipuAI/GLM-5.2":                (1.40,  4.40),
     },
     # OpenRouter: free-tier models.
     "openrouter": {
@@ -83,26 +127,32 @@ _DEFAULT_PRICING: dict[str, dict[str, Price | dict[str, Any]]] = {
         "sensenova-6.7-flash-lite": {"input": 1.5, "output": 4.5, "currency": "CNY"},
         "sensenova-6.8-flash-lite": {"input": 1.5, "output": 4.5, "currency": "CNY"},
         # SenseNova also routes DeepSeek V4-Flash at the same USD rate.
-        "deepseek-v4-flash": (0.14, 0.28),
+        "deepseek-v4-flash": (0.44, 1.32),
+        # GLM-5.2 official rate; free on the SenseNova Token Plan (500 calls/5h),
+        # kept at the official rate for cost-reference only.
+        "glm-5.2": (1.40, 4.40),
     },
 }
 
 
-def get_price(provider: str, model: str) -> Price | None:
+def get_price(provider: str, model: str, at: datetime | None = None) -> Price | None:
     """Look up ``(input, output)`` USD/M token rates for a provider/model.
 
     Checks the user ``pricing.yaml``. Returns None when the provider or
     model isn't listed — the caller falls back to env-var defaults or
     skips cost estimation for that call.
+
+    When *at* is given, DeepSeek-family models are priced at half rate
+    during the official off-peak windows (see ``is_deepseek_peak``).
     """
     yaml_pricing = _load_pricing_yaml()
     bucket = yaml_pricing.get(provider.lower())
     if bucket is not None and model in bucket:
-        return bucket[model]
+        return _apply_deepseek_schedule(model, bucket[model], at)
     return None
 
 
-def get_price_for_model(model: str) -> Price | None:
+def get_price_for_model(model: str, at: datetime | None = None) -> Price | None:
     """Provider-agnostic lookup by model name.
 
     The LangChain callback handler can only see the model name (it
@@ -112,14 +162,18 @@ def get_price_for_model(model: str) -> Price | None:
     Lookup order (first match wins):
     1. LiteLLM community catalog (auto-fetched, 24h cache)
     2. User ``pricing.yaml`` (``<project-root>/pricing.yaml``)
+
+    When *at* is given, DeepSeek-family models are priced at half rate
+    during the official off-peak windows, whichever source supplied the
+    base rate.
     """
     overlay = _load_litellm_overlay()
     if model in overlay:
-        return overlay[model]
+        return _apply_deepseek_schedule(model, overlay[model], at)
     yaml_pricing = _load_pricing_yaml()
     for provider_models in yaml_pricing.values():
         if model in provider_models:
-            return provider_models[model]
+            return _apply_deepseek_schedule(model, provider_models[model], at)
     return None
 
 

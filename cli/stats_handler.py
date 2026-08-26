@@ -1,5 +1,6 @@
 import os
 import threading
+from datetime import datetime, timezone
 from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
@@ -165,7 +166,7 @@ class StatsCallbackHandler(BaseCallbackHandler):
         per-model breakdown (and from the rolled-up total) rather than
         showing a misleading $0.00.
         """
-        price = get_price_for_model(model_name)
+        price = get_price_for_model(model_name, at=datetime.now(timezone.utc))
         if price is None:
             if self._default_input_price is None or self._default_output_price is None:
                 return None

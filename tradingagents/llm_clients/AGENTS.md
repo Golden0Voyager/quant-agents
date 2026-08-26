@@ -17,6 +17,8 @@ LLM 客户端层：多提供商接入、能力探测、定价与限流。
 - `deepseek-reasoner` 不支持 `tool_choice`：`with_structured_output` 抛
   `NotImplementedError`，上层必须走自由文本回退
 - MiniMax M2.x 用 `reasoning_split` 提取 `reasoning_content`（不是 sidecar 模式）
+- DeepSeek 系模型（含 sensenova/modelscope 镜像）有峰谷价：峰值 01:00-04:00、06:00-10:00
+  UTC 周一至周五，其余半价；`get_price*` 传 `at=` 才启用折扣，`stats_handler` 已接入
 - `NormalizedChatOpenAI` 负责 Responses API 归一化
 - ModelScope 的 `deepseek-ai/DeepSeek-V4-Pro` / `Qwen/Qwen3.5-397B-A17B` 自由文本正常，
   但带 `tool_choice` 的结构化请求返回 `choices: null`（langchain 抛 TypeError）——

@@ -54,6 +54,7 @@ def _priced_models() -> list[tuple[str, str]]:
         ("kimi", "kimi-k3"),
         ("sensenova", "sensenova-6.8-flash-lite"),
         ("sensenova", "deepseek-v4-flash"),
+        ("sensenova", "glm-5.2"),
     ]
 
 
@@ -93,9 +94,9 @@ def test_sensenova_flash_lite_post_beta_rate():
 
 
 def test_deepseek_pricing_matches_published_rates():
-    """DeepSeek's published V4-Flash rate is $0.14/$0.28 per 1M
-    (cache-miss input / output, verified 2026-07)."""
-    assert get_price("deepseek", "deepseek-v4-flash") == (0.14, 0.28)
+    """DeepSeek's published V4-Flash rate is $0.44/$1.32 per 1M
+    (cache-miss input / output, PEAK window, verified 2026-08)."""
+    assert get_price("deepseek", "deepseek-v4-flash") == (0.44, 1.32)
 
 
 # ---- Provider-agnostic lookup (used by callback) -------------------------
@@ -478,7 +479,7 @@ def test_local_catalog_used_when_litellm_omits_provider(tmp_path, monkeypatch):
     monkeypatch.setattr(pricing, "_LITELLM_CACHE_PATH", str(cache_path))
 
     # Local-only entries must still resolve.
-    assert get_price_for_model("deepseek-v4-flash") == (0.14, 0.28)
+    assert get_price_for_model("deepseek-v4-flash") == (0.44, 1.32)
     assert get_price_for_model("agnes-2.0-flash") == (0.00, 0.00)
     assert get_price_for_model("kimi-k2.6") == (0.95, 4.00)
 
@@ -690,7 +691,7 @@ class TestWriteDefaultPricingYaml:
         # Should have loaded content from the now-written default YAML.
         assert "deepseek" in result
         # _DEFAULT_PRICING uses hardcoded ¥7.25/$ for the generated yaml
-        assert result["deepseek"]["deepseek-v4-flash"] == (0.14, 0.28)
+        assert result["deepseek"]["deepseek-v4-flash"] == (0.44, 1.32)
 
 
 # ---- USD/CNY exchange rate ------------------------------------------------
@@ -917,7 +918,7 @@ class TestGetPriceEdgeCases:
 
     def test_provider_case_insensitive(self):
         """get_price lowercases the provider before lookup."""
-        assert get_price("DEEPSEEK", "deepseek-v4-flash") == (0.14, 0.28)
+        assert get_price("DEEPSEEK", "deepseek-v4-flash") == (0.44, 1.32)
         assert get_price("Agnes", "agnes-2.0-flash") == (0.00, 0.00)
         assert get_price("Sensenova", "sensenova-6.8-flash-lite") == (
             pytest.approx(0.22, rel=1e-2),
@@ -1073,3 +1074,75 @@ class TestLitellmOverlayEdgeCases:
                 overlay = _load_litellm_overlay()
         # Despite backup read failure, the fresh fetch should still be used.
         assert overlay["gpt-5.4"] == (2.50, 15.00)
+
+
+# ---- DeepSeek peak/off-peak schedule ---------------------------------------
+
+from datetime import datetime, timezone  # noqa: E402
+
+from tradingagents.llm_clients.pricing import is_deepseek_peak  # noqa: E402
+
+
+def _utc(day: int, hour: int) -> datetime:
+    """2026-08-24 is a Monday; day offsets stay within that week."""
+    return datetime(2026, 8, 24 + day, hour, 0, tzinfo=timezone.utc)
+
+
+class TestIsDeepSeekPeak:
+    """Peak = 01:00-04:00 and 06:00-10:00 UTC, Mon-Fri; everything else off-peak."""
+
+    @pytest.mark.parametrize("day,hour", [
+        (0, 1), (0, 3), (0, 6), (0, 9),      # Monday, inside both windows
+        (4, 2), (4, 8),                       # Friday, inside both windows
+    ])
+    def test_peak_hours(self, day, hour):
+        assert is_deepseek_peak(_utc(day, hour)) is True
+
+    @pytest.mark.parametrize("day,hour", [
+        (0, 0), (0, 4), (0, 5), (0, 10),     # Monday, window boundaries outside
+        (0, 12), (0, 23),                     # Monday, clearly off-peak
+        (5, 2), (6, 8),                       # weekend: always off-peak
+    ])
+    def test_off_peak_hours(self, day, hour):
+        assert is_deepseek_peak(_utc(day, hour)) is False
+
+    def test_naive_datetime_treated_as_utc(self):
+        assert is_deepseek_peak(datetime(2026, 8, 24, 2, 0)) is True
+
+    def test_none_defaults_to_now(self):
+        # Just exercise the default path; the result depends on wall time.
+        assert isinstance(is_deepseek_peak(None), bool)
+
+
+class TestDeepSeekOffPeakPricing:
+    """get_price / get_price_for_model halve DeepSeek-family rates off-peak."""
+
+    def test_peak_returns_full_rate(self):
+        assert get_price("deepseek", "deepseek-v4-flash", at=_utc(0, 2)) == (0.44, 1.32)
+
+    def test_off_peak_returns_half_rate(self):
+        assert get_price("deepseek", "deepseek-v4-flash", at=_utc(0, 12)) == (0.22, 0.66)
+
+    def test_weekend_returns_half_rate(self):
+        assert get_price("deepseek", "deepseek-v4-flash", at=_utc(5, 2)) == (0.22, 0.66)
+
+    def test_none_at_returns_full_rate(self):
+        """Callers that don't pass a timestamp keep the stable peak rate."""
+        assert get_price("deepseek", "deepseek-v4-flash") == (0.44, 1.32)
+
+    def test_sensenova_mirror_also_discounted(self):
+        """SenseNova-routed V4-Flash mirrors the official rate and schedule."""
+        assert get_price("sensenova", "deepseek-v4-flash", at=_utc(0, 12)) == (0.22, 0.66)
+
+    def test_modelscope_name_also_discounted(self):
+        price = get_price("modelscope", "deepseek-ai/DeepSeek-V4-Pro", at=_utc(0, 12))
+        assert price == (0.66, 1.98)
+
+    def test_non_deepseek_model_not_discounted(self):
+        assert get_price("sensenova", "glm-5.2", at=_utc(0, 12)) == (1.40, 4.40)
+
+    def test_model_lookup_off_peak_via_overlay(self, monkeypatch):
+        """The discount applies even when the LiteLLM overlay wins the lookup."""
+        _pin_litellm_overlay(monkeypatch, {"deepseek-v4-flash": (1.0, 2.0)})
+        assert get_price_for_model("deepseek-v4-flash", at=_utc(0, 12)) == (0.5, 1.0)
+        assert get_price_for_model("deepseek-v4-flash", at=_utc(0, 2)) == (1.0, 2.0)
