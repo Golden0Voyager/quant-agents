@@ -217,6 +217,12 @@ class MktDataValidatorIndicatorExceptionTests(unittest.TestCase):
 class TestVerifiedFundamentalsSnapshot:
     """build_verified_fundamentals_snapshot extracts key fundamentals from vendor text."""
 
+    @pytest.fixture(autouse=True)
+    def _no_valuation_anchor(self, monkeypatch):
+        # Keep these tests hermetic: the hithink anchor is optional
+        # enrichment exercised separately in TestValuationAnchor.
+        monkeypatch.setattr(validator, "_valuation_anchor", lambda symbol: None)
+
     SMARTMONEY_FUNDAMENTALS = """\
 # Fundamentals for 600519.SS (Kweichow Moutai) as of 2026-06-20
 # Source: quant_core.db (local SQLite)
@@ -353,3 +359,91 @@ class TestVerifiedFundamentalsSnapshot:
         assert "error" in snap
         assert "Verified fundamentals snapshot" not in md
         assert "unavailable" in md.lower()
+
+
+@pytest.mark.unit
+class TestValuationAnchor:
+    """hithink valuations/snapshot as the cross-validation anchor."""
+
+    FUNDAMENTALS = """\
+# Fundamentals for 600519.SS (Kweichow Moutai) as of 2026-06-20
+
+- PE(TTM): 25.50
+- PB: 8.20
+- PS(TTM): 12.30
+"""
+
+    def _route(self, monkeypatch, text, vendor="smartmoney_db"):
+        from tradingagents.dataflows.interface import VendorRouteResult
+
+        monkeypatch.setattr(
+            validator,
+            "route_to_vendor_with_source",
+            lambda method, *args, **kwargs: VendorRouteResult(text, vendor),
+        )
+
+    def test_anchor_overrides_conflicting_multiples_and_flags(self, monkeypatch):
+        self._route(monkeypatch, self.FUNDAMENTALS)
+        monkeypatch.setattr(
+            validator,
+            "_valuation_anchor",
+            lambda symbol: {
+                "pe_ttm": 20.00,  # >5% off the extracted 25.50 -> discrepancy
+                "pb_mrq": 8.28,   # within tolerance -> silent override
+                "ps_ttm": 12.30,
+                "pcf_ttm": 13.67,
+            },
+        )
+        snap = validator.build_verified_fundamentals_snapshot("600519.SS", "2026-06-20")
+        assert snap["pe_ttm"] == 20.00
+        assert snap["pb"] == 8.28
+        assert snap["ps_ttm"] == 12.30
+        assert snap["pcf_ttm"] == 13.67
+        assert snap["valuation_anchor"] == "hithink"
+        assert len(snap["valuation_discrepancies"]) == 1
+        assert "PE(TTM)" in snap["valuation_discrepancies"][0]
+
+        md = validator.render_fundamentals_snapshot(snap)
+        assert "PCF(TTM)" in md
+        assert "hithink official" in md
+        assert "Cross-validation discrepancies" in md
+
+    def test_anchor_fills_missing_multiples_without_notes(self, monkeypatch):
+        self._route(monkeypatch, "# Fundamentals\n- ROE: 18.50%")
+        monkeypatch.setattr(
+            validator,
+            "_valuation_anchor",
+            lambda symbol: {"pe_ttm": 20.00, "pb_mrq": 6.48},
+        )
+        snap = validator.build_verified_fundamentals_snapshot("600519.SS", "2026-06-20")
+        assert snap["pe_ttm"] == 20.00
+        assert snap["pb"] == 6.48
+        assert snap["roe"] == 18.50
+        assert "valuation_discrepancies" not in snap
+
+    def test_anchor_alone_sustains_snapshot_when_text_unavailable(self, monkeypatch):
+        self._route(monkeypatch, "NO_DATA_AVAILABLE: nothing", vendor=None)
+        monkeypatch.setattr(
+            validator,
+            "_valuation_anchor",
+            lambda symbol: {"pe_ttm": 20.00},
+        )
+        snap = validator.build_verified_fundamentals_snapshot("600519.SS", "2026-06-20")
+        assert "error" not in snap
+        assert snap["pe_ttm"] == 20.00
+
+    def test_anchor_failure_is_invisible(self, monkeypatch):
+        self._route(monkeypatch, self.FUNDAMENTALS)
+        monkeypatch.setattr(validator, "_valuation_anchor", lambda symbol: None)
+        snap = validator.build_verified_fundamentals_snapshot("600519.SS", "2026-06-20")
+        assert snap["pe_ttm"] == 25.50
+        assert "valuation_anchor" not in snap
+
+    def test_real_anchor_helper_swallows_errors(self, monkeypatch):
+        import tradingagents.dataflows.hithink_vendor as hv
+
+        monkeypatch.setattr(
+            hv, "fetch_valuation_metrics",
+            lambda ticker: (_ for _ in ()).throw(RuntimeError("down")),
+        )
+        assert validator._valuation_anchor("600519.SS") is None

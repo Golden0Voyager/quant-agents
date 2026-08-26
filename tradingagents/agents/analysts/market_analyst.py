@@ -1,6 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
+    get_auction_snapshot,
     get_chip_distribution,
     get_fund_flow,
     get_index_daily,
@@ -9,6 +10,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_limit_up_down,
     get_sector_fund_flow,
+    get_short_term_benchmark,
     get_stock_data,
     get_verified_market_snapshot,
     sanitize_company_name_in_report,
@@ -28,6 +30,8 @@ def create_market_analyst(llm):
         get_fund_flow,
         get_sector_fund_flow,
         get_limit_up_down,
+        get_auction_snapshot,
+        get_short_term_benchmark,
         get_index_daily,
         get_verified_market_snapshot,
     ]
@@ -39,6 +43,8 @@ def create_market_analyst(llm):
         "get_fund_flow": "Call the standalone get_fund_flow tool directly (do not pass it to get_indicators) to analyze capital-flow trends.",
         "get_sector_fund_flow": "Use get_sector_fund_flow to analyze sector-level fund flow and industry rotation.",
         "get_limit_up_down": "Call get_limit_up_down with the current date to gauge daily limit-up/limit-down market breadth.",
+        "get_auction_snapshot": "Call get_auction_snapshot for this ticker to read pre-open call-auction strength (竞价强弱): auction pct, volume ratio, and unmatched volume explain the day's open.",
+        "get_short_term_benchmark": "Call get_short_term_benchmark to see where short-term money pointed at the open (短线风向标 benchmark stocks).",
         "get_index_daily": "Call get_index_daily for relevant major indices to compare the stock with its home market or board.",
         "get_verified_market_snapshot": "Before the final report, call get_verified_market_snapshot for this ticker and date; use it as the source of truth for exact OHLCV, price-level, and indicator claims.",
     }
