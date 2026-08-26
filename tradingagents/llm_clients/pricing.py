@@ -44,8 +44,8 @@ _DEEPSEEK_PEAK_MODELS = frozenset({
     "deepseek-v4-flash",
     "deepseek-v4-pro",
     "deepseek-v4-flash-vision-exp",
-    "deepseek-ai/DeepSeek-V4-Flash",
-    "deepseek-ai/DeepSeek-V4-Pro",
+    "deepseek-ai/DeepSeek-V4-Flash-0731",
+    "deepseek-ai/DeepSeek-V4-Pro-0813",
 })
 
 # Peak windows as UTC hour ranges [start, end), weekdays only.
@@ -107,11 +107,13 @@ _DEFAULT_PRICING: dict[str, dict[str, Price | dict[str, Any]]] = {
     # model's official provider rate since ModelScope passes through at
     # approximately the original model cost.
     "modelscope": {
-        "deepseek-ai/DeepSeek-V4-Flash":   (0.44,  1.32),
-        "deepseek-ai/DeepSeek-V4-Pro":     (1.32,  3.96),
+        "deepseek-ai/DeepSeek-V4-Flash-0731": (0.44,  1.32),
+        "deepseek-ai/DeepSeek-V4-Pro-0813":   (1.32,  3.96),
         "stepfun-ai/Step-3.7-Flash":       (0.20,  1.15),
         "MiniMax/MiniMax-M3":              (0.30,  1.20),
         "Qwen/Qwen3.5-397B-A17B":         (0.60,  3.60),
+        # Estimated from Qwen ~27B tier rates; verify official price.
+        "Qwen/Qwen3.8-27B":               (0.20,  0.80),
         "ZhipuAI/GLM-5.2":                (1.40,  4.40),
     },
     # OpenRouter: free-tier models.

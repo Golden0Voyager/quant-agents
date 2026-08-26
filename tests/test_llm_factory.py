@@ -155,7 +155,7 @@ class ProviderModelCatalogTests(unittest.TestCase):
         for mode in ("quick", "deep"):
             options = get_model_options("modelscope", mode)
             values = [v for _, v in options]
-            self.assertIn("deepseek-ai/DeepSeek-V4-Flash", values)
+            self.assertIn("deepseek-ai/DeepSeek-V4-Flash-0731", values)
             self.assertIn("custom", values)
 
     def test_nvidia_options_listed(self):

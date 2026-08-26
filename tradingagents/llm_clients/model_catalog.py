@@ -202,15 +202,14 @@ MODEL_OPTIONS: ProviderModeOptions = {
     # ModelScope: Chinese model hub, daily 2000 free requests.
     "modelscope": {
         "quick": [
-            ("DeepSeek-V4-Flash - Latest V4, 1M ctx", "deepseek-ai/DeepSeek-V4-Flash"),
-            ("Qwen3.5-397B-A17B - Alibaba MoE flagship", "Qwen/Qwen3.5-397B-A17B"),
+            ("DeepSeek-V4-Flash-0731 - Latest V4, 1M ctx", "deepseek-ai/DeepSeek-V4-Flash-0731"),
+            ("Qwen3.8-27B - Alibaba, tool-choice verified", "Qwen/Qwen3.8-27B"),
             ("Step-3.7-Flash - StepFun 128K ctx", "stepfun-ai/Step-3.7-Flash"),
-            ("MiniMax-M3 - MiniMax flagship", "MiniMax/MiniMax-M3"),
             ("Custom model ID", "custom"),
         ],
         "deep": [
-            ("DeepSeek-V4-Pro - Full capacity reasoning", "deepseek-ai/DeepSeek-V4-Pro"),
-            ("DeepSeek-V4-Flash - Latest V4, 1M ctx", "deepseek-ai/DeepSeek-V4-Flash"),
+            ("DeepSeek-V4-Pro-0813 - Full capacity reasoning", "deepseek-ai/DeepSeek-V4-Pro-0813"),
+            ("DeepSeek-V4-Flash-0731 - Latest V4, 1M ctx", "deepseek-ai/DeepSeek-V4-Flash-0731"),
             ("GLM-5.2 - Zhipu AI flagship", "ZhipuAI/GLM-5.2"),
             ("Qwen3.5-397B-A17B - Alibaba MoE flagship", "Qwen/Qwen3.5-397B-A17B"),
             ("Custom model ID", "custom"),

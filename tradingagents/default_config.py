@@ -111,22 +111,28 @@ _BASE_CONFIG = {
     # Each entry: {"provider": str, "model": str}
     # The first entry's provider and backend_url match the primary config;
     # subsequent entries use their provider's default endpoint.
-    # Verified 2026-08-25: every tier below answers with_structured_output
-    # (tool_choice) correctly. ModelScope's deepseek-ai/DeepSeek-V4-Pro and
-    # Qwen/Qwen3.5-397B-A17B were removed — both return `choices: null` on
-    # tool_choice requests, forcing the structured roles into free-text
-    # fallback; deepseek-ai/DeepSeek-V4-Flash and MiniMax/MiniMax-M3 were
-    # removed — ModelScope no longer serves them (400 "no provider").
+    # Verified 2026-08-26: every tier below answers with_structured_output
+    # (tool_choice) correctly. ModelScope renamed its DeepSeek deployments —
+    # the new dated IDs (DeepSeek-V4-Flash-0731 / DeepSeek-V4-Pro-0813)
+    # support tool_choice; the undated originals were retired server-side
+    # (400 "no provider"). Qwen/Qwen3.8-27B is the only Qwen tier verified
+    # for tool_choice — Qwen3.5-397B-A17B returns `choices: null` on
+    # tool_choice requests. MiniMax/MiniMax-M3 (retired), moonshotai/Kimi-K3
+    # (no inference provider) and Tencent-Hunyuan/Hy3 (null choices even on
+    # plain calls) are all unusable and stay out.
     "quick_think_fallback": [
         {"provider": "sensenova",   "model": "sensenova-6.8-flash-lite"},
         {"provider": "sensenova",   "model": "deepseek-v4-flash"},
+        {"provider": "modelscope",  "model": "deepseek-ai/DeepSeek-V4-Flash-0731"},
         {"provider": "modelscope",  "model": "stepfun-ai/Step-3.7-Flash"},
+        {"provider": "modelscope",  "model": "Qwen/Qwen3.8-27B"},
         {"provider": "modelscope",  "model": "ZhipuAI/GLM-5.2"},
         {"provider": "openrouter",  "model": "nvidia/nemotron-3-ultra-550b-a55b:free"},
         {"provider": "openrouter",  "model": "nvidia/nemotron-3-super-120b-a12b:free"},
     ],
     "deep_think_fallback": [
         {"provider": "sensenova",   "model": "deepseek-v4-flash"},
+        {"provider": "modelscope",  "model": "deepseek-ai/DeepSeek-V4-Pro-0813"},
         {"provider": "modelscope",  "model": "ZhipuAI/GLM-5.2"},
         {"provider": "modelscope",  "model": "stepfun-ai/Step-3.7-Flash"},
         {"provider": "openrouter",  "model": "nvidia/nemotron-3-ultra-550b-a55b:free"},

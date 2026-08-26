@@ -1135,7 +1135,7 @@ class TestDeepSeekOffPeakPricing:
         assert get_price("sensenova", "deepseek-v4-flash", at=_utc(0, 12)) == (0.22, 0.66)
 
     def test_modelscope_name_also_discounted(self):
-        price = get_price("modelscope", "deepseek-ai/DeepSeek-V4-Pro", at=_utc(0, 12))
+        price = get_price("modelscope", "deepseek-ai/DeepSeek-V4-Pro-0813", at=_utc(0, 12))
         assert price == (0.66, 1.98)
 
     def test_non_deepseek_model_not_discounted(self):

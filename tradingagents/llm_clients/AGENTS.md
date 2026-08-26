@@ -20,10 +20,13 @@ LLM 客户端层：多提供商接入、能力探测、定价与限流。
 - DeepSeek 系模型（含 sensenova/modelscope 镜像）有峰谷价：峰值 01:00-04:00、06:00-10:00
   UTC 周一至周五，其余半价；`get_price*` 传 `at=` 才启用折扣，`stats_handler` 已接入
 - `NormalizedChatOpenAI` 负责 Responses API 归一化
-- ModelScope 的 `deepseek-ai/DeepSeek-V4-Pro` / `Qwen/Qwen3.5-397B-A17B` 自由文本正常，
-  但带 `tool_choice` 的结构化请求返回 `choices: null`（langchain 抛 TypeError）——
-  不能放进会服务结构化角色的 fallback 链；`deepseek-ai/DeepSeek-V4-Flash` 与
-  `MiniMax/MiniMax-M3` 已被 ModelScope 下架（400 "no provider supported"）
+- ModelScope 的 DeepSeek 部署已改名：无日期的 `deepseek-ai/DeepSeek-V4-Flash` / `-Pro`
+  已下架（400 "no provider"），新 ID `DeepSeek-V4-Flash-0731` / `DeepSeek-V4-Pro-0813`
+  实测自由文本与 `tool_choice` 结构化均正常，已回配到 fallback 链。
+  其余实测（2026-08-26）：`Qwen/Qwen3.8-27B` 结构化正常（quick 链可用）；
+  `Qwen/Qwen3.5-397B-A17B` 自由文本正常但 `tool_choice` 返回 `choices: null`；
+  `Tencent-Hunyuan/Hy3` 连自由文本都返回 `choices: null`；`moonshotai/Kimi-K3` 无推理
+  服务（400）、`MiniMax/MiniMax-M3` 已下架（400）——这些都不要放进 fallback 链
 - 新提供商密钥入 `.env`：如 `AGNES_API_KEY`、`MODELSCOPE_API_KEY`、`NVIDIA_API_KEY`；
   远程 Ollama 用 `OLLAMA_BASE_URL`
 
