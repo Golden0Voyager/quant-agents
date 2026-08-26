@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from typing import Any
 
 import pandas as pd
 from stockstats import wrap
@@ -192,6 +193,70 @@ def _extract_fundamental_metrics(text: str) -> dict[str, float]:
     return metrics
 
 
+# ---------------------------------------------------------------------------
+# HiThink valuation cross-validation anchor
+# ---------------------------------------------------------------------------
+
+# Regex-extracted key -> hithink valuations/snapshot key.
+_ANCHOR_KEY_MAP: dict[str, str] = {
+    "pe_ttm": "pe_ttm",
+    "pb": "pb_mrq",
+    "ps_ttm": "ps_ttm",
+}
+_ANCHOR_LABELS = {"pe_ttm": "PE(TTM)", "pb": "PB", "ps_ttm": "PS(TTM)"}
+# Multiples from two vendors computed off slightly different price/period
+# bases routinely differ by a percent or two; only flag real disagreements.
+_ANCHOR_REL_TOLERANCE = 0.05
+
+
+def _valuation_anchor(symbol: str) -> dict[str, float] | None:
+    """Official HiThink valuation multiples, or None on any failure.
+
+    Best-effort: non-A-share tickers, a missing key, and empty snapshots all
+    degrade to None (no anchor) rather than failing the snapshot build.
+    """
+    try:
+        from tradingagents.dataflows.hithink_vendor import fetch_valuation_metrics
+
+        return fetch_valuation_metrics(symbol)
+    except Exception:  # noqa: BLE001 — anchor is optional enrichment
+        return None
+
+
+def _apply_valuation_anchor(
+    metrics: dict[str, float], anchor: dict[str, float]
+) -> list[str]:
+    """Merge anchored multiples into *metrics*; return discrepancy notes.
+
+    The official structured snapshot wins on conflict (a regex scrape of
+    vendor prose is the less reliable source); the displaced value is
+    recorded as a discrepancy note so the report can mention it.
+    """
+    notes: list[str] = []
+    for key, anchor_key in _ANCHOR_KEY_MAP.items():
+        anchored = anchor.get(anchor_key)
+        if anchored is None:
+            continue
+        extracted = metrics.get(key)
+        if extracted is None:
+            metrics[key] = anchored
+            continue
+        if (
+            extracted != 0
+            and abs(anchored - extracted) / max(abs(extracted), 1.0)
+            > _ANCHOR_REL_TOLERANCE
+        ):
+            notes.append(
+                f"{_ANCHOR_LABELS[key]}: vendor text {extracted:.2f} vs "
+                f"hithink official {anchored:.2f} (official kept)"
+            )
+        metrics[key] = anchored
+    pcf = anchor.get("pcf_ttm")
+    if pcf is not None:
+        metrics["pcf_ttm"] = pcf
+    return notes
+
+
 def build_verified_fundamentals_snapshot(symbol: str, curr_date: str) -> dict:
     """Build a structured fundamentals snapshot from configured vendors.
 
@@ -207,29 +272,42 @@ def build_verified_fundamentals_snapshot(symbol: str, curr_date: str) -> dict:
         return {"symbol": symbol, "as_of": curr_date, "error": str(exc)}
 
     text = routed.data
-    metadata = {
+    metadata: dict[str, Any] = {
         "symbol": symbol,
         "as_of": curr_date,
         "source": routed.vendor,
     }
 
+    anchor = _valuation_anchor(symbol)
     if not text or (
         "NO_DATA_AVAILABLE" in text
         or "DATA_UNAVAILABLE" in text
         or "No fundamentals available" in text
     ):
-        return {**metadata, "error": "fundamentals data unavailable"}
+        if not anchor:
+            return {**metadata, "error": "fundamentals data unavailable"}
+        # Fundamentals prose unavailable — the official valuation snapshot
+        # can still anchor PE/PB/PS/PCF on its own.
+        metrics: dict[str, float] = {}
+    else:
+        metrics = _extract_fundamental_metrics(text)
 
-    metrics = _extract_fundamental_metrics(text)
+    discrepancies: list[str] = []
+    if anchor:
+        discrepancies = _apply_valuation_anchor(metrics, anchor)
+        metadata["valuation_anchor"] = "hithink"
     if not metrics:
         return {**metadata, "error": "no recognized fundamental metrics"}
-    return {**metadata, **metrics}
+    result = {**metadata, **metrics}
+    if discrepancies:
+        result["valuation_discrepancies"] = discrepancies
+    return result
 
 
 def render_fundamentals_snapshot(snapshot: dict) -> str:
     """Render a fundamentals snapshot dict to the markdown block injected into prompts."""
     symbol = snapshot.get("symbol", "Unknown")
-    metric_keys = set(_FUNDAMENTAL_PATTERNS)
+    metric_keys = set(_FUNDAMENTAL_PATTERNS) | {"pcf_ttm"}
     if snapshot.get("error") or not metric_keys.intersection(snapshot):
         reason = snapshot.get("error", "no recognized fundamental metrics")
         return (
@@ -242,6 +320,12 @@ def render_fundamentals_snapshot(snapshot: dict) -> str:
         f"## Verified fundamentals snapshot for {symbol.upper()}",
         f"- Analysis date: {snapshot.get('as_of', 'unknown')}",
         f"- Source vendor: {snapshot.get('source') or 'unknown'}",
+    ]
+    if snapshot.get("valuation_anchor"):
+        lines.append(
+            f"- Valuation multiples anchored by: {snapshot['valuation_anchor']} official snapshot"
+        )
+    lines += [
         "",
         "| Metric | Value |",
         "|---|---:|",
@@ -250,6 +334,7 @@ def render_fundamentals_snapshot(snapshot: dict) -> str:
         ("pe_ttm", "PE(TTM)"),
         ("pb", "PB"),
         ("ps_ttm", "PS(TTM)"),
+        ("pcf_ttm", "PCF(TTM)"),
         ("dividend_yield", "Dividend Yield (%)"),
         ("market_cap_billion_cny", "Market Cap (billion CNY)"),
         ("roe", "ROE (%)"),
@@ -273,6 +358,11 @@ def render_fundamentals_snapshot(snapshot: dict) -> str:
 
     if len(lines) <= 4:
         lines.append("| (no fundamentals available) | N/A |")
+
+    discrepancies = snapshot.get("valuation_discrepancies")
+    if discrepancies:
+        lines += ["", "Cross-validation discrepancies (vendor text vs hithink official):"]
+        lines += [f"- {note}" for note in discrepancies]
 
     lines.extend([
         "",

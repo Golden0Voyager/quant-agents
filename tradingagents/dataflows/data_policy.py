@@ -320,6 +320,27 @@ _POLICIES: dict[str, ToolPolicy] = {
         impact="medium",
         allowed_vendors=("hithink",),
     ),
+    "get_valuation_snapshot": ToolPolicy(
+        applicable_markets=frozenset({"XSHG"}),
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("hithink",),
+    ),
+    "get_auction_snapshot": ToolPolicy(
+        applicable_markets=frozenset({"XSHG"}),
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("hithink",),
+    ),
+    "get_short_term_benchmark": ToolPolicy(
+        applicable_markets=frozenset({"XSHG"}),
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="low",
+        allowed_vendors=("hithink",),
+    ),
 }
 
 _LEGACY_POLICY = ToolPolicy(

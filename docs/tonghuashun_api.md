@@ -56,7 +56,7 @@
 | `/api/meta/tickers/search` | 名称/代码跨市场消歧 → 唯一 thscode | `q=贵州茅台` |
 | `/api/meta/tickers/list` | 代码表分页获取 | 按资产类型 |
 | `/dump/market-dumps`（API: `/api/dump/...`） | 全市场 10 年日K + 复权因子 Parquet | 预签名链接一次拉全量 |
-| `/api/a-share/auction/snapshot` + `/short-term-benchmark` | 集合竞价快照 + 短线风向标基准 | 盘前数据 |
+| `/api/a-share/auction/snapshot` + `/api/a-share/auction/short-term-benchmark` | 集合竞价快照 + 短线风向标基准 | 盘前数据 |
 
 #### B. 财务（5）
 
@@ -119,10 +119,10 @@ tushare 为 opt-in，仅当 `tushare_enabled` 配置或 `TUSHARE_ENABLED=1` 时�
 | `get_dragon_tiger` | `dragon-tiger-list` | 强匹配 | 分机构榜/游资榜，信息量大于现有版本 |
 | `get_limit_up_down` | `limit-up/down/break-pool` + `limit-up-ladder` | 强匹配 | 连板天梯是现版本没有的维度 |
 | ticker_resolver 的 akshare 模糊匹配 | `meta/tickers/search` | 🔥 强匹配 | 0825 批次 9 只票公司名解析失败（8 只 A 股 + 1810.HK 显示 `--`）正是此环节；官方消歧根治 |
-| `get_historical_valuation` / `get_industry_valuation`（部分） | `valuations/snapshot` | 增强 | 官方估值快照可作本地分位计算的交叉校验源，喂给 `market_data_validator` |
+| `get_historical_valuation` / `get_industry_valuation`（部分） | `valuations/snapshot` | 增强 ✅ 已落地 | 官方估值快照（PE/PB/PS/PCF）已作交叉校验锚喂给 `market_data_validator`（`get_valuation_snapshot` + `fetch_valuation_metrics`） |
 | `get_dividend_history` | `adjustment-factors` | 部分 | 事件流含现金分红/送股/配股，够复权与分红历史用 |
 | （无现有对应） | `anomaly-analysis-stock` | 全新增量 ✅ 已落地 | "个股异动原因"维度：`get_anomaly_reason`，Sentiment 分析师预取注入（查不到=DATA_UNAVAILABLE 降级） |
-| （无现有对应） | `auction/snapshot` + `short-term-benchmark` | 全新增量 | 支持盘前决策场景 |
+| （无现有对应） | `auction/snapshot` + `auction/short-term-benchmark` | 全新增量 ✅ 已落地 | `get_auction_snapshot` / `get_short_term_benchmark` 作为 market analyst 工具（XSHG-only）支持盘前决策场景 |
 
 #### 🟡 部分匹配
 
@@ -182,7 +182,7 @@ vendor chain 示例（以 get_income_statement 为例）：
 |---|---|---|
 | **P0** | 三表×3 + indicators + hot_rank 替代 + tickers/search 接入 resolver | 最近两批报告中出现频率最高的降级项 |
 | P1 ✅ | dragon_tiger + limit_up_down + 异动原因（新增 prompt 维度） | Governance / Sentiment 增强 |
-| P2 | valuations 交叉校验、竞价数据盘前模式 | validator 增强、盘前决策 |
+| P2 ✅ | valuations 交叉校验、竞价数据盘前模式 | validator 增强、盘前决策 |
 
 ---
 
@@ -193,10 +193,13 @@ vendor chain 示例（以 get_income_statement 为例）：
 标的检索 / 交易日历(243日) / 行情快照 / 历史K线(interval=1d,18根) /
 利润表·资产负债表·现金流量表(period=quarterly,各4期) /
 财务指标(report=2025-1,五类23项) / 估值快照 / 集合竞价 / 复权因子(5条) /
-热榜(30条) / 涨停池(46只,trade_date=20260825) / 龙虎榜 / 指数快照(000300.SH)
+热榜(30条) / 涨停池(46只,trade_date=20260825) / 龙虎榜 / 指数快照(000300.SH) /
+异动解读(anomaly-analysis-stock) / 短线风向标(auction/short-term-benchmark)
 
 踩坑备注：
 - `prices/historical` 的 start/end 是**毫秒时间戳**（非日期字符串）
 - `financials/*` 必须传 `period=annual|quarterly`
 - `financials/indicators` 的 `report` 格式为 `{yyyy}-{1|2|3|4}`，响应在 `data.abilities[]`
 - 基金组端点普遍要求 `fund_type=exchange|otc|reits`
+- `anomaly-analysis-stock` / `valuations/snapshot` / `auction/snapshot` 都用批量参数 `thscodes`（传 `thscode` 报 code=1001）
+- 短线风向标完整路径是 `/api/a-share/auction/short-term-benchmark`（不在 special-data 下）
