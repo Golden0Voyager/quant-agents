@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from typing import Any
 
 import pandas as pd
 from stockstats import wrap
@@ -271,7 +272,7 @@ def build_verified_fundamentals_snapshot(symbol: str, curr_date: str) -> dict:
         return {"symbol": symbol, "as_of": curr_date, "error": str(exc)}
 
     text = routed.data
-    metadata = {
+    metadata: dict[str, Any] = {
         "symbol": symbol,
         "as_of": curr_date,
         "source": routed.vendor,
