@@ -129,7 +129,7 @@ tushare 为 opt-in，仅当 `tushare_enabled` 配置或 `TUSHARE_ENABLED=1` 时�
 | 现有方法 | 说明 |
 |---|---|
 | `get_sector_fund_flow` / `get_concept_board` | THS 指数目录+成分股覆盖板块成分与行情；但板块资金流没有，仍留现有源 |
-| `get_institutional_holdings` / `get_institutional_intelligence` | 可从基金端反查：`fund/portfolio/holdings` 查"哪些基金重仓某票"，作机构持仓旁证 |
+| `get_institutional_holdings` / `get_institutional_intelligence` | ❌ 反查不可行（2026-08-26 实测证伪）：`fund/portfolio/holdings` 是**基金视角**（`fund_type=exchange|otc|reits` + 基金代码 → 该基金的持仓明细，已验证 510300.SH），不存在"股票 → 哪些基金持有"的反向端点（`fund/holdings/by-stock` 等候选全部 404）；OTC 基金代码格式未解（110022 各种后缀均 3001 Fund not found）。机构维度维持现有源 + 已落地的龙虎榜机构榜 |
 | `get_stock_data`（OHLCV） | quant_core.db 已是首选且更快；hithink 适合当第二在线层（排在 akshare 之前），qfq 直出省去自算复权 |
 
 #### 🔴 无覆盖（现有链路一条都不能删）
@@ -194,12 +194,14 @@ vendor chain 示例（以 get_income_statement 为例）：
 利润表·资产负债表·现金流量表(period=quarterly,各4期) /
 财务指标(report=2025-1,五类23项) / 估值快照 / 集合竞价 / 复权因子(5条) /
 热榜(30条) / 涨停池(46只,trade_date=20260825) / 龙虎榜 / 指数快照(000300.SH) /
-异动解读(anomaly-analysis-stock) / 短线风向标(auction/short-term-benchmark)
+异动解读(anomaly-analysis-stock) / 短线风向标(auction/short-term-benchmark) /
+基金持仓(fund/portfolio/holdings, fund_type=exchange + ETF 代码 510300.SH：
+item[] 含 hold_ratio/position_capital/period_increase_rate_pct/investment_rank)
 
 踩坑备注：
 - `prices/historical` 的 start/end 是**毫秒时间戳**（非日期字符串）
 - `financials/*` 必须传 `period=annual|quarterly`
 - `financials/indicators` 的 `report` 格式为 `{yyyy}-{1|2|3|4}`，响应在 `data.abilities[]`
-- 基金组端点普遍要求 `fund_type=exchange|otc|reits`
+- 基金组端点普遍要求 `fund_type=exchange|otc|reits`，且是基金视角（thscode=基金代码）；OTC 基金代码格式未验证通过（110022 各后缀均报 3001 Fund not found）
 - `anomaly-analysis-stock` / `valuations/snapshot` / `auction/snapshot` 都用批量参数 `thscodes`（传 `thscode` 报 code=1001）
 - 短线风向标完整路径是 `/api/a-share/auction/short-term-benchmark`（不在 special-data 下）
