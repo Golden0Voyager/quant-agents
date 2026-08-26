@@ -83,6 +83,10 @@ def load_ratings(reports_dir: Path) -> list[dict]:
                     "confidence": (r.get("confidence") or "").strip() or None,
                     "entry": _parse_price(r.get("entry")),
                     "stop": _parse_price(r.get("stop")),
+                    # 数据完整度切片用: 该票本次运行是否有降级/部分数据
+                    "fallback": 1 if r.get("fallback") else 0,
+                    "coverage_degraded": r.get("coverage_degraded")
+                    if isinstance(r.get("coverage_degraded"), int) else None,
                 })
     return ratings
 
@@ -176,7 +180,7 @@ def save_outcomes(outcomes: list[dict]) -> None:
     conn = sqlite3.connect(OUTCOME_DB)
     # 表为纯衍生数据 (全量可从 reports/ 重算)，schema 升级时直接重建
     cols = {r[1] for r in conn.execute("PRAGMA table_info(rating_outcomes)").fetchall()}
-    if cols and "stop_hit_20" not in cols:
+    if cols and {"stop_hit_20", "fallback", "coverage_degraded"} - cols:
         conn.execute("DROP TABLE rating_outcomes")
     conn.execute(
         """CREATE TABLE IF NOT EXISTS rating_outcomes (
@@ -187,12 +191,13 @@ def save_outcomes(outcomes: list[dict]) -> None:
             ret_5 REAL, ret_10 REAL, ret_20 REAL,
             excess_5 REAL, excess_10 REAL, excess_20 REAL,
             stop_hit_5 INTEGER, stop_hit_10 INTEGER, stop_hit_20 INTEGER,
+            fallback INTEGER, coverage_degraded INTEGER,
             PRIMARY KEY (batch_date, ticker)
         )"""
     )
     conn.executemany(
         """INSERT OR REPLACE INTO rating_outcomes VALUES
-           (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
             (
                 o["batch_date"], o["ticker"], o["rating"], o["confidence"],
@@ -201,6 +206,7 @@ def save_outcomes(outcomes: list[dict]) -> None:
                 o.get("ret_5"), o.get("ret_10"), o.get("ret_20"),
                 o.get("excess_5"), o.get("excess_10"), o.get("excess_20"),
                 o.get("stop_hit_5"), o.get("stop_hit_10"), o.get("stop_hit_20"),
+                o.get("fallback"), o.get("coverage_degraded"),
             )
             for o in outcomes
         ],
@@ -221,6 +227,94 @@ def _hit_pct(rows: list[dict], pred) -> str:
     if not rows:
         return "—"
     return f"{100.0 * sum(1 for o in rows if pred(o)) / len(rows):.1f}%"
+
+
+# ---------------------------------------------------------------------------
+# 3a. 校准分析: 单调性检验 + 数据完整度切片
+# ---------------------------------------------------------------------------
+
+# 乐观程度打分: 校准良好的系统里，平均超额收益应随乐观程度单调递减
+RATING_OPTIMISM = {"Buy": 5, "Overweight": 4, "Hold": 3, "Underweight": 2, "Sell": 1}
+
+
+def _ranks(values: list[float]) -> list[float]:
+    """排名 (1-based，并列取平均名次)，供 Spearman 相关使用。"""
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    ranks = [0.0] * len(values)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and values[order[j + 1]] == values[order[i]]:
+            j += 1
+        avg = (i + j) / 2.0 + 1.0
+        for k in range(i, j + 1):
+            ranks[order[k]] = avg
+        i = j + 1
+    return ranks
+
+
+def spearman(xs: list[float], ys: list[float]) -> float | None:
+    """Spearman 等级相关；样本 <3 或任一序列零方差时返回 None。"""
+    if len(xs) != len(ys) or len(xs) < 3:
+        return None
+    rx, ry = _ranks(xs), _ranks(ys)
+    n = len(xs)
+    mx, my = sum(rx) / n, sum(ry) / n
+    cov = sum((a - mx) * (b - my) for a, b in zip(rx, ry, strict=True))
+    vx = sum((a - mx) ** 2 for a in rx)
+    vy = sum((b - my) ** 2 for b in ry)
+    if vx == 0 or vy == 0:
+        return None
+    return cov / (vx * vy) ** 0.5
+
+
+def monotonicity_by_horizon(
+    outcomes: list[dict], horizons: tuple[int, ...] = HORIZONS
+) -> dict[int, dict]:
+    """每个窗口: 各评级的平均超额 + 乐观程度与平均超额的 Spearman 相关。
+
+    rho 接近 +1 = 评级排序与实际表现一致 (校准良好)；接近 0 或负 = 校准失效。
+    """
+    result: dict[int, dict] = {}
+    for h in horizons:
+        means: dict[str, float] = {}
+        counts: dict[str, int] = {}
+        for rating in RATING_OPTIMISM:
+            rows = [
+                o for o in outcomes
+                if o["rating"] == rating and o.get(f"excess_{h}") is not None
+            ]
+            if rows:
+                means[rating] = sum(o[f"excess_{h}"] for o in rows) / len(rows)
+                counts[rating] = len(rows)
+        rho = spearman(
+            [RATING_OPTIMISM[r] for r in means],
+            [means[r] for r in means],
+        )
+        result[h] = {"means": means, "counts": counts, "rho": rho}
+    return result
+
+
+def _is_degraded(outcome: dict) -> bool:
+    return bool(outcome.get("fallback")) or bool(outcome.get("coverage_degraded"))
+
+
+def completeness_by_horizon(
+    outcomes: list[dict], horizons: tuple[int, ...] = HORIZONS
+) -> dict[int, dict[str, list[dict]]]:
+    """每个窗口按数据完整度分桶 (degraded = 有 fallback 或 coverage 降级)。
+
+    只保留方向性评级 (Hold 无 L1/L2 判定)，供"数据缺失是否伤害准确率"切片。
+    """
+    directional = [o for o in outcomes if o["rating"] in (BEARISH | BULLISH)]
+    result: dict[int, dict[str, list[dict]]] = {}
+    for h in horizons:
+        rows = [o for o in directional if o.get(f"excess_{h}") is not None]
+        result[h] = {
+            "degraded": [o for o in rows if _is_degraded(o)],
+            "clean": [o for o in rows if not _is_degraded(o)],
+        }
+    return result
 
 
 def compute_regime_context(outcomes: list[dict]) -> str:
@@ -263,6 +357,8 @@ def render_report(outcomes: list[dict], regime_note: str = "") -> str:
         "- L1 超额命中: 看空判对 = 相对沪深300 ETF 超额 < 0；看多判对 = 超额 > 0 (选股 α 能力)",
         "- L2 绝对命中: 看空判对 = 绝对收益 < 0；看多判对 = 绝对收益 > 0 (实盘盈亏视角)",
         "- L3 论点存活: 窗口内未触及报告自己给的 stop 价 (系统自定义的未被证伪率，Hold 也适用)",
+        "- 单调性检验: 评级乐观程度排序与各评级平均超额收益的 Spearman 相关 (校准的严格定义)",
+        "- 数据完整度切片: 运行有 vendor 降级/部分数据的票 vs 完整运行的票，方向命中率对比",
         "- 基准价: batch 日后首个交易日收盘价",
     ]
     if regime_note:
@@ -300,6 +396,55 @@ def render_report(outcomes: list[dict], regime_note: str = "") -> str:
             )
         lines.append("")
 
+    # 单调性检验: 乐观程度排序 vs 平均超额收益 (校准的严格定义)
+    lines.append("## 单调性检验 (评级排序 vs 实际表现)")
+    lines.append("")
+    lines.append("| 窗口 | 各评级平均超额% (Buy→Sell) | Spearman ρ | 判定 |")
+    lines.append("|---|---|---:|---|")
+    for h, stats in monotonicity_by_horizon(outcomes).items():
+        means = stats["means"]
+        if not means:
+            lines.append(f"| {h}日 | (无样本) | — | — |")
+            continue
+        cells = " / ".join(
+            f"{r[:4]} {means[r]:+.2f}({stats['counts'][r]})"
+            for r in RATING_OPTIMISM
+            if r in means
+        )
+        rho = stats["rho"]
+        if rho is None:
+            verdict = "样本/分桶不足"
+            rho_str = "—"
+        else:
+            rho_str = f"{rho:+.2f}"
+            verdict = "✅ 单调" if rho >= 0.8 else ("🟡 部分" if rho >= 0.4 else "❌ 失序")
+        lines.append(f"| {h}日 | {cells} | {rho_str} | {verdict} |")
+    lines.append("")
+    lines.append("> ρ ≥ 0.8 视为校准良好 (评级越乐观实际超额越高)；单一市况下该指标同样受混杂影响，需跨市况样本确认。")
+    lines.append("")
+
+    # 数据完整度切片: 降级运行是否伤害方向准确率
+    lines.append("## 数据完整度 × 方向命中率 (仅方向性评级)")
+    lines.append("")
+    lines.append("| 窗口 | 分组 | 样本数 | L1超额命中 | L2绝对命中 | 平均超额% |")
+    lines.append("|---|---|---:|---:|---:|---:|")
+    for h, buckets in completeness_by_horizon(outcomes).items():
+        for label, key in (("完整", "clean"), ("有降级", "degraded")):
+            rows = buckets[key]
+            if not rows:
+                lines.append(f"| {h}日 | {label} | 0 | — | — | — |")
+                continue
+            l1 = _hit_pct(rows, lambda o, h=h: _direction_correct(o["rating"], o[f"excess_{h}"]))
+            l2 = _hit_pct(
+                rows,
+                lambda o, h=h: (o[f"ret_{h}"] < 0) if o["rating"] in BEARISH else (o[f"ret_{h}"] > 0),
+            )
+            avg_exc = sum(o[f"excess_{h}"] for o in rows) / len(rows)
+            lines.append(f"| {h}日 | {label} | {len(rows)} | {l1} | {l2} | {avg_exc:+.2f} |")
+    lines.append("")
+    lines.append("> 「有降级」= 该票运行出现 vendor fallback 或 coverage 降级；两桶命中率持续拉开 = 数据完整度是准确率瓶颈，应优先补数据而非调 prompt。")
+    lines.append("")
+
     # Stop 质量分析: 触发 stop 的样本，窗口末是否回到 stop 的"安全侧" (whipsaw = stop 太紧)
     lines.append("## Stop 质量分析 (触发论点失效的样本)")
     lines.append("")
@@ -327,25 +472,26 @@ def render_report(outcomes: list[dict], regime_note: str = "") -> str:
     lines.append("> whipsaw 占比高 = stop 普遍设得太紧 (盘中扫损后价格回转)，应反馈给 Trader 改用 ATR 倍数定位。")
     lines.append("")
 
-    # 置信度维度（20 日窗口）
-    lines.append("## 置信度 × 方向命中率 (20 个交易日, 仅方向性评级)")
+    # 置信度维度（全部窗口）
+    lines.append("## 置信度 × 方向命中率 (仅方向性评级)")
     lines.append("")
-    lines.append("| 置信度 | 样本数 | 方向命中率 | 平均超额% |")
-    lines.append("|---|---:|---:|---:|")
-    for conf in ("high", "medium", "low", None):
-        rows = [
-            o for o in outcomes
-            if o["rating"] in (BEARISH | BULLISH)
-            and (o.get("confidence") or None) == conf
-            and o.get("excess_20") is not None
-        ]
-        label = conf or "(未标注)"
-        if not rows:
-            lines.append(f"| {label} | 0 | — | — |")
-            continue
-        n_hit = sum(1 for o in rows if _direction_correct(o["rating"], o["excess_20"]))
-        avg_exc = sum(o["excess_20"] for o in rows) / len(rows)
-        lines.append(f"| {label} | {len(rows)} | {100.0 * n_hit / len(rows):.1f}% | {avg_exc:+.2f} |")
+    lines.append("| 窗口 | 置信度 | 样本数 | 方向命中率 | 平均超额% |")
+    lines.append("|---|---|---:|---:|---:|")
+    for h in HORIZONS:
+        for conf in ("high", "medium", "low", None):
+            rows = [
+                o for o in outcomes
+                if o["rating"] in (BEARISH | BULLISH)
+                and (o.get("confidence") or None) == conf
+                and o.get(f"excess_{h}") is not None
+            ]
+            label = conf or "(未标注)"
+            if not rows:
+                lines.append(f"| {h}日 | {label} | 0 | — | — |")
+                continue
+            n_hit = sum(1 for o in rows if _direction_correct(o["rating"], o[f"excess_{h}"]))
+            avg_exc = sum(o[f"excess_{h}"] for o in rows) / len(rows)
+            lines.append(f"| {h}日 | {label} | {len(rows)} | {100.0 * n_hit / len(rows):.1f}% | {avg_exc:+.2f} |")
     lines.append("")
 
     pending = sum(1 for o in outcomes if o.get("excess_20") is None)
@@ -358,12 +504,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="评级准确率回测")
     parser.add_argument("--md", default=str(REPORTS_DIR / "rating_accuracy_baseline.md"))
     parser.add_argument(
+        "--reports-dir", default=str(REPORTS_DIR),
+        help="batch 报告根目录 (默认取脚本所在仓库的 reports/；"
+             "从 worktree 运行时需指向主 checkout 的 reports/)",
+    )
+    parser.add_argument(
         "--quiet", action="store_true",
         help="静默模式：只刷新 outcomes 库与报告文件，不打印报告正文 (供 batch 末自动调用)",
     )
     args = parser.parse_args()
 
-    ratings = load_ratings(REPORTS_DIR)
+    reports_dir = Path(args.reports_dir)
+    ratings = load_ratings(reports_dir)
     print(f"提取评级: {len(ratings)} 条")
     outcomes = compute_outcomes(ratings)
     print(f"可回测(有基准价): {len(outcomes)} 条")
