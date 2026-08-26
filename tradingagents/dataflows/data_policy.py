@@ -69,28 +69,28 @@ _POLICIES: dict[str, ToolPolicy] = {
         date_policy="latest_snapshot",
         empty_semantics="coverage_gap",
         impact="high",
-        allowed_vendors=("smartmoney_db", "alpha_vantage", "yfinance", "akshare"),
+        allowed_vendors=("smartmoney_db", "hithink", "alpha_vantage", "yfinance", "akshare"),
     ),
     "get_cashflow": ToolPolicy(
         applicable_markets=_ALL_MARKETS,
         date_policy="latest_snapshot",
         empty_semantics="coverage_gap",
         impact="high",
-        allowed_vendors=("smartmoney_db", "alpha_vantage", "yfinance", "akshare"),
+        allowed_vendors=("smartmoney_db", "hithink", "alpha_vantage", "yfinance", "akshare"),
     ),
     "get_income_statement": ToolPolicy(
         applicable_markets=_ALL_MARKETS,
         date_policy="latest_snapshot",
         empty_semantics="coverage_gap",
         impact="high",
-        allowed_vendors=("smartmoney_db", "alpha_vantage", "yfinance", "akshare"),
+        allowed_vendors=("smartmoney_db", "hithink", "alpha_vantage", "yfinance", "akshare"),
     ),
     "get_indicators": ToolPolicy(
         applicable_markets=_ALL_MARKETS,
         date_policy="latest_snapshot",
         empty_semantics="coverage_gap",
         impact="high",
-        allowed_vendors=("smartmoney_db", "alpha_vantage", "yfinance", "akshare"),
+        allowed_vendors=("smartmoney_db", "hithink", "alpha_vantage", "yfinance", "akshare"),
     ),
     # Global news takes a window end (curr_date) as its first argument rather
     # than a ticker, so market resolution falls back to the runtime context or
@@ -297,7 +297,7 @@ _POLICIES: dict[str, ToolPolicy] = {
         date_policy="latest_snapshot",
         empty_semantics="coverage_gap",
         impact="medium",
-        allowed_vendors=("eastmoney",),
+        allowed_vendors=("hithink", "eastmoney"),
     ),
     "fetch_eastmoney_guba_sentiment": ToolPolicy(
         applicable_markets=frozenset({"XSHG"}),

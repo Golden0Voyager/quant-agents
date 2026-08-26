@@ -76,6 +76,13 @@ from .errors import (
     VendorRateLimitError,
 )
 from .fred import get_macro_data as get_fred_macro_data
+from .hithink_vendor import (
+    get_balance_sheet as get_hithink_balance_sheet,
+    get_cashflow as get_hithink_cashflow,
+    get_hot_rank as get_hithink_hot_rank,
+    get_income_statement as get_hithink_income_statement,
+    get_indicators as get_hithink_indicators,
+)
 from .request_memo import RequestKey
 from .runtime_context import (
     RuntimeDataContext,
@@ -914,6 +921,7 @@ VENDOR_METHODS: dict[str, dict[str, Any]] = {
     # technical_indicators
     "get_indicators": {
         "smartmoney_db": get_smartmoney_indicators,
+        "hithink": get_hithink_indicators,
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
         "akshare": get_akshare_indicators,
@@ -956,18 +964,21 @@ VENDOR_METHODS: dict[str, dict[str, Any]] = {
     },
     "get_balance_sheet": {
         "smartmoney_db": get_smartmoney_balance_sheet,
+        "hithink": get_hithink_balance_sheet,
         "alpha_vantage": get_alpha_vantage_balance_sheet,
         "yfinance": get_yfinance_balance_sheet,
         "akshare": get_akshare_balance_sheet,
     },
     "get_cashflow": {
         "smartmoney_db": get_smartmoney_cashflow,
+        "hithink": get_hithink_cashflow,
         "alpha_vantage": get_alpha_vantage_cashflow,
         "yfinance": get_yfinance_cashflow,
         "akshare": get_akshare_cashflow,
     },
     "get_income_statement": {
         "smartmoney_db": get_smartmoney_income_statement,
+        "hithink": get_hithink_income_statement,
         "alpha_vantage": get_alpha_vantage_income_statement,
         "yfinance": get_yfinance_income_statement,
         "akshare": get_akshare_income_statement,
@@ -996,6 +1007,7 @@ VENDOR_METHODS: dict[str, dict[str, Any]] = {
         "cailianpress": _fetch_cailianpress_for_route,
     },
     "fetch_eastmoney_hot_rank": {
+        "hithink": get_hithink_hot_rank,
         "eastmoney": _fetch_eastmoney_hot_rank_for_route,
     },
     "fetch_eastmoney_guba_sentiment": {
@@ -1170,15 +1182,11 @@ def _build_vendor_chain(method: str, vendor_config: str, symbol: str | None) -> 
         # Only the default chain gets local-first A-share promotion; explicit
         # user configuration is preserved verbatim.
         if vendor_config.strip() == "default":
-            if "smartmoney_db" in vendor_chain:
-                vendor_chain = ["smartmoney_db", "akshare"] + [
-                    v for v in vendor_chain
-                    if v not in ("smartmoney_db", "akshare")
-                ]
-            else:
-                vendor_chain = ["akshare"] + [
-                    v for v in vendor_chain if v != "akshare"
-                ]
+            # hithink (official 同花顺 API) sits between the local DB and the
+            # akshare online fallback when it implements the method.
+            preferred = ("smartmoney_db", "hithink", "akshare")
+            head = [v for v in preferred if v in vendor_chain]
+            vendor_chain = head + [v for v in vendor_chain if v not in head]
 
         # DISABLE_YFINANCE_FALLBACK applies to all A-share chains regardless of
         # whether the vendor order was explicitly configured.

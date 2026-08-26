@@ -116,8 +116,28 @@ from tradingagents.market_context import AnalysisDates
                     ),
                 ),
             )
+            for method in ("get_fundamentals",)
+        ],
+        *[
+            (
+                method,
+                ToolPolicy(
+                    applicable_markets=frozenset(
+                        {"XSHG", "XHKG", "XNYS", "CRYPTO", "UNKNOWN"}
+                    ),
+                    date_policy="latest_snapshot",
+                    empty_semantics="coverage_gap",
+                    impact="high",
+                    allowed_vendors=(
+                        "smartmoney_db",
+                        "hithink",
+                        "alpha_vantage",
+                        "yfinance",
+                        "akshare",
+                    ),
+                ),
+            )
             for method in (
-                "get_fundamentals",
                 "get_balance_sheet",
                 "get_cashflow",
                 "get_income_statement",
