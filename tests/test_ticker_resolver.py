@@ -148,6 +148,15 @@ class BuildNameMapTests(unittest.TestCase):
 class ResolveChineseNamePartialMatchTests(unittest.TestCase):
     def setUp(self):
         _reset_cache()
+        # These tests exercise the akshare cache/fuzzy tiers; keep the HiThink
+        # search tier hermetic so a configured HITHINK_FINANCE_API_KEY (or its
+        # absence) cannot leak live API results into the assertions.
+        patcher = patch(
+            "tradingagents.ticker_resolver._resolve_chinese_name_hithink",
+            return_value=None,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         _reset_cache()
@@ -195,6 +204,12 @@ class ResolveChineseNamePartialMatchTests(unittest.TestCase):
 class CacheMissRebuildTests(unittest.TestCase):
     def setUp(self):
         _reset_cache()
+        patcher = patch(
+            "tradingagents.ticker_resolver._resolve_chinese_name_hithink",
+            return_value=None,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         _reset_cache()
@@ -379,6 +394,16 @@ class InternationalTickerTests(unittest.TestCase):
 class ResolveTickerChineseIntegrationTests(unittest.TestCase):
     def setUp(self):
         _reset_cache()
+        # Keep both HiThink tiers (name→code search and company-name lookup)
+        # hermetic — these tests exercise the akshare-cache / DB / yfinance
+        # fallback chain and must not hit the live API when a key is present.
+        for target in (
+            "tradingagents.ticker_resolver._resolve_chinese_name_hithink",
+            "tradingagents.ticker_resolver._fetch_company_name_from_hithink",
+        ):
+            patcher = patch(target, return_value=None)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def tearDown(self):
         _reset_cache()
