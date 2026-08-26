@@ -313,6 +313,13 @@ _POLICIES: dict[str, ToolPolicy] = {
         impact="low",
         allowed_vendors=("eastmoney",),
     ),
+    "get_anomaly_reason": ToolPolicy(
+        applicable_markets=frozenset({"XSHG"}),
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("hithink",),
+    ),
 }
 
 _LEGACY_POLICY = ToolPolicy(

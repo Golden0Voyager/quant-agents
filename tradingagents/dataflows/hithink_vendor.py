@@ -22,6 +22,10 @@ Endpoint contract (docs/tonghuashun_api.md):
 - special-data/hot-stock-list: 当日热股 Top30, rows {thscode, ticker, name,
   rank, heat, rank_change, rank_trend} — verified live 2026-08-26; no
   per-ticker history (falls back to Eastmoney for non-Top30 names).
+- special-data/anomaly-analysis-stock: 个股异动解读, batch param ``thscodes``
+  (``thscode`` errors 1001), rows {thscode, stock_name, tag_name,
+  keyword_list, analysis_content} — verified live 2026-08-26; empty item =
+  no anomaly today (standard NoMarketDataError degradation).
 """
 from __future__ import annotations
 
@@ -659,3 +663,69 @@ def get_limit_up_down(trade_date: str) -> str:
             lines.append(f"- {r.get('name', 'N/A')}{pct_str}")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Anomaly reasons (special-data/anomaly-analysis-stock — 个股异动解读)
+# ---------------------------------------------------------------------------
+
+_ANOMALY_MAX_CHARS = 800
+_ANOMALY_DISCLAIMER_MARKER = "（免责声明："
+
+
+def _strip_anomaly_disclaimer(text: str) -> str:
+    """Drop the boilerplate AI disclaimer appended to every analysis_content."""
+    idx = text.find(_ANOMALY_DISCLAIMER_MARKER)
+    if idx > 0:
+        text = text[:idx]
+    return text.strip()
+
+
+def get_anomaly_reason(ticker: str) -> str:
+    """Official per-stock anomaly explanation (为什么动) via HiThink.
+
+    Verified live 2026-08-26: batch param ``thscodes`` (a single code still
+    uses it; ``thscode`` errors with code=1001). item[] rows carry thscode /
+    stock_name / tag_name / keyword_list / analysis_content (multi-paragraph,
+    always ending with a fixed AI disclaimer that we strip; overlong content
+    is truncated to keep prompts bounded). A stock with no anomaly today
+    returns an empty item list -> NoMarketDataError, i.e. the standard
+    DATA_UNAVAILABLE degradation (not a hard failure).
+    """
+    thscode = _require_a_share(ticker)
+    data = hithink_get(
+        "/api/a-share/special-data/anomaly-analysis-stock",
+        {"thscodes": thscode},
+    )
+    rows = data.get("item")
+    if not isinstance(rows, list) or not rows:
+        raise NoMarketDataError(
+            ticker, canonical=thscode, detail="no anomaly record today via hithink"
+        )
+    match = next(
+        (
+            r
+            for r in rows
+            if isinstance(r, dict) and str(r.get("thscode", "")).upper() == thscode
+        ),
+        None,
+    )
+    if match is None:
+        raise NoMarketDataError(
+            ticker, canonical=thscode, detail="anomaly payload missing ticker row"
+        )
+
+    content = _strip_anomaly_disclaimer(str(match.get("analysis_content") or ""))
+    if len(content) > _ANOMALY_MAX_CHARS:
+        content = content[:_ANOMALY_MAX_CHARS].rstrip() + " …"
+    keywords = match.get("keyword_list")
+    kw_text = "、".join(str(k) for k in keywords) if isinstance(keywords, list) else ""
+
+    parts = [
+        f"同花顺异动解读 — {ticker} (source: hithink anomaly-analysis-stock, 当日)",
+        f"标签: {match.get('tag_name') or 'N/A'}"
+        + (f"  |  关键词: {kw_text}" if kw_text else ""),
+    ]
+    if content:
+        parts.append(content)
+    return "\n".join(parts)

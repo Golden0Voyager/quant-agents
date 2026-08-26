@@ -77,6 +77,7 @@ from .errors import (
 )
 from .fred import get_macro_data as get_fred_macro_data
 from .hithink_vendor import (
+    get_anomaly_reason as get_hithink_anomaly_reason,
     get_balance_sheet as get_hithink_balance_sheet,
     get_cashflow as get_hithink_cashflow,
     get_dragon_tiger as get_hithink_dragon_tiger,
@@ -270,6 +271,7 @@ TOOLS_CATEGORIES = {
             "fetch_eastmoney_hot_rank",
             "fetch_eastmoney_guba_sentiment",
             "fetch_eastmoney_hot_keywords",
+            "get_anomaly_reason",
         ],
     }
 }
@@ -726,6 +728,7 @@ _METHOD_PARAMETER_SCHEMAS: dict[str, tuple[tuple[str, Any], ...]] = {
         ("limit", 10),
     ),
     "fetch_eastmoney_hot_keywords": (("limit", 15),),
+    "get_anomaly_reason": (("ticker", _REQUIRED_PARAMETER),),
     "get_earnings_estimates": (("ticker", _REQUIRED_PARAMETER),),
     "get_shareholder_count": (
         ("ticker", _REQUIRED_PARAMETER),
@@ -1019,6 +1022,9 @@ VENDOR_METHODS: dict[str, dict[str, Any]] = {
     },
     "fetch_eastmoney_hot_keywords": {
         "eastmoney": _fetch_eastmoney_keywords_for_route,
+    },
+    "get_anomaly_reason": {
+        "hithink": get_hithink_anomaly_reason,
     },
     "get_earnings_estimates": {
         "smartmoney_db": get_smartmoney_earnings_estimates,
