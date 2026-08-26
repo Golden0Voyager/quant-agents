@@ -2,7 +2,7 @@
 
 Supports:
 - Chinese A-share numeric codes (auto-append .SS/.SZ/.BJ)
-- Chinese company names (via akshare lookup + local cache)
+- Chinese company names (HiThink tickers/search → akshare lookup + local cache)
 - Exchange-qualified tickers (pass-through with yfinance validation)
 - International tickers (pass-through)
 """
@@ -92,8 +92,35 @@ def _append_a_share_suffix(code: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Chinese name resolution (akshare)
+# Chinese name resolution (HiThink official search → akshare fallback)
 # ---------------------------------------------------------------------------
+
+
+def _resolve_chinese_name_hithink(name: str) -> str | None:
+    """Resolve a Chinese company name via HiThink ``meta/tickers/search``.
+
+    Official disambiguation endpoint — preferred over the akshare full-table
+    fuzzy match when ``HITHINK_FINANCE_API_KEY`` is configured. Returns the
+    bare 6-digit code, or None on any error / no A-share match.
+    """
+    try:
+        from tradingagents.dataflows import hithink_common
+
+        if not hithink_common.is_available():
+            return None
+        items = hithink_common.search_tickers(name, asset_type="a-share", limit=10)
+    except Exception:
+        return None
+
+    a_share_items = [it for it in items if it.get("asset_type") == "a-share"]
+    # Exact name match wins; otherwise take the API's top-ranked A-share hit.
+    for it in a_share_items:
+        if it.get("name") == name:
+            return it.get("ticker") or None
+    for it in a_share_items:
+        if it.get("ticker"):
+            return it["ticker"]
+    return None
 
 
 def _build_name_map() -> dict[str, str]:
@@ -119,10 +146,15 @@ def _build_name_map() -> dict[str, str]:
 def _resolve_chinese_name(name: str) -> str:
     """Resolve a Chinese company name to its 6-digit numeric code.
 
-    Uses a local JSON cache; refreshes from akshare on cache miss.
-    Falls back to fuzzy matching when exact/partial match fails.
+    Tries the HiThink official search first (when configured), then falls
+    back to the local JSON cache refreshed from akshare on cache miss,
+    with fuzzy matching as the last resort.
     """
     import difflib
+
+    hithink_code = _resolve_chinese_name_hithink(name)
+    if hithink_code:
+        return hithink_code
 
     cache = _load_name_cache()
 
@@ -197,6 +229,34 @@ def _fetch_company_name_from_akshare(ticker: str) -> str | None:
     return _A_SHARE_NAME_BY_CODE.get(bare)
 
 
+def _fetch_company_name_from_hithink(ticker: str) -> str | None:
+    """Look up A-share company name by code via HiThink ``meta/tickers/search``.
+
+    Only applies to A-share tickers (suffix .SS, .SZ, .BJ). Returns None for
+    non-A-share tickers, when no API key is configured, or on any error.
+    Rescues the case where the akshare full-table fetch fails: a single
+    targeted search instead of pulling the whole code-name table.
+    """
+    suffix = ticker.split(".")[-1].upper() if "." in ticker else ""
+    if suffix not in ("SS", "SZ", "BJ"):
+        return None
+    bare = ticker.split(".")[0]
+
+    try:
+        from tradingagents.dataflows import hithink_common
+
+        if not hithink_common.is_available():
+            return None
+        items = hithink_common.search_tickers(bare, asset_type="a-share", limit=10)
+    except Exception:
+        return None
+
+    for it in items:
+        if it.get("ticker") == bare and it.get("asset_type") == "a-share":
+            return it.get("name") or None
+    return None
+
+
 # ---------------------------------------------------------------------------
 # yfinance validation / company name fetch
 # ---------------------------------------------------------------------------
@@ -262,10 +322,11 @@ def resolve_ticker(user_input: str) -> dict[str, str]:
         re.IGNORECASE,
     )
     def _resolve_name(ticker: str) -> str:
-        """Resolve company name: akshare > local DB > yfinance."""
+        """Resolve company name: akshare > local DB > hithink > yfinance."""
         return (
             _fetch_company_name_from_akshare(ticker)
             or _fetch_company_name_from_db(ticker)
+            or _fetch_company_name_from_hithink(ticker)
             or _fetch_company_name(ticker)
             or ""
         )
