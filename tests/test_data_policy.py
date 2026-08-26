@@ -27,7 +27,7 @@ from tradingagents.market_context import AnalysisDates
                 date_policy="market_session",
                 empty_semantics="coverage_gap",
                 impact="high",
-                allowed_vendors=("smartmoney_db",),
+                allowed_vendors=("smartmoney_db", "hithink"),
             ),
         ),
         (

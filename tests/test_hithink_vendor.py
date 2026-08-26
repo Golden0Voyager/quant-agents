@@ -69,10 +69,24 @@ _CASHFLOW_ITEM = {
     "cash_equivalents_net_addition": 1_000_000_000.0,
 }
 
+# Real payload shape verified live 2026-08-26 (600519.SH):
+# abilities[] groups by ability, indicators[] carry index_id + string value.
 _ABILITIES = {
     "abilities": [
-        {"category": "盈利能力", "items": {"roe": 15.23, "gross_margin": 91.5}},
-        {"category": "偿债能力", "items": {"debt_ratio": 18.5}},
+        {
+            "ability": "profitability",
+            "indicators": [
+                {"index_id": "index_weighted_avg_roe", "value": "15.23"},
+                {"index_id": "sale_gross_margin", "value": "91.5"},
+            ],
+        },
+        {
+            "ability": "solvency",
+            "indicators": [
+                {"index_id": "assets_debt_ratio", "value": "18.5"},
+                {"index_id": "earned_interest_multiple", "value": None},
+            ],
+        },
     ]
 }
 
@@ -81,12 +95,21 @@ _HOT_LIST = {
         {
             "rank": 1,
             "thscode": "600519.SH",
+            "ticker": "600519",
             "name": "贵州茅台",
-            "heat": 987654,
-            "price": 1680.5,
-            "change_pct": 2.35,
+            "heat": "987654",
+            "rank_change": 3,
+            "rank_trend": "up",
         },
-        {"rank": 2, "thscode": "000001.SZ", "name": "平安银行", "heat": 12345},
+        {
+            "rank": 2,
+            "thscode": "000001.SZ",
+            "ticker": "000001",
+            "name": "平安银行",
+            "heat": "12345",
+            "rank_change": 0,
+            "rank_trend": "flat",
+        },
     ]
 }
 
@@ -201,7 +224,7 @@ class TestFinancialIndicators:
         )
         assert "roe values for 600519.SS" in result
         assert "2026-2" in result
-        assert "净资产收益率(ROE) = 15.23" in result
+        assert "净资产收益率(ROE,加权) = 15.23" in result
 
     def test_chinese_alias(self):
         with _patch_get(_ABILITIES):
@@ -253,8 +276,14 @@ class TestHotRank:
         assert "整体热度排名: #1" in result
         assert "贵州茅台(600519.SH)" in result
         assert "热度: 987654" in result
-        assert "最新价: 1680.5" in result
-        assert "涨跌幅: 2.35%" in result
+        assert "排名变动: 3（上升）" in result
+
+    def test_flat_trend_without_rank_change(self):
+        rows = [dict(r) for r in _HOT_LIST["item"]]
+        rows[0].pop("rank_change")
+        with _patch_get({"item": rows}):
+            result = hithink_vendor.get_hot_rank("600519.SS")
+        assert "排名趋势: 上升" in result
 
     def test_not_in_top30_falls_back(self):
         with (
@@ -358,3 +387,258 @@ class TestHotRankRouting:
         assert result.vendor == "eastmoney"
         assert result.data == "EASTMONEY_OK"
         mock_em.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Fixtures below mirror real payloads captured live on 2026-08-26.
+# ---------------------------------------------------------------------------
+
+# dragon-tiger-list (2026-08-25): stock-level aggregated rows; the same stock
+# can appear as 当日榜 (range_days=1) and 3日榜 (range_days=3).
+_DT_ROW_1 = {
+    "thscode": "600487.SH",
+    "ticker": "600487",
+    "name": "亨通光电",
+    "concept_list": [{"name": "F5G概念"}, {"name": "共封装光学(CPO)"}],
+    "change": 0.069005,
+    "net_value": 1_849_593_215.8,
+    "net_rate": 0.11365869,
+    "hot_rank": 2,
+    "buy_value": 2_663_983_257.26,
+    "sell_value": 814_390_041.46,
+    "range_days": 1,
+    "org_net_value": 656_306_893.06,
+    "hot_money_net_value": 347_970_669.12,
+}
+_DT_ROW_3D = {**_DT_ROW_1, "range_days": 3, "net_value": 2_000_000_000.0}
+_DT_OTHER = {"thscode": "002407.SZ", "ticker": "002407", "name": "多氟多", "range_days": 1}
+
+_DRAGON_TIGER = {
+    "board_type": "all",
+    "trade_date": "2026-08-25",
+    "count": 3,
+    "stock_count": 2,
+    "stock_items": [_DT_ROW_1, _DT_ROW_3D, _DT_OTHER],
+    "hot_money_items": [],
+}
+
+_CALENDAR = {
+    "item": [
+        {"date_ms": 1_787_500_800_000, "date": "20260821"},
+        {"date_ms": 1_787_587_200_000, "date": "20260825"},
+        {"date_ms": 1_787_673_600_000, "date": "20260826"},
+    ]
+}
+
+# limit-up-pool (2026-08-25, sorted by continue_day_cnt desc)
+_LIMIT_UP = {
+    "pagination": {"total": 3, "pages": 1, "size": 200, "page": 1},
+    "item": [
+        {
+            "thscode": "002412.SZ",
+            "ticker": "002412",
+            "name": "汉森制药",
+            "is_st": False,
+            "is_new": False,
+            "last_price": 12.33,
+            "price_change_ratio_pct": 9.9911,
+            "limit_up_time": "09:45",
+            "limit_up_reason": "中药+净利增长+集采中选",
+            "continue_day_text": "5连板",
+            "continue_day_cnt": 5,
+            "seal_money": 117_349_789,
+            "max_seal_money": 325_976_594.4,
+        },
+        {
+            "thscode": "603986.SH",
+            "ticker": "603986",
+            "name": "兆易创新",
+            "continue_day_text": "2连板",
+            "continue_day_cnt": 2,
+            "seal_money": 123_456_789.12,
+            "limit_up_reason": "存储芯片",
+        },
+        {
+            "thscode": "600519.SH",
+            "ticker": "600519",
+            "name": "贵州茅台",
+            "continue_day_text": "首板",
+            "continue_day_cnt": 1,
+            "limit_up_reason": None,
+        },
+    ],
+}
+
+_LIMIT_DOWN = {
+    "pagination": {"total": 2, "pages": 1, "size": 200, "page": 1},
+    "item": [
+        {
+            "thscode": "603156.SH",
+            "ticker": "603156",
+            "name": "养元饮品",
+            "last_price": 42.96,
+            "price_change_ratio_pct": -9.9937,
+            "first_limit_time": "09:32",
+            "last_limit_time": "13:47",
+            "turnover_ratio_pct": 1.7417,
+        },
+        {"thscode": "000001.SZ", "ticker": "000001", "name": "平安银行",
+         "price_change_ratio_pct": -10.0},
+    ],
+}
+
+_EMPTY_POOL = {"pagination": {"total": 0, "pages": 0, "size": 200, "page": 1}, "item": []}
+
+
+def _pool_dispatch(up_payload, down_payload):
+    def fake_get(path, params=None):
+        if path.endswith("limit-up-pool"):
+            return up_payload
+        if path.endswith("limit-down-pool"):
+            return down_payload
+        raise AssertionError(f"unexpected path: {path}")
+
+    return fake_get
+
+
+class TestDragonTiger:
+    def test_filters_board_to_symbol_and_formats(self):
+        with _patch_get(_DRAGON_TIGER) as mock_get:
+            result = hithink_vendor.get_dragon_tiger("600487.SS")
+
+        mock_get.assert_called_once_with(
+            "/api/a-share/special-data/dragon-tiger-list", {"board_type": "all"}
+        )
+        assert "## 600487.SS Dragon Tiger Board (龙虎榜)" in result
+        assert "hithink" in result
+        assert "Date: 2026-08-25" in result
+        assert "Total records: 2 entries" in result
+        assert "**当日榜** (亨通光电)" in result
+        assert "**3日榜**" in result
+        assert "涨跌幅: +6.90%" in result
+        assert "龙虎榜净买入: 18.50亿 (占成交 11.37%)" in result
+        assert "买入/卖出: 26.64亿 / 8.14亿" in result
+        assert "机构净买入: 6.56亿" in result
+        assert "游资净买入: 3.48亿" in result
+        assert "同花顺人气排名: #2" in result
+        assert "多氟多" not in result  # other stocks filtered out
+
+    def test_curr_date_snapped_to_trading_day_via_calendar(self):
+        calls = []
+
+        def fake_get(path, params=None):
+            calls.append((path, params))
+            if path.endswith("calendar/trading-days"):
+                return _CALENDAR
+            return _DRAGON_TIGER
+
+        with patch(
+            "tradingagents.dataflows.hithink_vendor.hithink_get",
+            side_effect=fake_get,
+        ):
+            # 2026-08-23 is a Sunday → snaps to Friday 2026-08-21
+            hithink_vendor.get_dragon_tiger("600487.SS", "2026-08-23")
+
+        assert calls[0][0].endswith("calendar/trading-days")
+        assert calls[1][1]["date"] == "2026-08-21"
+
+    def test_not_on_board_raises_no_market_data(self):
+        with (
+            _patch_get(_DRAGON_TIGER),
+            pytest.raises(NoMarketDataError, match="not on dragon-tiger board"),
+        ):
+            hithink_vendor.get_dragon_tiger("600519.SS")
+
+    def test_non_a_share_fast_fails_without_http(self):
+        with patch(
+            "tradingagents.dataflows.hithink_vendor.hithink_get"
+        ) as mock_get, pytest.raises(NoMarketDataError, match="A-shares only"):
+            hithink_vendor.get_dragon_tiger("AAPL")
+        mock_get.assert_not_called()
+
+
+class TestLimitUpDown:
+    def test_formats_pools_like_smartmoney(self):
+        expected_ms = int(
+            datetime(2026, 8, 25, tzinfo=hithink_vendor._SH_TZ).timestamp() * 1000
+        )
+        with patch(
+            "tradingagents.dataflows.hithink_vendor.hithink_get",
+            side_effect=_pool_dispatch(_LIMIT_UP, _LIMIT_DOWN),
+        ) as mock_get:
+            result = hithink_vendor.get_limit_up_down("2026-08-25")
+
+        up_call = mock_get.call_args_list[0]
+        assert up_call.args[0].endswith("limit-up-pool")
+        assert up_call.args[1]["date_ms"] == expected_ms
+        assert up_call.args[1]["size"] == 200
+
+        assert "## A-Share Limit-Up / Limit-Down Stats for 2026-08-25" in result
+        assert "hithink" in result
+        assert "- **Limit-up stocks (涨停)**: 3" in result
+        assert "- **Limit-down stocks (跌停)**: 2" in result
+        assert "- **Up/Down ratio**: 3:2" in result
+        assert "5连板: 1 只 (汉森制药)" in result
+        assert "2连板: 1 只 (兆易创新)" in result
+        assert "首板: 1 只 (贵州茅台)" in result
+        assert "汉森制药 (5连板) [中药+净利增长+集采中选]" in result
+        assert "养元饮品 (-9.99%)" in result
+
+    def test_paginates_until_all_pages_fetched(self):
+        page1 = {**_LIMIT_UP, "pagination": {"total": 3, "pages": 2, "size": 2, "page": 1},
+                 "item": _LIMIT_UP["item"][:2]}
+        page2 = {**_LIMIT_UP, "pagination": {"total": 3, "pages": 2, "size": 2, "page": 2},
+                 "item": _LIMIT_UP["item"][2:]}
+        calls = []
+
+        def fake_get(path, params=None):
+            calls.append(params)
+            if path.endswith("limit-up-pool"):
+                return page1 if params["page"] == 1 else page2
+            return _EMPTY_POOL
+
+        with patch(
+            "tradingagents.dataflows.hithink_vendor.hithink_get",
+            side_effect=fake_get,
+        ):
+            result = hithink_vendor.get_limit_up_down("2026-08-25")
+
+        assert "- **Limit-up stocks (涨停)**: 3" in result
+        assert [c["page"] for c in calls if "page" in c][:2] == [1, 2]
+
+    def test_both_pools_empty_raise_no_market_data(self):
+        with (
+            patch(
+                "tradingagents.dataflows.hithink_vendor.hithink_get",
+                side_effect=_pool_dispatch(_EMPTY_POOL, _EMPTY_POOL),
+            ),
+            pytest.raises(NoMarketDataError, match="no limit-up/limit-down data"),
+        ):
+            hithink_vendor.get_limit_up_down("2026-08-23")  # Sunday → empty pools
+
+    def test_unparseable_date_raises_no_market_data_without_http(self):
+        with patch(
+            "tradingagents.dataflows.hithink_vendor.hithink_get"
+        ) as mock_get, pytest.raises(NoMarketDataError, match="unparseable"):
+            hithink_vendor.get_limit_up_down("not-a-date")
+        mock_get.assert_not_called()
+
+
+class TestP1ChainRegistration:
+    def test_dragon_tiger_chain_order(self):
+        from tradingagents.dataflows import interface
+
+        chain = interface._build_vendor_chain("get_dragon_tiger", "default", "600519.SS")
+        assert chain[:3] == ["smartmoney_db", "hithink", "akshare"]
+
+    def test_limit_up_down_chain_order(self):
+        from tradingagents.dataflows import interface
+
+        chain = interface._build_vendor_chain("get_limit_up_down", "default", "2026-08-25")
+        assert chain == ["smartmoney_db", "hithink"]
+
+    def test_default_config_tool_chain_wires_dragon_tiger(self):
+        from tradingagents.default_config import default_config
+
+        chain = default_config()["tool_vendors"]["get_dragon_tiger"].split(",")
+        assert chain == ["smartmoney_db", "hithink", "akshare"]
