@@ -103,6 +103,13 @@ class TestPairRecommendations:
         pairs = pair_recommendations([_rec("600519", "Overweight")], txns)
         assert pairs[0]["grid"] is True
 
+    def test_manual_trade_tag_not_marked_grid(self):
+        """「手动卖出」「分批卖出」等手动 tag 不应被标记为网格单。"""
+        txns = [_txn("2026-08-12", "600519", "买入", tag="手动建仓")]
+        pairs = pair_recommendations([_rec("600519", "Overweight")], txns)
+        assert pairs[0]["status"] == "matched"
+        assert pairs[0]["grid"] is False
+
     def test_ticker_suffix_normalization(self):
         txns = [_txn("2026-08-12", "600519.SS", "买入")]
         pairs = pair_recommendations([_rec("600519", "Buy")], txns)
