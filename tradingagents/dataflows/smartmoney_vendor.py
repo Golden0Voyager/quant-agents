@@ -470,11 +470,7 @@ def get_balance_sheet(
 
     row = df.iloc[0]
     period = row["report_period"]
-    lines = [
-        f"# Balance Sheet for {symbol.upper()} (截至 {period})",
-        "# Source: quant_core.db (local SQLite, quarterly_financials)",
-        "",
-    ]
+    metrics: list[str] = []
     for col, label, fmt in [
         ("debt_ratio", "资产负债率", ".2f%"),
         ("bps", "每股净资产", ".2f"),
@@ -483,9 +479,21 @@ def get_balance_sheet(
         v = row.get(col)
         if pd.notna(v):
             if "%" in fmt:
-                lines.append(f"- {label}: {v:.2f}%")
+                metrics.append(f"- {label}: {v:.2f}%")
             else:
-                lines.append(f"- {label}: {v:{fmt}}")
+                metrics.append(f"- {label}: {v:{fmt}}")
+    if not metrics:
+        # 行存在但指标列全空 — 空壳会阻断链路 fallback (hithink/akshare)，
+        # 必须按无数据抛出让路由继续下探 (20260826 批次 001316/000603/688239 中招)
+        raise NoMarketDataError(
+            symbol, detail="local quarterly_financials row has only null metrics"
+        )
+    lines = [
+        f"# Balance Sheet for {symbol.upper()} (截至 {period})",
+        "# Source: quant_core.db (local SQLite, quarterly_financials)",
+        "",
+        *metrics,
+    ]
     return "\n".join(lines)
 
 
@@ -519,14 +527,18 @@ def get_cashflow(
 
     row = df.iloc[0]
     period = row["report_period"]
+    v = row.get("operating_cashflow")
+    if not pd.notna(v):
+        # 同上: 空壳会阻断 fallback，必须抛出 (见 get_balance_sheet)
+        raise NoMarketDataError(
+            symbol, detail="local quarterly_financials row has null operating_cashflow"
+        )
     lines = [
         f"# Operating Cash Flow for {symbol.upper()} (截至 {period})",
         "# Source: quant_core.db (local SQLite, quarterly_financials)",
         "",
+        f"- 经营活动现金流净额: {v:,.0f}",
     ]
-    v = row.get("operating_cashflow")
-    if pd.notna(v):
-        lines.append(f"- 经营活动现金流净额: {v:,.0f}")
     return "\n".join(lines)
 
 
@@ -560,11 +572,7 @@ def get_income_statement(
 
     row = df.iloc[0]
     period = row["report_period"]
-    lines = [
-        f"# Income Statement for {symbol.upper()} (截至 {period})",
-        "# Source: quant_core.db (local SQLite, quarterly_financials)",
-        "",
-    ]
+    metrics: list[str] = []
     for col, label, fmt in [
         ("revenue", "营业总收入", ",.0f"),
         ("net_profit", "净利润", ",.0f"),
@@ -578,9 +586,20 @@ def get_income_statement(
         v = row.get(col)
         if pd.notna(v):
             if "%" in fmt:
-                lines.append(f"- {label}: {v:.2f}%")
+                metrics.append(f"- {label}: {v:.2f}%")
             else:
-                lines.append(f"- {label}: {v:{fmt}}")
+                metrics.append(f"- {label}: {v:{fmt}}")
+    if not metrics:
+        # 同上: 空壳会阻断 fallback，必须抛出 (见 get_balance_sheet)
+        raise NoMarketDataError(
+            symbol, detail="local quarterly_financials row has only null metrics"
+        )
+    lines = [
+        f"# Income Statement for {symbol.upper()} (截至 {period})",
+        "# Source: quant_core.db (local SQLite, quarterly_financials)",
+        "",
+        *metrics,
+    ]
     return "\n".join(lines)
 
 

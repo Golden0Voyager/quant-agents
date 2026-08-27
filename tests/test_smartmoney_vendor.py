@@ -295,6 +295,18 @@ def _create_full_test_db(path):
     conn.close()
 
 
+def _insert_null_quarterly_row(db_path, ts_code="000603"):
+    """Insert a quarterly_financials row whose metric columns are all NULL —
+    mimics the stale local rows that used to block the fallback chain."""
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "INSERT INTO quarterly_financials (ts_code, report_period) VALUES (?, ?)",
+        (ts_code, "2026-03-31"),
+    )
+    conn.commit()
+    conn.close()
+
+
 class _PatchedVendor:
     def __init__(self, db_path):
         self.db_path = db_path
@@ -923,6 +935,26 @@ class GetBalanceSheetFromDbTests(unittest.TestCase):
         finally:
             os.unlink(db_path)
 
+    def test_raises_on_null_metrics_row(self):
+        """Row exists but all metric columns are NULL — must raise so the
+        fallback chain (hithink/akshare) is not blocked by an empty shell."""
+        from tradingagents.dataflows.errors import NoMarketDataError
+        from tradingagents.dataflows.smartmoney_vendor import get_balance_sheet
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            _insert_null_quarterly_row(db_path)
+            with (
+                _PatchedVendor(db_path),
+                self.assertRaises(NoMarketDataError) as ctx,
+            ):
+                get_balance_sheet("000603.SZ")
+            self.assertIn("null", str(ctx.exception))
+        finally:
+            os.unlink(db_path)
+
 
 @pytest.mark.unit
 class GetCashflowFromDbTests(unittest.TestCase):
@@ -952,6 +984,25 @@ class GetCashflowFromDbTests(unittest.TestCase):
             with _PatchedVendor(db_path), self.assertRaises(RuntimeError) as ctx:
                 get_cashflow("999999.SS")
             self.assertIn("Cashflow", str(ctx.exception))
+        finally:
+            os.unlink(db_path)
+
+    def test_raises_on_null_metrics_row(self):
+        """Row exists but operating_cashflow is NULL — must raise for fallback."""
+        from tradingagents.dataflows.errors import NoMarketDataError
+        from tradingagents.dataflows.smartmoney_vendor import get_cashflow
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            _insert_null_quarterly_row(db_path)
+            with (
+                _PatchedVendor(db_path),
+                self.assertRaises(NoMarketDataError) as ctx,
+            ):
+                get_cashflow("000603.SZ")
+            self.assertIn("null", str(ctx.exception))
         finally:
             os.unlink(db_path)
 
@@ -988,6 +1039,25 @@ class GetIncomeStatementFromDbTests(unittest.TestCase):
             with _PatchedVendor(db_path), self.assertRaises(RuntimeError) as ctx:
                 get_income_statement("999999.SS")
             self.assertIn("Income statement", str(ctx.exception))
+        finally:
+            os.unlink(db_path)
+
+    def test_raises_on_null_metrics_row(self):
+        """Row exists but all metric columns are NULL — must raise for fallback."""
+        from tradingagents.dataflows.errors import NoMarketDataError
+        from tradingagents.dataflows.smartmoney_vendor import get_income_statement
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            _insert_null_quarterly_row(db_path)
+            with (
+                _PatchedVendor(db_path),
+                self.assertRaises(NoMarketDataError) as ctx,
+            ):
+                get_income_statement("000603.SZ")
+            self.assertIn("null", str(ctx.exception))
         finally:
             os.unlink(db_path)
 
