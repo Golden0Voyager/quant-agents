@@ -122,7 +122,7 @@ tushare 为 opt-in，仅当 `tushare_enabled` 配置或 `TUSHARE_ENABLED=1` 时�
 | `get_historical_valuation` / `get_industry_valuation`（部分） | `valuations/snapshot` | 增强 ✅ 已落地 | 官方估值快照（PE/PB/PS/PCF）已作交叉校验锚喂给 `market_data_validator`（`get_valuation_snapshot` + `fetch_valuation_metrics`） |
 | `get_dividend_history` | `adjustment-factors` | 部分 | 事件流含现金分红/送股/配股，够复权与分红历史用 |
 | （无现有对应） | `anomaly-analysis-stock` | 全新增量 ✅ 已落地 | "个股异动原因"维度：`get_anomaly_reason`，Sentiment 分析师预取注入（查不到=DATA_UNAVAILABLE 降级） |
-| （无现有对应） | `auction/snapshot` + `auction/short-term-benchmark` | 全新增量 ✅ 已落地 | `get_auction_snapshot` / `get_short_term_benchmark` 作为 market analyst 工具（XSHG-only）支持盘前决策场景 |
+| （无现有对应） | `auction/snapshot` + `auction/short-term-benchmark` | 全新增量 ✅ 已落地 | `get_auction_snapshot` / `get_short_term_benchmark` 预取注入 Market Analyst prompt（XSHG-only）支持盘前决策场景（2026-08-26 起不再是 LLM 可选工具，避免漏调） |
 
 #### 🟡 部分匹配
 
