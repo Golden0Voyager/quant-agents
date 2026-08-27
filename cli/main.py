@@ -1676,9 +1676,21 @@ def _do_sync_holdings(sheet_id: str | None, worksheet: str):
 
     try:
         sync_service = PortfolioSyncService(sheet_id=_sheet_id, worksheet=_worksheet)
-        portfolio = sync_service.sync()
+        synced = sync_service.sync()
 
         repo = PortfolioRepository()
+        # Merge into the existing cache so a holdings refresh does not wipe
+        # previously synced transactions (sync-transactions writes them into
+        # the same JSON). Mirrors _sync_portfolio_for_my_list.
+        from tradingagents.portfolio import Portfolio
+
+        try:
+            portfolio = repo.load() if repo.exists() else Portfolio()
+        except Exception:
+            portfolio = Portfolio()
+        portfolio.holdings = synced.holdings
+        portfolio.metadata = synced.metadata
+        portfolio.summary = synced.summary
         repo.save(portfolio)
 
         console.print(f"[green]✓ Synced {len(portfolio.holdings)} holdings[/green]")

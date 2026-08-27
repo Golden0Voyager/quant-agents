@@ -237,3 +237,58 @@ class TestSyncPortfolioForMyListIntegration:
         assert saved.metadata.source_sheet_id == sheet_id
         assert isinstance(saved.holdings, dict)
         assert isinstance(saved.transactions, list)
+
+
+@pytest.mark.smoke
+class TestDoSyncHoldingsPreservesTransactions:
+    """``sync-holdings`` must merge into the cache, not wipe transactions."""
+
+    def test_holdings_refresh_keeps_cached_transactions(self):
+        from cli.main import _do_sync_holdings
+        from tradingagents.portfolio import (
+            Portfolio,
+            PortfolioRepository,
+            Transaction,
+        )
+
+        repo = PortfolioRepository()
+        repo.save(
+            Portfolio(
+                transactions=[
+                    Transaction(
+                        date="2026-01-01",
+                        ticker="AAPL",
+                        action="买入",
+                        shares=10,
+                        price=150.0,
+                    )
+                ]
+            )
+        )
+
+        holdings_rows = [
+            [
+                "代码",
+                "资产名称",
+                "持仓成本",
+                "持仓数量",
+                "现价",
+                "投入本金 (元)",
+                "盈亏率",
+                "仓位占比",
+                "网格策略",
+            ],
+            ["AAPL", "Apple Inc.", "150.00", "100", "160.00", "15000.00", "6.67%", "50.00%", ""],
+        ]
+
+        with patch(
+            "tradingagents.portfolio.sync._run_gws_command",
+            return_value=holdings_rows,
+        ):
+            _do_sync_holdings("fake_holdings_sheet", "total")
+
+        saved = repo.load()
+        assert "AAPL" in saved.holdings
+        assert saved.holdings["AAPL"].shares == 100.0
+        assert len(saved.transactions) == 1
+        assert saved.transactions[0].ticker == "AAPL"
