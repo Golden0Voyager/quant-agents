@@ -14,6 +14,13 @@ from cli.models import AnalystType
 @pytest.fixture(autouse=True)
 def _mock_home(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    # PortfolioRepository's default path is derived from the module-level
+    # _DEFAULT_DATA_DIR (os.path.expanduser resolves at import time), so
+    # patching Path.home alone does NOT keep tests from writing to the real
+    # ~/Code/quant_data/tradingagents_portfolio.json. Redirect it explicitly.
+    import tradingagents.portfolio.repository as repo_module
+
+    monkeypatch.setattr(repo_module, "_DEFAULT_DATA_DIR", str(tmp_path / "quant_data"))
 
 
 @pytest.mark.unit
