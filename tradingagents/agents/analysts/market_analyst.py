@@ -1,7 +1,6 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
-    get_auction_snapshot,
     get_chip_distribution,
     get_fund_flow,
     get_index_daily,
@@ -10,15 +9,16 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_limit_up_down,
     get_sector_fund_flow,
-    get_short_term_benchmark,
     get_stock_data,
     get_verified_market_snapshot,
     sanitize_company_name_in_report,
 )
+from tradingagents.agents.utils.prefetch import prefetch_for_market
 from tradingagents.agents.utils.tool_capabilities import (
     BoundToolsByMarket,
     tool_guidance_for,
 )
+from tradingagents.dataflows.interface import route_to_vendor
 from tradingagents.market_context import infer_market
 
 
@@ -30,8 +30,6 @@ def create_market_analyst(llm):
         get_fund_flow,
         get_sector_fund_flow,
         get_limit_up_down,
-        get_auction_snapshot,
-        get_short_term_benchmark,
         get_index_daily,
         get_verified_market_snapshot,
     ]
@@ -43,8 +41,6 @@ def create_market_analyst(llm):
         "get_fund_flow": "Call the standalone get_fund_flow tool directly (do not pass it to get_indicators) to analyze capital-flow trends.",
         "get_sector_fund_flow": "Use get_sector_fund_flow to analyze sector-level fund flow and industry rotation.",
         "get_limit_up_down": "Call get_limit_up_down with the current date to gauge daily limit-up/limit-down market breadth.",
-        "get_auction_snapshot": "Call get_auction_snapshot for this ticker to read pre-open call-auction strength (竞价强弱): auction pct, volume ratio, and unmatched volume explain the day's open.",
-        "get_short_term_benchmark": "Call get_short_term_benchmark to see where short-term money pointed at the open (短线风向标 benchmark stocks).",
         "get_index_daily": "Call get_index_daily for relevant major indices to compare the stock with its home market or board.",
         "get_verified_market_snapshot": "Before the final report, call get_verified_market_snapshot for this ticker and date; use it as the source of truth for exact OHLCV, price-level, and indicator claims.",
     }
@@ -56,6 +52,40 @@ def create_market_analyst(llm):
         instrument_context = get_instrument_context_from_state(state)
         market = state.get("market") or infer_market(ticker)
         market_tools, bound_llm = bound_tools.get(market)
+
+        # Pre-fetch the call-auction context (A-share only) instead of leaving
+        # it to optional tool calls — in the 20260826 batch 10/23 tickers
+        # skipped the calls and then reported the dimension as "tool
+        # unavailable". Pre-fetched blocks are always in the prompt.
+        auction_block = prefetch_for_market(
+            "get_auction_snapshot",
+            market,
+            "call-auction snapshot (集合竞价)",
+            lambda: route_to_vendor("get_auction_snapshot", ticker),
+        )
+        benchmark_block = prefetch_for_market(
+            "get_short_term_benchmark",
+            market,
+            "short-term benchmark (短线风向标)",
+            lambda: route_to_vendor("get_short_term_benchmark"),
+        )
+        auction_section = f"""
+## Pre-fetched call-auction context (A-share only)
+
+### 集合竞价快照 — pre-open auction strength for {ticker}
+Auction pct, volume ratio, and unmatched volume explain the day's open. A DATA_UNAVAILABLE placeholder means the auction data could not be retrieved (e.g. before the auction starts or vendor outage) — do not fabricate values.
+
+<start_of_auction>
+{auction_block}
+<end_of_auction>
+
+### 短线风向标 — market-wide short-term money direction at the open
+Benchmark stocks with their call-auction pct change and sector tags: a quick read on where short-term money pointed at the open.
+
+<start_of_short_term_benchmark>
+{benchmark_block}
+<end_of_short_term_benchmark>
+"""
 
         ticker_guard = (
             f"TICKER VERIFICATION — You are analyzing {company_name} ({ticker}). "
@@ -90,6 +120,7 @@ Volume-Based Indicators:
 
 - Select indicators that provide diverse and complementary information. Avoid redundancy (e.g., do not select both rsi and stochrsi). Also briefly explain why they are suitable for the given market context. When calling an available indicator tool, use the exact indicator names above because they are defined parameters. If tool outputs conflict, flag the discrepancy rather than inventing a reconciled number. Do not claim historical validation, support/resistance bounces, or exact percentage moves unless directly supported by concrete dates and prices."""
             + tool_guidance_for(market_tools, tool_guidance)
+            + auction_section
             + " Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
             + (

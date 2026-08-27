@@ -29,7 +29,6 @@ See: https://github.com/TauricResearch/TradingAgents/issues/796
 """
 
 import logging
-from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from langchain_core.messages import AIMessage
@@ -42,48 +41,20 @@ from tradingagents.agents.utils.agent_utils import (
     get_news,
     sanitize_company_name_in_report,
 )
+from tradingagents.agents.utils.prefetch import prefetch_for_market
 from tradingagents.agents.utils.structured import (
     FALLBACK_MARKER,
     bind_structured,
     invoke_structured_or_freetext,
 )
-from tradingagents.dataflows.data_policy import is_applicable
 from tradingagents.dataflows.interface import route_to_vendor
-from tradingagents.market_context import Market, infer_market
+from tradingagents.market_context import infer_market
 
 logger = logging.getLogger(__name__)
 
 
 def _seven_days_back(trade_date: str) -> str:
     return (datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
-
-
-def _safe_prefetch(label: str, fetch: Callable[[], str]) -> str:
-    """Fetch optional sentiment enrichment without aborting the analyst node."""
-    try:
-        result = fetch()
-        if result:
-            return result
-        detail = "empty response"
-    except Exception as exc:  # noqa: BLE001 - enrichment must degrade gracefully
-        logger.warning("Sentiment %s prefetch failed: %s", label, exc)
-        detail = type(exc).__name__
-    return (
-        f"DATA_UNAVAILABLE: {label} could not be retrieved ({detail}). "
-        "Proceed without it; do not fabricate values."
-    )
-
-
-def _prefetch_for_market(
-    method: str, market: Market, label: str, fetch: Callable[[], str]
-) -> str:
-    """Run a manual prefetch only when the central policy permits it."""
-    if not is_applicable(method, market):
-        return (
-            f"DATA_NOT_APPLICABLE: {label} does not apply to market {market}. "
-            "Proceed without it; do not fabricate values."
-        )
-    return _safe_prefetch(label, fetch)
 
 
 def create_sentiment_analyst(llm):
@@ -107,30 +78,30 @@ def create_sentiment_analyst(llm):
 
         # Treat all three sources as optional enrichment. Vendor/network
         # failures become explicit prompt blocks instead of aborting the node.
-        news_block = _prefetch_for_market(
+        news_block = prefetch_for_market(
             "get_news",
             market,
             "news", lambda: get_news.func(ticker, start_date, end_date)
         )
-        hot_rank_block = _prefetch_for_market(
+        hot_rank_block = prefetch_for_market(
             "fetch_eastmoney_hot_rank",
             market,
             "Eastmoney hot rank",
             lambda: route_to_vendor("fetch_eastmoney_hot_rank", ticker),
         )
-        guba_block = _prefetch_for_market(
+        guba_block = prefetch_for_market(
             "fetch_eastmoney_guba_sentiment",
             market,
             "Eastmoney Guba sentiment",
             lambda: route_to_vendor("fetch_eastmoney_guba_sentiment", ticker),
         )
-        hot_keywords_block = _prefetch_for_market(
+        hot_keywords_block = prefetch_for_market(
             "fetch_eastmoney_hot_keywords",
             market,
             "Eastmoney market hot keywords",
             lambda: route_to_vendor("fetch_eastmoney_hot_keywords"),
         )
-        anomaly_block = _prefetch_for_market(
+        anomaly_block = prefetch_for_market(
             "get_anomaly_reason",
             market,
             "HiThink anomaly explanation",
