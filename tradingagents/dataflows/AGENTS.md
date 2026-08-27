@@ -13,7 +13,7 @@
   DB 缺失还是上游接口失效
 - `akshare_common.py` — 共享工具：`format_money_cn`、`to_akshare_symbol`、`no_proxy`
 - `hithink_common.py` / `hithink_vendor.py` — 同花顺 HiThink Financial-API 客户端与 vendor
-  （env `HITHINK_FINANCE_API_KEY`；三表/财务指标/热榜/龙虎榜/涨停池，链位在 smartmoney_db 之后、akshare 之前；异动原因 hithink 独占，预取注入 Sentiment prompt；估值快照为 market_data_validator 的 PE/PB/PS/PCF 交叉校验锚；集合竞价/短线风向标 hithink 独占，market analyst 工具）
+  （env `HITHINK_FINANCE_API_KEY`；三表/财务指标/热榜/龙虎榜/涨停池，链位在 smartmoney_db 之后、akshare 之前；异动原因 hithink 独占，预取注入 Sentiment prompt；估值快照为 market_data_validator 的 PE/PB/PS/PCF 交叉校验锚；集合竞价/短线风向标 hithink 独占，预取注入 Market Analyst prompt）
 - `market_data_validator.py` — 数值声明的验证锚定（grounding）
 
 ## 已知坑
@@ -23,6 +23,12 @@
   `'macdh'`→`macd_hist`、`'macds'`→`macd_dea`；曾因 `'macd'` 误映射到 `macd_hist`
   导致 LLM 报告「MACD 数据冲突」
 - akshare 调用注意 `no_proxy` 上下文；所有文件 I/O 使用 `encoding="utf-8"`
+- **akshare 按票 crash 归一**：无质押记录（`stock_gpzy_...` TypeError）、非沪深港通标的
+  （`stock_hsgt_individual_em` TypeError）、无研报覆盖（`stock_research_report_em` KeyError
+  'infoCode'）时 akshare 库内部会崩而不是返回空表；vendor 层已将其归一为带明确语义的
+  `NoMarketDataError`（"无质押记录/非标的/无覆盖，not a data outage"），别把这类
+  NO_DATA 当成上游故障排查。个股新闻零直接命中（榜单快讯正文不点名）不再抛错，
+  降级为仅列标题的市场背景区
 
 ## 验证
 
