@@ -8,6 +8,7 @@ import pytest
 
 from tradingagents.portfolio.transaction_sync import (
     TransactionSyncService,
+    _normalize_date,
     _resolve_column_indices,
     _run_gws_command,
     _transform_row,
@@ -206,6 +207,13 @@ class TransformRowTests(unittest.TestCase):
         self.assertEqual(tx.cash_change, -15050.0)
         self.assertEqual(tx.tag, "")
 
+    def test_normalizes_slash_date_to_iso(self):
+        """Sheet-native 'YY/MM/DD' dates must be stored as ISO."""
+        row = ["26/08/27", "600519", "贵州茅台", "150.50", "买入", "100", "5.00", "-15050.00", ""]
+        tx = _transform_row(row, self.full_indices)
+        self.assertIsNotNone(tx)
+        self.assertEqual(tx.date, "2026-08-27")
+
     def test_returns_none_when_row_too_short(self):
         row = ["2024-01-15"]
         tx = _transform_row(row, self.full_indices)
@@ -293,6 +301,36 @@ class TransformRowTests(unittest.TestCase):
         self.assertIsNone(tx.cash_change)
         self.assertIsNone(tx.tag)
         self.assertEqual(tx.name, "茅台")
+
+
+@pytest.mark.unit
+class NormalizeDateTests(unittest.TestCase):
+    """Tests for _normalize_date standalone function."""
+
+    def test_two_digit_year_slash(self):
+        self.assertEqual(_normalize_date("26/08/27"), "2026-08-27")
+
+    def test_four_digit_year_slash(self):
+        self.assertEqual(_normalize_date("2026/8/7"), "2026-08-07")
+
+    def test_iso_passes_through(self):
+        self.assertEqual(_normalize_date("2026-08-27"), "2026-08-27")
+
+    def test_compact_digits(self):
+        self.assertEqual(_normalize_date("20260827"), "2026-08-27")
+
+    def test_year_pivot(self):
+        self.assertEqual(_normalize_date("69/01/01"), "2069-01-01")
+        self.assertEqual(_normalize_date("70/01/01"), "1970-01-01")
+
+    def test_unrecognized_format_returned_unchanged(self):
+        self.assertEqual(_normalize_date("Aug 27, 2026"), "Aug 27, 2026")
+
+    def test_invalid_calendar_date_returned_unchanged(self):
+        self.assertEqual(_normalize_date("2026/13/40"), "2026/13/40")
+
+    def test_strips_whitespace(self):
+        self.assertEqual(_normalize_date("  26/08/27  "), "2026-08-27")
 
 
 @pytest.mark.unit
