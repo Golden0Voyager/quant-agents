@@ -83,6 +83,7 @@ Market data validation via `market_data_validator.py` (grounding numerical claim
 - `<ticker>/complete_report.md` + `<ticker>/1_analysts/` + `<ticker>/2_research/`
 - `batch_summary.md` + `batch_summary.json`
 - `failures.log`
+- `reports/portfolio_comparison.md` — agent 推荐 vs 实盘操作对比（`uv run python scripts/portfolio_backtest.py`）
 
 Audit: `uv run python scripts/report_auditor.py reports/YYYYMMDD_batch_<list>`
 
