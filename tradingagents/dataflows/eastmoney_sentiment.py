@@ -42,6 +42,25 @@ logger = logging.getLogger(__name__)
 # Function A — Hot rank (人气排名)
 # ---------------------------------------------------------------------------
 
+def _hithink_hot_rank_line(ticker: str) -> str | None:
+    """Best-effort HiThink substitute for the Eastmoney hot-rank table.
+
+    The Eastmoney table endpoint (``stock_hot_rank_em``) has been refusing
+    connections since ~2026-08-25 (anti-scraping), which degraded nearly
+    every A-share sentiment prefetch to ``partial``. HiThink's official
+    hot-stock-list covers the "current rank" line for tickers in its daily
+    Top30. Returns ``None`` when hithink is unconfigured, errors, or the
+    ticker is not in the Top30 — the caller then keeps the placeholder.
+    """
+    try:
+        from tradingagents.dataflows.hithink_vendor import get_hot_rank
+
+        return get_hot_rank(ticker)
+    except Exception as exc:  # noqa: BLE001 — substitute must degrade silently
+        logger.debug("hithink hot-rank substitute failed for %s: %s", ticker, exc)
+        return None
+
+
 def fetch_eastmoney_hot_rank(ticker: str, limit: int = 20) -> str:
     """Fetch Eastmoney hot-rank data for *ticker* and return it as a formatted
     plaintext block ready for prompt injection.
@@ -86,12 +105,20 @@ def fetch_eastmoney_hot_rank(ticker: str, limit: int = 20) -> str:
                 f"最新价: {price}  |  涨跌幅: {change_pct}%  |  涨跌额: {change_amt}"
             )
         else:
+            # 未进 top-100 是明确的阴性信号（今日不热门），不是数据缺失——
+            # 不用尖括号占位符，避免被路由层误判为 partial 降级
+            # (20260826 批次 22/23 票因此被打上 partial=1，稀释了降级信号)
             hot_rank_lines.append(
-                f"<{bare_code} not found in the top-100 hot rank list>"
+                f"整体人气排名: 未进入 top-100（{bare_code} 今日不在东财人气榜内，"
+                "属明确的阴性结果：关注度一般，非数据缺失）"
             )
     except Exception as exc:
         logger.warning("Eastmoney hot-rank table fetch failed for %s: %s", ticker, exc)
-        hot_rank_lines.append(f"<hot-rank table unavailable: {type(exc).__name__}>")
+        hithink_line = _hithink_hot_rank_line(ticker)
+        if hithink_line:
+            hot_rank_lines.append(hithink_line)
+        else:
+            hot_rank_lines.append(f"<hot-rank table unavailable: {type(exc).__name__}>")
 
     # --- Source 2: historical rank detail ---
     detail_lines: list[str] = []

@@ -29,6 +29,10 @@
   `NoMarketDataError`（"无质押记录/非标的/无覆盖，not a data outage"），别把这类
   NO_DATA 当成上游故障排查。个股新闻零直接命中（榜单快讯正文不点名）不再抛错，
   降级为仅列标题的市场背景区
+- **东财热榜 partial 陷阱**:`fetch_eastmoney_hot_rank` 的表格端点（`stock_hot_rank_em`）
+  2026-08 起频繁断连（反爬），表格挂时由 hithink hot-stock-list 补位当前排名行（双失败才
+  保留 `<hot-rank table unavailable>` 占位符 → partial）；未进 top-100 是明确阴性信号，
+  以普通文本渲染（不用尖括号占位符），避免被 `_eastmoney_payload` 误判 partial 稀释降级信号
 
 ## 验证
 

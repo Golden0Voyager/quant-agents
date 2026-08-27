@@ -95,7 +95,8 @@ class TestFetchEastmoneyHotRank:
         mock_ak.stock_hot_rank_detail_em.assert_called_once()
 
     def test_rank_table_empty_falls_back_gracefully(self):
-        """When the symbol is not in the top-100 hot rank list, show a message."""
+        """Not in the top-100 hot list → explicit negative signal (not a
+        degraded placeholder, so the route status stays ok)."""
         empty_rank = pd.DataFrame([
             {"当前排名": 1, "代码": "SZ000001", "股票名称": "SomeOther",
              "最新价": 10.0, "涨跌额": 0.5, "涨跌幅": 5.0},
@@ -106,7 +107,9 @@ class TestFetchEastmoneyHotRank:
 
             result = fetch_eastmoney_hot_rank("600519.SS")
 
-        assert "not found" in result.lower() or "top-100" in result.lower()
+        assert "未进入 top-100" in result
+        assert "阴性" in result
+        assert "not found" not in result.lower()  # 不再触发路由层 partial 判定
         assert "历史排名" in result  # detail still shows
 
     def test_detail_empty_still_shows_rank(self):
@@ -121,8 +124,13 @@ class TestFetchEastmoneyHotRank:
         assert "历史排名" in result
 
     def test_exception_returns_placeholder(self):
-        """Any exception should produce a graceful placeholder, not raise."""
-        with patch("tradingagents.dataflows.eastmoney_sentiment.ak") as mock_ak:
+        """Any exception should produce a graceful placeholder, not raise —
+        and only when the hithink substitute also misses."""
+        with patch("tradingagents.dataflows.eastmoney_sentiment.ak") as mock_ak, \
+             patch(
+                 "tradingagents.dataflows.eastmoney_sentiment._hithink_hot_rank_line",
+                 return_value=None,
+             ):
             mock_ak.stock_hot_rank_em.side_effect = RuntimeError("API timeout")
             mock_ak.stock_hot_rank_detail_em.side_effect = RuntimeError("API timeout")
 
@@ -131,11 +139,32 @@ class TestFetchEastmoneyHotRank:
         assert "unavailable" in result.lower()
         assert "RuntimeError" in result
 
+    def test_hithink_substitute_fills_rank_line(self):
+        """Eastmoney table down + ticker in hithink Top30 → hithink line
+        replaces the placeholder (no 'unavailable' marker, no partial)."""
+        with patch("tradingagents.dataflows.eastmoney_sentiment.ak") as mock_ak, \
+             patch(
+                 "tradingagents.dataflows.eastmoney_sentiment._hithink_hot_rank_line",
+                 return_value="同花顺热榜 — 600519.SS (source: hithink hot-stock-list, 当日Top30)\n整体热度排名: #3",
+             ):
+            mock_ak.stock_hot_rank_em.side_effect = ConnectionError("refused")
+            mock_ak.stock_hot_rank_detail_em.return_value = _FAKE_HOT_RANK_DETAIL_DF
+
+            result = fetch_eastmoney_hot_rank("600519.SS")
+
+        assert "同花顺热榜" in result
+        assert "整体热度排名: #3" in result
+        assert "hot-rank table unavailable" not in result
+        assert "历史排名" in result  # detail still shows
+
     def test_hot_rank_uses_max_retries_3(self):
         """_akshare_retry should be called with max_retries=3 for hot-rank calls."""
         with patch(
             "tradingagents.dataflows.eastmoney_sentiment._akshare_retry"
-        ) as mock_retry:
+        ) as mock_retry, patch(
+            "tradingagents.dataflows.eastmoney_sentiment._hithink_hot_rank_line",
+            return_value=None,
+        ):
             mock_retry.side_effect = [None, _FAKE_HOT_RANK_DETAIL_DF]
             fetch_eastmoney_hot_rank("600519.SS")
             for call in mock_retry.call_args_list:
