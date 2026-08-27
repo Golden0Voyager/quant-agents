@@ -495,15 +495,11 @@ def get_news(
         unrelated_rows = list(df[~related_mask].iterrows())
         df = df[related_mask]
 
-    if df.empty and unrelated_rows:
-        raise NoMarketDataError(
-            symbol,
-            detail=(
-                f"news search for {symbol} returned {len(unrelated_rows)} articles but none "
-                f"mention 「{company_name}」 — likely a ticker-code collision with another "
-                "instrument (e.g. a fund sharing the same digits)"
-            ),
-        )
+    # Zero name-matching articles no longer aborts: keyword hits are mostly
+    # listicles (资金流/股东户数/两融榜) where the stock appears in a data
+    # table, not in the article text. Render them title-only with a caveat
+    # instead of falling through to the rate-limit-prone yfinance fallback
+    # (20260826 batch: 300760/002179 news went NO_DATA this way).
 
     lines = [
         f"## {symbol.upper()} News from {start_date} to {end_date} (source: akshare / Eastmoney)\n",
@@ -522,10 +518,17 @@ def get_news(
         lines.append("")
 
     if unrelated_rows:
-        lines.append(
-            f"### ⚠️ 以下 {len(unrelated_rows)} 条检索结果未提及「{company_name}」，"
-            "疑为代码碰撞（如同号基金）或无关快讯，仅列标题供参考，不应作为本公司新闻引用："
-        )
+        if df.empty:
+            lines.append(
+                f"### ⚠️ 检索窗口内没有直接提及「{company_name}」的个股新闻；"
+                f"以下 {len(unrelated_rows)} 条关键词命中快讯中，个股通常出现在榜单/表格"
+                "而非正文，仅列标题作市场背景参考，不应作为本公司新闻引用："
+            )
+        else:
+            lines.append(
+                f"### ⚠️ 以下 {len(unrelated_rows)} 条检索结果未提及「{company_name}」，"
+                "疑为代码碰撞（如同号基金）或无关快讯，仅列标题供参考，不应作为本公司新闻引用："
+            )
         for _, row in unrelated_rows:
             lines.append(f"- {row.get('新闻标题', 'N/A')} ({row.get('发布时间', 'N/A')})")
         lines.append("")
@@ -780,7 +783,22 @@ def get_northbound_hold(
     """Fetch A-share northbound (Stock Connect) holding data."""
     code = to_akshare_symbol(symbol, "bare")
     with _akshare_task_context(f"🌏 {symbol} 北向资金"), no_proxy():
-        df = _safe_call(ak.stock_hsgt_individual_em, symbol=code)
+        try:
+            df = _safe_call(ak.stock_hsgt_individual_em, symbol=code)
+        except TypeError as exc:
+            # akshare crashes ('NoneType' object is not subscriptable) when
+            # Eastmoney has no page for the code — i.e. the stock is not in
+            # the Stock Connect eligible list (verified 2026-08-27: 300562
+            # crashes, 600519 returns rows). Normalize to an explicit
+            # no-records answer instead of a generic failure.
+            raise NoMarketDataError(
+                symbol,
+                detail=(
+                    f"no northbound holding records for {symbol} — the stock is "
+                    "likely not on the Stock Connect eligible list (非沪深港通标的), "
+                    "not a data outage"
+                ),
+            ) from exc
 
     df = _filter_df_by_date(df, "持股日期", curr_date)
 
@@ -1294,7 +1312,20 @@ def get_pledge_ratio(symbol: str) -> str:
     code = to_akshare_symbol(symbol, "bare")
 
     with _akshare_task_context(f"🔒 {symbol} 股权质押"), no_proxy():
-        df = _safe_call(ak.stock_gpzy_individual_pledge_ratio_detail_em, symbol=code)
+        try:
+            df = _safe_call(ak.stock_gpzy_individual_pledge_ratio_detail_em, symbol=code)
+        except TypeError as exc:
+            # akshare crashes ('NoneType' object is not subscriptable) when
+            # Eastmoney returns result=None — i.e. the company has NO pledge
+            # records (verified 2026-08-27: 600519 crashes, 002241 returns
+            # rows). Normalize to an explicit no-pledge answer.
+            raise NoMarketDataError(
+                symbol,
+                detail=(
+                    f"no pledge records for {symbol} — the company likely has "
+                    "no outstanding share pledges (无质押记录), not a data outage"
+                ),
+            ) from exc
 
     if not isinstance(df, pd.DataFrame) or df.empty:
         raise NoMarketDataError(
@@ -1365,7 +1396,20 @@ def get_research_reports(
     code = to_akshare_symbol(symbol, "bare")
 
     with _akshare_task_context(f"📄 {symbol} 个股研报"), no_proxy():
-        df = _safe_call(ak.stock_research_report_em, symbol=code)
+        try:
+            df = _safe_call(ak.stock_research_report_em, symbol=code)
+        except KeyError as exc:
+            # akshare crashes (KeyError: 'infoCode') when Eastmoney has no
+            # research coverage for the code (verified 2026-08-27: 300175
+            # crashes, 600519 returns rows). Normalize to an explicit
+            # no-coverage answer.
+            raise NoMarketDataError(
+                symbol,
+                detail=(
+                    f"no research-report coverage for {symbol} — no analyst "
+                    "reports on record (无研报覆盖), not a data outage"
+                ),
+            ) from exc
 
     df = _filter_df_by_date(df, "日期", curr_date)
 

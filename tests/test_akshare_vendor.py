@@ -554,8 +554,9 @@ class TestGetNews(TestCase):
         assert "白酒板块走强" in result
         assert "未提及「贵州茅台」" in result
 
-    def test_all_unrelated_raises_collision(self):
-        """全部检索结果都不含公司名 → 视为代码碰撞（如同号基金），显式报错。"""
+    def test_all_unrelated_returns_title_only_section(self):
+        """全部检索结果都不含公司名 → 不再报错（多为榜单快讯，正文不点名），
+        降级为仅列标题的市场背景区。"""
         from tradingagents.dataflows import akshare_vendor
         df_fund = pd.DataFrame([{
             "新闻标题": "华安事件驱动量化混合A：二季度利润6.85亿元",
@@ -567,8 +568,10 @@ class TestGetNews(TestCase):
         with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak, \
              self._patch_name("贵州茅台"):
             mock_ak.stock_news_em.return_value = df_fund
-            with pytest.raises(NoMarketDataError, match="collision"):
-                akshare_vendor.get_news("600519.SS", "2026-05-10", "2026-05-14")
+            result = akshare_vendor.get_news("600519.SS", "2026-05-10", "2026-05-14")
+        assert "没有直接提及「贵州茅台」" in result
+        assert "华安事件驱动量化混合A" in result
+        assert "不应作为本公司新闻引用" in result
 
     def test_name_resolution_failure_skips_filtering(self):
         """公司名解析失败时保持旧行为：不过滤，全部渲染。"""
@@ -798,6 +801,16 @@ class TestGetNorthboundHold(TestCase):
             mock_ak.stock_hsgt_individual_em.return_value = pd.DataFrame()
             with pytest.raises(NoMarketDataError, match="600519.SS"):
                 akshare_vendor.get_northbound_hold("600519.SS")
+
+    def test_typeerror_normalized_to_not_eligible(self):
+        """akshare 对非沪深港通标的崩 TypeError → 归一为明确的"非标的"无数据。"""
+        from tradingagents.dataflows import akshare_vendor
+        with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
+            mock_ak.stock_hsgt_individual_em.side_effect = TypeError(
+                "'NoneType' object is not subscriptable"
+            )
+            with pytest.raises(NoMarketDataError, match="Stock Connect eligible"):
+                akshare_vendor.get_northbound_hold("300562.SZ")
 
 
 # ---------------------------------------------------------------------------
@@ -1267,6 +1280,16 @@ class TestGetPledgeRatio(TestCase):
             with pytest.raises(NoMarketDataError, match="600519.SS"):
                 akshare_vendor.get_pledge_ratio("600519.SS")
 
+    def test_typeerror_normalized_to_no_pledge_records(self):
+        """akshare 对无质押记录公司崩 TypeError → 归一为明确的"无质押"无数据。"""
+        from tradingagents.dataflows import akshare_vendor
+        with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
+            mock_ak.stock_gpzy_individual_pledge_ratio_detail_em.side_effect = TypeError(
+                "'NoneType' object is not subscriptable"
+            )
+            with pytest.raises(NoMarketDataError, match="no outstanding share pledges"):
+                akshare_vendor.get_pledge_ratio("600519.SS")
+
 
 # ---------------------------------------------------------------------------
 # get_dividend_history
@@ -1335,6 +1358,14 @@ class TestGetResearchReports(TestCase):
             mock_ak.stock_research_report_em.return_value = pd.DataFrame()
             with pytest.raises(NoMarketDataError, match="600519.SS"):
                 akshare_vendor.get_research_reports("600519.SS")
+
+    def test_keyerror_normalized_to_no_coverage(self):
+        """akshare 对无研报覆盖公司崩 KeyError → 归一为明确的"无覆盖"无数据。"""
+        from tradingagents.dataflows import akshare_vendor
+        with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
+            mock_ak.stock_research_report_em.side_effect = KeyError("infoCode")
+            with pytest.raises(NoMarketDataError, match="no research-report coverage"):
+                akshare_vendor.get_research_reports("300175.SZ")
 
 
 # ---------------------------------------------------------------------------
@@ -1566,6 +1597,6 @@ class TestAkshareRegression:
         from tradingagents.dataflows.interface import route_to_vendor
 
         out = route_to_vendor("get_balance_sheet", "600519.SS")
-        assert any(kw in out.lower() for kw in ("akshare", "东财", "quant_core.db", "smartmoney")), (
+        assert any(kw in out.lower() for kw in ("akshare", "东财", "quant_core.db", "smartmoney", "hithink", "同花顺")), (
             f"route_to_vendor 没有把 A 股请求路由到 A-share vendor，实际输出:\n{out[:200]}"
         )
