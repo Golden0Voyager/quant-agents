@@ -219,8 +219,8 @@ def render_report(analysis: dict, comparison: dict) -> str:
     _agg_rows(lines, "全部", comparison["overall"])
     _agg_rows(lines, "看多", comparison["by_direction"]["bullish"])
     _agg_rows(lines, "看空", comparison["by_direction"]["bearish"])
-    _agg_rows(lines, "网格单", comparison["by_grid"]["grid"])
-    _agg_rows(lines, "非网格", comparison["by_grid"]["non_grid"])
+    # 网格/非网格分组刻意不渲染：网格交易只发生在 ETF 上，而 agent 不推荐 ETF，
+    # 配对事件永远落在非网格桶，分组行只会是两行空数据。
     lines.append("")
     lines.append(
         "> 看多: agent 收益以基准收盘为成本，用户收益以实际买入价为成本；"
@@ -233,16 +233,15 @@ def render_report(analysis: dict, comparison: dict) -> str:
     lines += [
         "## 3. 逐事件明细",
         "",
-        "| 推荐日 | 代码 | 评级 | 状态 | 成交日 | 成交价 | grid | Δ5 | Δ10 | Δ20 |",
-        "|---|---|---|---|---|---:|---|---:|---:|---:|",
+        "| 推荐日 | 代码 | 评级 | 状态 | 成交日 | 成交价 | Δ5 | Δ10 | Δ20 |",
+        "|---|---|---|---|---|---:|---:|---:|---:|",
     ]
     for e in comparison["events"]:
         price_str = f"{e['trade_price']:.2f}" if e.get("trade_price") else "—"
-        grid_str = "✓" if e.get("grid") else ""
         lines.append(
             f"| {e['batch_date']} | {e['ticker']} | {e['rating']} | {e['status']} "
             f"| {e.get('trade_date') or '—'} "
-            f"| {price_str} | {grid_str} "
+            f"| {price_str} "
             f"| {_pct(e.get('delta_5'))} | {_pct(e.get('delta_10'))} | {_pct(e.get('delta_20'))} |"
         )
     lines.append("")

@@ -181,7 +181,7 @@ def pair_recommendations(
     - 同 ticker（裸代码）、成交日 ∈ (batch_date, batch_date + 10 个日历日]、
       方向一致（看多↔买入，看空↔卖出）的首笔成交记为跟随
     - 分红动作永远跳过
-    - 带 tag（如「网格」）的成交打 grid=True 标记
+    - tag 含「网格」的成交打 grid=True 标记（手动交易的 tag 不算）
     - 无匹配 → status="no_action"
     """
     pairs: list[dict] = []
@@ -232,7 +232,9 @@ def pair_recommendations(
                 "trade_price": best.price or None,
                 "trade_shares": best.shares,
                 "trade_action": best.action,
-                "grid": bool(best.tag),
+                # 只有明确带「网格」标签的成交才算网格单；手动交易也带 tag
+                # （如「手动卖出」「分批卖出」），bool(tag) 会把它们误标为网格。
+                "grid": "网格" in (best.tag or ""),
             })
         pairs.append(pair)
     return pairs
