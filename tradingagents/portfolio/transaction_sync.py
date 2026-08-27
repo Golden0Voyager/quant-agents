@@ -7,12 +7,44 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
+from datetime import date
 
 from tradingagents.portfolio.models import Transaction
 from tradingagents.portfolio.validators import parse_number
 
 logger = logging.getLogger(__name__)
+
+# Matches YY/MM/DD, YYYY/MM/DD, YYYY-MM-DD, YYYYMMDD (separators optional
+# for the 4-digit-year forms).
+_DATE_SLASH_RE = re.compile(r"^(\d{2,4})[/\-.](\d{1,2})[/\-.](\d{1,2})$")
+_DATE_COMPACT_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})$")
+
+
+def _normalize_date(value: str) -> str:
+    """Normalize sheet date strings to ISO 'YYYY-MM-DD'.
+
+    The transaction sheet stores dates as 'YY/MM/DD' (e.g. '26/08/27');
+    downstream pairing/parsing expects ISO. Two-digit years < 70 map to
+    2000s, >= 70 to 1900s. Unrecognized formats are returned unchanged so
+    no data is silently dropped.
+    """
+    s = value.strip()
+    m = _DATE_SLASH_RE.match(s)
+    if m:
+        year, month, day = (int(g) for g in m.groups())
+        if year < 100:
+            year += 2000 if year < 70 else 1900
+    else:
+        m = _DATE_COMPACT_RE.match(s)
+        if not m:
+            return s
+        year, month, day = (int(g) for g in m.groups())
+    try:
+        return date(year, month, day).isoformat()
+    except ValueError:
+        return s
 
 # Column header mapping for the transaction sheet
 _COLUMN_MAP = {
@@ -109,7 +141,7 @@ def _transform_row(row: list[str], indices: dict[str, int]) -> Transaction | Non
         action_normalized = "分红"
 
     return Transaction(
-        date=date_val,
+        date=_normalize_date(date_val),
         ticker=ticker_val,
         name=name_val,
         price=price_val,
