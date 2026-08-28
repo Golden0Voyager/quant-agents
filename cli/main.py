@@ -8,7 +8,6 @@ from pathlib import Path
 
 import questionary
 import typer
-from rich.align import Align
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
@@ -66,19 +65,39 @@ def display_welcome() -> None:
         welcome_ascii = (Path(__file__).parent / "static" / "welcome.txt").read_text(encoding="utf-8").rstrip("\n")
     except Exception:
         welcome_ascii = "TradingAgents"
-    welcome_content = f"[bold bright_magenta]{welcome_ascii}[/bold bright_magenta]\n"
-    welcome_content += "[bold cyan]TradingAgents[/bold cyan] [dim]·[/dim] [bold white]Multi-Agents LLM Financial Trading Framework[/bold white]  [dim]A-Share Edition[/dim]\n\n"
-    welcome_content += "[bold]Workflow[/bold]  [cyan]I.[/cyan] Analyst Team  [dim]→[/dim]  [magenta]II.[/magenta] Research Team  [dim]→[/dim]  [yellow]III.[/yellow] Trader  [dim]→[/dim]  [red]IV.[/red] Risk Management  [dim]→[/dim]  [green]V.[/green] Portfolio Management\n\n"
-    welcome_content += "[dim]Tip: 按 Esc 或选择 “← 返回上一层” 可随时回退  ·  Built by [link=https://github.com/TauricResearch]Tauric Research[/link][/dim]"
-    welcome_box = Panel(
-        Align.center(welcome_content),
-        border_style="bright_magenta",
-        padding=(1, 2),
-        title="[bold bright_white] Welcome to TradingAgents [/bold bright_white]",
-        subtitle="[dim]A-Share · Multi-Market · Multi-Agent[/dim]",
-        box=__import__("rich.box").box.ROUNDED,
+    # Cyber gradient: even lines cyan, odd lines magenta
+    _lines = welcome_ascii.splitlines()
+    _colored = []
+    for _i, _ln in enumerate(_lines):
+        _c = "bright_cyan" if _i % 2 == 0 else "bright_magenta"
+        _colored.append(f"[bold {_c}]{_ln}[/bold {_c}]")
+    welcome_ascii_colored = "\n".join(_colored)
+    from rich.text import Text
+    ascii_text = Text.from_markup(welcome_ascii_colored)
+    ascii_text.no_wrap = True
+    ascii_text.overflow = "crop"
+    workflow_text = Text.from_markup("[bold]Flow[/bold]  I. Analyst  [dim]>[/dim]  II. Research  [dim]>[/dim]  III. Trader  [dim]>[/dim]  IV. Risk  [dim]>[/dim]  V. PM")
+    workflow_text.no_wrap = True
+    workflow_text.overflow = "crop"
+    from rich.console import Group
+    body = Group(
+        ascii_text,
+        Text(""),
+        Text.from_markup("[bold cyan]Multi-Agents LLM Financial Trading Framework[/bold cyan] [dim].[/dim] [bold white]A-Share Edition[/bold white]"),
+        Text(""),
+        workflow_text,
+        Text(""),
+        Text.from_markup("[dim]按 Esc 或选择 “← 返回上一层” 可随时回退  ·  [link=https://github.com/TauricResearch]Tauric Research[/link][/dim]"),
     )
-    console.print(Align.center(welcome_box))
+    welcome_box = Panel(
+        body,
+        border_style="bright_cyan",
+        padding=(0, 1),
+        box=__import__("rich.box").box.HEAVY,
+        width=78,
+        expand=False,
+    )
+    console.print(welcome_box)
     console.print()
     # Announcements (silent on failure) — shown once at entry, not per wizard invocation
     try:
@@ -1612,7 +1631,7 @@ def analyze(
     if not holdings and not holdings_sheet and not sync_holdings:
         holdings = _prompt_sync_holdings_interactive()
     while True:
-        mode = ask_mode()
+        mode = ask_mode(allow_back=True)
         if mode == BACK_VALUE:
             console.print("[yellow]已退出[/yellow]")
             return
@@ -1693,13 +1712,18 @@ def analyze(
             import questionary as _q
 
             while True:
-                use_profile = _q.confirm(
+                use_profile_choice = _q.select(
                     "使用保存的配置快速开始？（跳过 LLM/分析师等配置）",
-                    default=True,
+                    choices=[
+                        _q.Choice("是，使用保存的配置", value="yes"),
+                        _q.Choice("否，完整自定义", value="no"),
+                        _q.Choice(BACK_LABEL, value=BACK_VALUE),
+                    ],
+                    style=_q.Style([("selected", "fg:cyan noinherit"), ("highlighted", "fg:cyan noinherit"), ("pointer", "fg:cyan noinherit")]),
                 ).ask()
-                if use_profile is None:
-                    break  # Esc → back to mode selection
-                if use_profile:
+                if use_profile_choice is None or use_profile_choice == BACK_VALUE:
+                    break  # Esc/Back → back to mode selection
+                if use_profile_choice == "yes":
                     prof_result = select_profile_interactive(allow_back=True)
                     if prof_result == BACK_VALUE:
                         continue  # back to use_profile question
