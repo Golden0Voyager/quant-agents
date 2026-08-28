@@ -11,6 +11,9 @@ from tradingagents.llm_clients.model_catalog import get_model_options
 
 console = Console()
 
+BACK_VALUE = "__back__"
+BACK_LABEL = "← 返回上一层"
+
 TICKER_INPUT_EXAMPLES = "SPY, 0700.HK, BTC-USD"
 
 ANALYST_ORDER = [
@@ -34,7 +37,7 @@ ANALYST_DESCRIPTIONS: dict[AnalystType, str] = {
 CRYPTO_SUFFIXES = ("-USD", "-USDT", "-USDC", "-BTC", "-ETH")
 
 
-def get_ticker() -> str:
+def get_ticker(allow_back: bool = False) -> str:
     """Prompt the user to enter a ticker symbol, preserving exchange suffixes.
 
     Uses questionary.text (not typer.prompt, which strips trailing dot-suffixes
@@ -57,6 +60,8 @@ def get_ticker() -> str:
     ).ask()
 
     if ticker is None:
+        if allow_back:
+            return BACK_VALUE  # type: ignore[return-value]
         console.print("\n[red]No ticker symbol provided. Exiting...[/red]")
         exit(1)
 
@@ -120,7 +125,7 @@ def _is_ashare_ticker(ticker: str) -> bool:
     return upper.endswith((".SS", ".SZ", ".BJ"))
 
 
-def get_analysis_date() -> str:
+def get_analysis_date(allow_back: bool = False) -> str:
     """Prompt the user to enter a date in YYYY-MM-DD format."""
     import re
     from datetime import datetime
@@ -146,6 +151,11 @@ def get_analysis_date() -> str:
         ),
     ).ask()
 
+    if date is None:
+        if allow_back:
+            return BACK_VALUE  # type: ignore[return-value]
+        console.print("\n[red]No date provided. Exiting...[/red]")
+        exit(1)
     if not date:
         console.print("\n[red]No date provided. Exiting...[/red]")
         exit(1)
@@ -154,7 +164,7 @@ def get_analysis_date() -> str:
 
 
 def select_analysts(
-    asset_type: AssetType = AssetType.STOCK, ticker: str | None = None
+    asset_type: AssetType = AssetType.STOCK, ticker: str | None = None, allow_back: bool = False
 ) -> list[AnalystType]:
     """Select analysts using an interactive checkbox.
 
@@ -191,10 +201,14 @@ def select_analysts(
                 )
             )
 
+    instr = "\n- Press Space to select/unselect analysts\n- Press 'a' to select/unselect all\n- Press Enter when done"
+    if allow_back:
+        instr += "\n- 按 Esc 返回上一层"
+
     selected = questionary.checkbox(
         "Select Your [Analysts Team]:",
         choices=choices,
-        instruction="\n- Press Space to select/unselect analysts\n- Press 'a' to select/unselect all\n- Press Enter when done",
+        instruction=instr,
         validate=lambda x: len(x) > 0 or "You must select at least one analyst.",
         style=questionary.Style(
             [
@@ -207,6 +221,11 @@ def select_analysts(
         ),
     ).ask()
 
+    if selected is None:
+        if allow_back:
+            return BACK_VALUE  # type: ignore[return-value]
+        console.print("\n[red]No analysts selected. Exiting...[/red]")
+        exit(1)
     if not selected:
         console.print("\n[red]No analysts selected. Exiting...[/red]")
         exit(1)
@@ -214,7 +233,7 @@ def select_analysts(
     return selected
 
 
-def select_research_depth() -> int:
+def select_research_depth(allow_back: bool = False) -> int:
     """Select research depth using an interactive selection."""
 
     # Define research depth options with their corresponding values
@@ -225,11 +244,15 @@ def select_research_depth() -> int:
         ("Shallow - Quick research, few debate and strategy discussion rounds", 1),
     ]
 
+    choices = [
+        questionary.Choice(display, value=value) for display, value in DEPTH_OPTIONS
+    ]
+    if allow_back:
+        choices.append(questionary.Choice(BACK_LABEL, value=BACK_VALUE))
+
     choice = questionary.select(
         "Select Your [Research Depth]:",
-        choices=[
-            questionary.Choice(display, value=value) for display, value in DEPTH_OPTIONS
-        ],
+        choices=choices,
         instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
         style=questionary.Style(
             [
@@ -241,8 +264,12 @@ def select_research_depth() -> int:
     ).ask()
 
     if choice is None:
+        if allow_back:
+            return BACK_VALUE  # type: ignore[return-value]
         console.print("\n[red]No research depth selected. Exiting...[/red]")
         exit(1)
+    if choice == BACK_VALUE:
+        return BACK_VALUE  # type: ignore[return-value]
 
     return choice
 
@@ -303,7 +330,7 @@ def _fetch_kimi_models() -> list[tuple[str, str]]:
         return []
 
 
-def _require_text(message: str, hint: str) -> str:
+def _require_text(message: str, hint: str, allow_back: bool = False) -> str:
     """Prompt for a required value; exit cleanly if the user cancels.
 
     ``questionary.text(...).ask()`` returns None on Ctrl-C/Esc; mirror the
@@ -315,12 +342,14 @@ def _require_text(message: str, hint: str) -> str:
         validate=lambda x: len(x.strip()) > 0 or hint,
     ).ask()
     if response is None:
+        if allow_back:
+            return BACK_VALUE  # type: ignore[return-value]
         console.print("\n[red]Cancelled. Exiting...[/red]")
         exit(1)
     return response.strip()
 
 
-def select_openrouter_model(mode: str) -> str:
+def select_openrouter_model(mode: str, allow_back: bool = False) -> str:
     """Select an OpenRouter model from the newest available, or enter a custom ID.
 
     ``mode`` ("quick"/"deep") labels the prompt so the two consecutive
@@ -338,6 +367,8 @@ def select_openrouter_model(mode: str) -> str:
 
     choices = [questionary.Choice(name, value=mid) for name, mid in top]
     choices.append(questionary.Choice("Custom model ID", value="custom"))
+    if allow_back:
+        choices.append(questionary.Choice(BACK_LABEL, value=BACK_VALUE))
 
     choice = questionary.select(
         f"Select Your [{mode.title()}-Thinking] OpenRouter Model (latest available):",
@@ -351,17 +382,25 @@ def select_openrouter_model(mode: str) -> str:
     ).ask()
 
     if choice is None:
+        if allow_back:
+            return BACK_VALUE  # type: ignore[return-value]
         console.print("\n[red]No model selected. Exiting...[/red]")
         exit(1)
+    if choice == BACK_VALUE:
+        return BACK_VALUE  # type: ignore[return-value]
     if choice == "custom":
-        return _require_text(
+        custom = _require_text(
             "Enter OpenRouter model ID (e.g. google/gemma-4-26b-a4b-it):",
             "Please enter a model ID.",
+            allow_back=allow_back,
         )
+        if custom == BACK_VALUE:
+            return BACK_VALUE  # type: ignore[return-value]
+        return custom
     return choice
 
 
-def select_kimi_model(mode: str) -> str:
+def select_kimi_model(mode: str, allow_back: bool = False) -> str:
     """Select a Kimi model from the API or the built-in catalog.
 
     ``mode`` ("quick"/"deep") labels the prompt like the other providers.
@@ -375,6 +414,8 @@ def select_kimi_model(mode: str) -> str:
     choices = [questionary.Choice(name, value=mid) for name, mid in top]
     if not any(value == "custom" for _, value in top):
         choices.append(questionary.Choice("Custom model ID", value="custom"))
+    if allow_back:
+        choices.append(questionary.Choice(BACK_LABEL, value=BACK_VALUE))
 
     choice = questionary.select(
         f"Select Your [{mode.title()}-Thinking] Kimi Model:",
@@ -388,37 +429,52 @@ def select_kimi_model(mode: str) -> str:
     ).ask()
 
     if choice is None:
+        if allow_back:
+            return BACK_VALUE  # type: ignore[return-value]
         console.print("\n[red]No model selected. Exiting...[/red]")
         exit(1)
+    if choice == BACK_VALUE:
+        return BACK_VALUE  # type: ignore[return-value]
     if choice == "custom":
-        return _prompt_custom_model_id()
+        custom = _prompt_custom_model_id(allow_back=allow_back)
+        if custom == BACK_VALUE:
+            return BACK_VALUE  # type: ignore[return-value]
+        return custom
     return choice
 
 
-def _prompt_custom_model_id() -> str:
+def _prompt_custom_model_id(allow_back: bool = False) -> str:
     """Prompt user to type a custom model ID."""
-    return _require_text("Enter model ID:", "Please enter a model ID.")
+    return _require_text("Enter model ID:", "Please enter a model ID.", allow_back=allow_back)
 
 
-def _select_model(provider: str, mode: str) -> str:
+def _select_model(provider: str, mode: str, allow_back: bool = False) -> str:
     """Select a model for the given provider and mode (quick/deep)."""
     if provider.lower() == "openrouter":
-        return select_openrouter_model(mode)
+        return select_openrouter_model(mode, allow_back=allow_back)
     if provider.lower() == "kimi":
-        return select_kimi_model(mode)
+        return select_kimi_model(mode, allow_back=allow_back)
 
     if provider.lower() == "azure":
-        return _require_text(
+        azure = _require_text(
             f"Enter Azure deployment name ({mode}-thinking):",
             "Please enter a deployment name.",
+            allow_back=allow_back,
         )
+        if azure == BACK_VALUE:
+            return BACK_VALUE  # type: ignore[return-value]
+        return azure
+
+    model_choices = [
+        questionary.Choice(display, value=value)
+        for display, value in get_model_options(provider, mode)
+    ]
+    if allow_back:
+        model_choices.append(questionary.Choice(BACK_LABEL, value=BACK_VALUE))
 
     choice = questionary.select(
         f"Select Your [{mode.title()}-Thinking LLM Engine]:",
-        choices=[
-            questionary.Choice(display, value=value)
-            for display, value in get_model_options(provider, mode)
-        ],
+        choices=model_choices,
         instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
         style=questionary.Style(
             [
@@ -430,23 +486,30 @@ def _select_model(provider: str, mode: str) -> str:
     ).ask()
 
     if choice is None:
+        if allow_back:
+            return BACK_VALUE  # type: ignore[return-value]
         console.print(f"\n[red]No {mode} thinking llm engine selected. Exiting...[/red]")
         exit(1)
+    if choice == BACK_VALUE:
+        return BACK_VALUE  # type: ignore[return-value]
 
     if choice == "custom":
-        return _prompt_custom_model_id()
+        custom = _prompt_custom_model_id(allow_back=allow_back)
+        if custom == BACK_VALUE:
+            return BACK_VALUE  # type: ignore[return-value]
+        return custom
 
     return choice
 
 
-def select_shallow_thinking_agent(provider) -> str:
+def select_shallow_thinking_agent(provider, allow_back: bool = False) -> str:
     """Select shallow thinking llm engine using an interactive selection."""
-    return _select_model(provider, "quick")
+    return _select_model(provider, "quick", allow_back=allow_back)
 
 
-def select_deep_thinking_agent(provider) -> str:
+def select_deep_thinking_agent(provider, allow_back: bool = False) -> str:
     """Select deep thinking llm engine using an interactive selection."""
-    return _select_model(provider, "deep")
+    return _select_model(provider, "deep", allow_back=allow_back)
 
 def _llm_provider_table() -> list[tuple[str, str, str | None]]:
     """(display_name, provider_key, base_url) for every supported provider.
@@ -484,16 +547,20 @@ def provider_default_url(provider_key: str) -> str | None:
     return None
 
 
-def select_llm_provider() -> tuple[str, str | None]:
+def select_llm_provider(allow_back: bool = False) -> tuple[str, str | None]:
     """Select the LLM provider and its API endpoint."""
     PROVIDERS = _llm_provider_table()
 
+    choices = [
+        questionary.Choice(display, value=(provider_key, url))
+        for display, provider_key, url in PROVIDERS
+    ]
+    if allow_back:
+        choices.append(questionary.Choice(BACK_LABEL, value=BACK_VALUE))
+
     choice = questionary.select(
         "Select your LLM Provider:",
-        choices=[
-            questionary.Choice(display, value=(provider_key, url))
-            for display, provider_key, url in PROVIDERS
-        ],
+        choices=choices,
         instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
         style=questionary.Style(
             [
@@ -505,23 +572,30 @@ def select_llm_provider() -> tuple[str, str | None]:
     ).ask()
 
     if choice is None:
+        if allow_back:
+            return BACK_VALUE, None  # type: ignore[return-value]
         console.print("\n[red]No LLM provider selected. Exiting...[/red]")
         exit(1)
+    if choice == BACK_VALUE:
+        return BACK_VALUE, None  # type: ignore[return-value]
 
     provider, url = choice
     return provider, url
 
 
-def ask_workers() -> int:
+def ask_workers(allow_back: bool = False) -> int:
     """Ask user to choose the number of concurrent workers for batch analysis."""
+    choices = [
+        questionary.Choice("1 — 顺序执行，稳定可靠（1 个 Worker）", value=1),
+        questionary.Choice("2 — 轻量并发，速度翻倍（2 个 Worker，推荐）", value=2),
+        questionary.Choice("3 — 中等并发，适合多只股票（3 个 Worker）", value=3),
+        questionary.Choice("5 — 高并发，需确保 API 限流允许（5 个 Worker）", value=5),
+    ]
+    if allow_back:
+        choices.append(questionary.Choice(BACK_LABEL, value=BACK_VALUE))
     choice = questionary.select(
         "并发 Worker 数量（每个 Worker 分析一只股票）:",
-        choices=[
-            questionary.Choice("1 — 顺序执行，稳定可靠（1 个 Worker）", value=1),
-            questionary.Choice("2 — 轻量并发，速度翻倍（2 个 Worker，推荐）", value=2),
-            questionary.Choice("3 — 中等并发，适合多只股票（3 个 Worker）", value=3),
-            questionary.Choice("5 — 高并发，需确保 API 限流允许（5 个 Worker）", value=5),
-        ],
+        choices=choices,
         style=questionary.Style([
             ("selected", "fg:green noinherit"),
             ("highlighted", "fg:green noinherit"),
@@ -529,19 +603,25 @@ def ask_workers() -> int:
         ]),
     ).ask()
     if choice is None:
+        if allow_back:
+            return BACK_VALUE  # type: ignore[return-value]
         console.print("[yellow]未选择，默认使用 3 个 Worker[/yellow]")
         return 3
+    if choice == BACK_VALUE:
+        return BACK_VALUE  # type: ignore[return-value]
     return choice
 
 
-def ask_openai_reasoning_effort() -> str:
+def ask_openai_reasoning_effort(allow_back: bool = False) -> str:
     """Ask for OpenAI reasoning effort level."""
     choices = [
         questionary.Choice("Medium (Default)", "medium"),
         questionary.Choice("High (More thorough)", "high"),
         questionary.Choice("Low (Faster)", "low"),
     ]
-    return questionary.select(
+    if allow_back:
+        choices.append(questionary.Choice(BACK_LABEL, value=BACK_VALUE))
+    result = questionary.select(
         "Select Reasoning Effort:",
         choices=choices,
         style=questionary.Style([
@@ -550,128 +630,173 @@ def ask_openai_reasoning_effort() -> str:
             ("pointer", "fg:cyan noinherit"),
         ]),
     ).ask()
+    if result is None and allow_back:
+        return BACK_VALUE  # type: ignore[return-value]
+    if result == BACK_VALUE:
+        return BACK_VALUE  # type: ignore[return-value]
+    return result
 
 
-def ask_anthropic_effort() -> str | None:
+def ask_anthropic_effort(allow_back: bool = False) -> str | None:
     """Ask for Anthropic effort level.
 
     Controls token usage and response thoroughness on Claude 4.5 / 4.6 / 4.7
     models. The API also accepts "max"; we expose low/medium/high as the
     common selection range.
     """
-    return questionary.select(
+    choices = [
+        questionary.Choice("High (recommended)", "high"),
+        questionary.Choice("Medium (balanced)", "medium"),
+        questionary.Choice("Low (faster, cheaper)", "low"),
+    ]
+    if allow_back:
+        choices.append(questionary.Choice(BACK_LABEL, value=BACK_VALUE))
+    result = questionary.select(
         "Select Effort Level:",
-        choices=[
-            questionary.Choice("High (recommended)", "high"),
-            questionary.Choice("Medium (balanced)", "medium"),
-            questionary.Choice("Low (faster, cheaper)", "low"),
-        ],
+        choices=choices,
         style=questionary.Style([
             ("selected", "fg:cyan noinherit"),
             ("highlighted", "fg:cyan noinherit"),
             ("pointer", "fg:cyan noinherit"),
         ]),
     ).ask()
+    if result is None and allow_back:
+        return BACK_VALUE  # type: ignore[return-value]
+    if result == BACK_VALUE:
+        return BACK_VALUE  # type: ignore[return-value]
+    return result
 
 
-def ask_gemini_thinking_config() -> str | None:
+def ask_gemini_thinking_config(allow_back: bool = False) -> str | None:
     """Ask for Gemini thinking configuration.
 
     Returns thinking_level: "high" or "minimal".
     Client maps to appropriate API param based on model series.
     """
-    return questionary.select(
+    choices = [
+        questionary.Choice("Enable Thinking (recommended)", "high"),
+        questionary.Choice("Minimal/Disable Thinking", "minimal"),
+    ]
+    if allow_back:
+        choices.append(questionary.Choice(BACK_LABEL, value=BACK_VALUE))
+    result = questionary.select(
         "Select Thinking Mode:",
-        choices=[
-            questionary.Choice("Enable Thinking (recommended)", "high"),
-            questionary.Choice("Minimal/Disable Thinking", "minimal"),
-        ],
+        choices=choices,
         style=questionary.Style([
             ("selected", "fg:green noinherit"),
             ("highlighted", "fg:green noinherit"),
             ("pointer", "fg:green noinherit"),
         ]),
     ).ask()
+    if result is None and allow_back:
+        return BACK_VALUE  # type: ignore[return-value]
+    if result == BACK_VALUE:
+        return BACK_VALUE  # type: ignore[return-value]
+    return result
 
 
-def ask_glm_region() -> tuple[str, str]:
+def ask_glm_region(allow_back: bool = False) -> tuple[str, str]:
     """Ask which GLM platform (Z.AI international vs BigModel China) to use.
 
     Zhipu serves the same GLM models under two brands with separate
     accounts; keys aren't interchangeable. Returns (provider_key, backend_url).
     """
-    return questionary.select(
+    choices = [
+        questionary.Choice(
+            "Z.AI — api.z.ai (international, uses ZHIPU_API_KEY)",
+            value=("glm", "https://api.z.ai/api/paas/v4/"),
+        ),
+        questionary.Choice(
+            "BigModel — open.bigmodel.cn (China, uses ZHIPU_CN_API_KEY)",
+            value=("glm-cn", "https://open.bigmodel.cn/api/paas/v4/"),
+        ),
+    ]
+    if allow_back:
+        choices.append(questionary.Choice(BACK_LABEL, value=BACK_VALUE))
+    result = questionary.select(
         "Select GLM platform:",
-        choices=[
-            questionary.Choice(
-                "Z.AI — api.z.ai (international, uses ZHIPU_API_KEY)",
-                value=("glm", "https://api.z.ai/api/paas/v4/"),
-            ),
-            questionary.Choice(
-                "BigModel — open.bigmodel.cn (China, uses ZHIPU_CN_API_KEY)",
-                value=("glm-cn", "https://open.bigmodel.cn/api/paas/v4/"),
-            ),
-        ],
+        choices=choices,
         style=questionary.Style([
             ("selected", "fg:cyan noinherit"),
             ("highlighted", "fg:cyan noinherit"),
             ("pointer", "fg:cyan noinherit"),
         ]),
     ).ask()
+    if result is None and allow_back:
+        return BACK_VALUE, None  # type: ignore[return-value]
+    if result == BACK_VALUE:
+        return BACK_VALUE, None  # type: ignore[return-value]
+    return result
 
 
-def ask_qwen_region() -> tuple[str, str]:
+def ask_qwen_region(allow_back: bool = False) -> tuple[str, str]:
     """Ask which Qwen region (international vs China) to use.
 
     Alibaba DashScope exposes two endpoints with separate accounts —
     a key from one region does NOT authenticate against the other
     (fixes #758). Returns (provider_key, backend_url).
     """
-    return questionary.select(
+    choices = [
+        questionary.Choice(
+            "International — dashscope-intl.aliyuncs.com (uses DASHSCOPE_API_KEY)",
+            value=("qwen", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
+        ),
+        questionary.Choice(
+            "China — dashscope.aliyuncs.com (uses DASHSCOPE_CN_API_KEY)",
+            value=("qwen-cn", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+        ),
+    ]
+    if allow_back:
+        choices.append(questionary.Choice(BACK_LABEL, value=BACK_VALUE))
+    result = questionary.select(
         "Select Qwen region:",
-        choices=[
-            questionary.Choice(
-                "International — dashscope-intl.aliyuncs.com (uses DASHSCOPE_API_KEY)",
-                value=("qwen", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
-            ),
-            questionary.Choice(
-                "China — dashscope.aliyuncs.com (uses DASHSCOPE_CN_API_KEY)",
-                value=("qwen-cn", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
-            ),
-        ],
+        choices=choices,
         style=questionary.Style([
             ("selected", "fg:cyan noinherit"),
             ("highlighted", "fg:cyan noinherit"),
             ("pointer", "fg:cyan noinherit"),
         ]),
     ).ask()
+    if result is None and allow_back:
+        return BACK_VALUE, None  # type: ignore[return-value]
+    if result == BACK_VALUE:
+        return BACK_VALUE, None  # type: ignore[return-value]
+    return result
 
 
-def ask_minimax_region() -> tuple[str, str]:
+def ask_minimax_region(allow_back: bool = False) -> tuple[str, str]:
     """Ask which MiniMax region (global vs China) to use.
 
     MiniMax exposes two endpoints with separate accounts — a key from
     one region does NOT authenticate against the other. Returns
     (provider_key, backend_url).
     """
-    return questionary.select(
+    choices = [
+        questionary.Choice(
+            "Global — api.minimax.io (uses MINIMAX_API_KEY)",
+            value=("minimax", "https://api.minimax.io/v1"),
+        ),
+        questionary.Choice(
+            "China — api.minimaxi.com (uses MINIMAX_CN_API_KEY)",
+            value=("minimax-cn", "https://api.minimaxi.com/v1"),
+        ),
+    ]
+    if allow_back:
+        choices.append(questionary.Choice(BACK_LABEL, value=BACK_VALUE))
+    result = questionary.select(
         "Select MiniMax region:",
-        choices=[
-            questionary.Choice(
-                "Global — api.minimax.io (uses MINIMAX_API_KEY)",
-                value=("minimax", "https://api.minimax.io/v1"),
-            ),
-            questionary.Choice(
-                "China — api.minimaxi.com (uses MINIMAX_CN_API_KEY)",
-                value=("minimax-cn", "https://api.minimaxi.com/v1"),
-            ),
-        ],
+        choices=choices,
         style=questionary.Style([
             ("selected", "fg:cyan noinherit"),
             ("highlighted", "fg:cyan noinherit"),
             ("pointer", "fg:cyan noinherit"),
         ]),
     ).ask()
+    if result is None and allow_back:
+        return BACK_VALUE, None  # type: ignore[return-value]
+    if result == BACK_VALUE:
+        return BACK_VALUE, None  # type: ignore[return-value]
+    return result
 
 
 def confirm_ollama_endpoint(url: str) -> None:
@@ -747,25 +872,28 @@ def ensure_api_key(provider: str) -> str | None:
     return key
 
 
-def ask_output_language() -> str:
+def ask_output_language(allow_back: bool = False) -> str:
     """Ask for report output language."""
+    choices = [
+        # Chinese first for A-share users who just want to hit Enter.
+        questionary.Choice("Chinese (中文)", "Chinese"),
+        questionary.Choice("English (default)", "English"),
+        questionary.Choice("Japanese (日本語)", "Japanese"),
+        questionary.Choice("Korean (한국어)", "Korean"),
+        questionary.Choice("Hindi (हिन्दी)", "Hindi"),
+        questionary.Choice("Spanish (Español)", "Spanish"),
+        questionary.Choice("Portuguese (Português)", "Portuguese"),
+        questionary.Choice("French (Français)", "French"),
+        questionary.Choice("German (Deutsch)", "German"),
+        questionary.Choice("Arabic (العربية)", "Arabic"),
+        questionary.Choice("Russian (Русский)", "Russian"),
+        questionary.Choice("Custom language", "custom"),
+    ]
+    if allow_back:
+        choices.append(questionary.Choice(BACK_LABEL, value=BACK_VALUE))
     choice = questionary.select(
         "Select Output Language:",
-        choices=[
-            # Chinese first for A-share users who just want to hit Enter.
-            questionary.Choice("Chinese (中文)", "Chinese"),
-            questionary.Choice("English (default)", "English"),
-            questionary.Choice("Japanese (日本語)", "Japanese"),
-            questionary.Choice("Korean (한국어)", "Korean"),
-            questionary.Choice("Hindi (हिन्दी)", "Hindi"),
-            questionary.Choice("Spanish (Español)", "Spanish"),
-            questionary.Choice("Portuguese (Português)", "Portuguese"),
-            questionary.Choice("French (Français)", "French"),
-            questionary.Choice("German (Deutsch)", "German"),
-            questionary.Choice("Arabic (العربية)", "Arabic"),
-            questionary.Choice("Russian (Русский)", "Russian"),
-            questionary.Choice("Custom language", "custom"),
-        ],
+        choices=choices,
         style=questionary.Style([
             ("selected", "fg:yellow noinherit"),
             ("highlighted", "fg:yellow noinherit"),
@@ -776,11 +904,20 @@ def ask_output_language() -> str:
     # Output language has a sensible default, so a cancel falls back to English
     # rather than exiting the run (unlike the required model/provider prompts).
     if choice is None:
+        if allow_back:
+            return BACK_VALUE  # type: ignore[return-value]
         return "English"
+    if choice == BACK_VALUE:
+        return BACK_VALUE  # type: ignore[return-value]
     if choice == "custom":
-        return (questionary.text(
+        _raw = questionary.text(
             "Enter language name (e.g. Turkish, Vietnamese, Thai, Indonesian):",
             validate=lambda x: len(x.strip()) > 0 or "Please enter a language name.",
-        ).ask() or "").strip() or "English"
+        ).ask()
+        if _raw is None:
+            if allow_back:
+                return BACK_VALUE  # type: ignore[return-value]
+            return "English"
+        return _raw.strip() or "English"
 
     return choice

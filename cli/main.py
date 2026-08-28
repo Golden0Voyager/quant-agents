@@ -60,11 +60,13 @@ def create_question_box(title, prompt, default=None):
     return Panel(box_content, border_style="blue", padding=(1, 2))
 
 
-def get_user_selections(preselected_tickers: list[str] | None = None) -> dict | None:
+def get_user_selections(preselected_tickers: list[str] | None = None, allow_back: bool = False) -> dict | None:
     """Get all user selections before starting the analysis display.
 
     Args:
         preselected_tickers: If provided, skip the ticker input prompt and use these tickers directly.
+        allow_back: When True, Esc / “← 返回上一层” returns BACK_VALUE sentinel so
+            the caller can navigate to the previous menu instead of exiting.
     """
     # Display ASCII art welcome message
     with open(Path(__file__).parent / "static" / "welcome.txt", encoding="utf-8") as f:
@@ -95,18 +97,28 @@ def get_user_selections(preselected_tickers: list[str] | None = None) -> dict | 
     announcements = fetch_announcements()
     display_announcements(console, announcements)
 
-    # Create a boxed questionnaire for each step
-    # (create_question_box is defined at module level)
-
-    # Step 1: Ticker symbol(s)
     from tradingagents.ticker_resolver import resolve_ticker
 
-    # Map resolved ticker -> company_name for downstream naming
     ticker_to_name: dict[str, str] = {}
+    selected_tickers: list[str] = []
+    selected_ticker: str | list[str] = ""
+    asset_type = None  # type: ignore[assignment]
+    analysis_date: str = ""
+    selected_analysts: list = []  # type: ignore[type-arg]
+    output_language: str = ""
+    selected_research_depth: int = 1
+    selected_llm_provider: str = ""
+    backend_url: str | None = None
+    selected_shallow_thinker: str = ""
+    selected_deep_thinker: str = ""
+    thinking_level: str | None = None
+    reasoning_effort: str | None = None
+    anthropic_effort: str | None = None
 
+    provider_from_env = bool(os.environ.get("TRADINGAGENTS_LLM_PROVIDER"))
+
+    # Handle ticker pre-selection (no back needed — it was chosen one level up)
     if preselected_tickers is not None:
-        # Use watchlist or CLI-provided tickers directly
-        selected_tickers = []
         ticker_names = []
         for t in preselected_tickers:
             try:
@@ -119,197 +131,268 @@ def get_user_selections(preselected_tickers: list[str] | None = None) -> dict | 
                 console.print(f"[yellow]解析提示 {t}: {e}[/yellow]")
                 selected_tickers.append(t.upper())
                 ticker_names.append(f"[cyan]{t.upper()}[/cyan] (未知)")
-
         console.print("\n[bold cyan]Step 1: Ticker Symbol[/bold cyan]")
         console.print(f"[dim]Using pre-selected tickers from watchlist/args: {', '.join(preselected_tickers)}[/dim]")
         console.print("\n[bold]已解析股票:[/bold]")
         for line in ticker_names:
             console.print(f"  • {line}")
+        selected_ticker = selected_tickers[0] if len(selected_tickers) == 1 else selected_tickers
+        asset_type = detect_asset_type(selected_ticker if isinstance(selected_ticker, str) else selected_tickers[0])
+        if asset_type.value != "stock":
+            console.print(f"[green]Detected asset type:[/green] {asset_type.value}")
+        # Start after ticker
+        step = 1
+        max_step = 8
     else:
-        while True:
+        selected_tickers = []
+        step = 0
+        max_step = 8
+
+    if allow_back:
+        console.print("[dim]提示：每步均可按 Esc 或选择 “← 返回上一层” 回到上一步[/dim]")
+
+    while step <= max_step:
+        # Step 0: Ticker symbol(s)
+        if step == 0:
             console.print("\n[bold cyan]Step 1: Ticker Symbol[/bold cyan]")
             console.print("[dim]Enter ticker symbol(s) to analyze, comma-separated for multiple[/dim]")
-            raw_tickers = get_ticker()
+            raw_tickers = get_ticker(allow_back=allow_back)
+            if raw_tickers == BACK_VALUE:
+                return BACK_VALUE  # type: ignore[return-value]
             tickers = _parse_tickers_input(raw_tickers)
-
-            # Resolve tickers and show names for confirmation
-            selected_tickers = []
-            ticker_names = []
+            tmp_tickers: list[str] = []
+            tmp_names: list[str] = []
+            tmp_map: dict[str, str] = {}
             for t in tickers:
                 try:
                     resolved = resolve_ticker(t)
-                    selected_tickers.append(resolved["ticker"])
+                    tmp_tickers.append(resolved["ticker"])
                     name = resolved.get("company_name", "")
-                    ticker_to_name[resolved["ticker"]] = name
-                    ticker_names.append(f"[cyan]{resolved['ticker']}[/cyan] {name}")
+                    tmp_map[resolved["ticker"]] = name
+                    tmp_names.append(f"[cyan]{resolved['ticker']}[/cyan] {name}")
                 except Exception as e:
                     console.print(f"[yellow]解析提示 {t}: {e}[/yellow]")
-                    selected_tickers.append(t.upper())
-                    ticker_names.append(f"[cyan]{t.upper()}[/cyan] (未知)")
-
+                    tmp_tickers.append(t.upper())
+                    tmp_names.append(f"[cyan]{t.upper()}[/cyan] (未知)")
             console.print("\n[bold]已解析股票:[/bold]")
-            for line in ticker_names:
+            for line in tmp_names:
                 console.print(f"  • {line}")
-
-            import questionary
-
             confirmed = questionary.confirm(
                 "股票信息是否正确？",
                 default=True,
-                style=questionary.Style(
-                    [
-                        ("question", "fg:green bold"),
-                    ]
-                ),
+                style=questionary.Style([("question", "fg:green bold")]),
             ).ask()
+            if confirmed is None and allow_back:
+                continue  # treat Esc as “re-enter”, stay on same step (or could go back)
             if confirmed:
-                break
+                selected_tickers = tmp_tickers
+                ticker_to_name = tmp_map
+                selected_ticker = selected_tickers[0] if len(selected_tickers) == 1 else selected_tickers
+                asset_type = detect_asset_type(selected_ticker if isinstance(selected_ticker, str) else selected_tickers[0])
+                if asset_type.value != "stock":
+                    console.print(f"[green]Detected asset type:[/green] {asset_type.value}")
+                step += 1
+                continue
             console.print("[yellow]请重新输入股票代码...[/yellow]\n")
+            continue
 
-    selected_ticker = selected_tickers[0] if len(selected_tickers) == 1 else selected_tickers
+        # Step 1: Analysis date
+        if step == 1:
+            default_date = datetime.datetime.now().strftime("%Y-%m-%d")
+            console.print("\n[bold cyan]Step 2: Analysis Date[/bold cyan]")
+            console.print(f"[dim]Enter the analysis date (YYYY-MM-DD), default: {default_date}[/dim]")
+            result = get_analysis_date(allow_back=allow_back)  # type: ignore[call-arg]
+            if result == BACK_VALUE:
+                if preselected_tickers is not None:
+                    return BACK_VALUE  # type: ignore[return-value]
+                step -= 1
+                continue
+            analysis_date = result
+            step += 1
+            continue
 
-    asset_type = detect_asset_type(selected_ticker if isinstance(selected_ticker, str) else selected_tickers[0])
-    # Only announce when it's not the default stock path, to avoid printing
-    # "stock" on every run.
-    if asset_type.value != "stock":
-        console.print(f"[green]Detected asset type:[/green] {asset_type.value}")
+        # Step 2: Select analysts
+        if step == 2:
+            console.print("\n[bold cyan]Step 3: Analysts Team[/bold cyan]")
+            console.print("[dim]Select your LLM analyst agents for the analysis[/dim]")
+            res = select_analysts(
+                asset_type,  # type: ignore[arg-type]
+                ticker=selected_ticker if isinstance(selected_ticker, str) else None,
+                allow_back=allow_back,
+            )
+            if res == BACK_VALUE:  # type: ignore[comparison-overlap]
+                step -= 1
+                continue
+            selected_analysts = res  # type: ignore[assignment]
+            console.print(f"[green]Selected analysts:[/green] {', '.join(a.value for a in selected_analysts)}")
+            # Step 3.5: Data Readiness Check (no separate step index — runs with analysts)
+            from tradingagents.agents.utils.data_readiness import (
+                check_data_readiness,
+                display_readiness_report,
+            )
+            console.print()
+            ticker_for_check = selected_ticker if isinstance(selected_ticker, str) else selected_tickers[0]
+            report = check_data_readiness(
+                ticker=ticker_for_check,
+                trade_date=analysis_date,
+                selected_analysts=[a.value for a in selected_analysts],
+            )
+            display_readiness_report(console, report)
+            if report.warning_count > 0:
+                cont = questionary.confirm(
+                    "部分数据不可用，是否继续分析？",
+                    default=True,
+                ).ask()
+                if cont is None and allow_back:
+                    step -= 1  # Esc = back
+                    continue
+                if not cont:
+                    console.print("[yellow]已取消分析[/yellow]")
+                    return None
+            step += 1
+            continue
 
-    # Step 2: Analysis date
-    default_date = datetime.datetime.now().strftime("%Y-%m-%d")
-    console.print("\n[bold cyan]Step 2: Analysis Date[/bold cyan]")
-    console.print(f"[dim]Enter the analysis date (YYYY-MM-DD), default: {default_date}[/dim]")
-    analysis_date = get_analysis_date()
+        # Step 3: Output language
+        if step == 3:
+            if os.environ.get("TRADINGAGENTS_OUTPUT_LANGUAGE"):
+                output_language = DEFAULT_CONFIG["output_language"]
+                console.print(f"[green]✓ Output language from environment:[/green] {output_language}")
+                step += 1
+                continue
+            console.print("\n[bold cyan]Step 4: Output Language[/bold cyan]")
+            console.print("[dim]Select the language for analyst reports and final decision[/dim]")
+            res = ask_output_language(allow_back=allow_back)  # type: ignore[assignment]
+            if res == BACK_VALUE:
+                step -= 1
+                continue
+            output_language = res  # type: ignore[assignment]
+            step += 1
+            continue
 
-    # Step 3: Select analysts
-    console.print("\n[bold cyan]Step 3: Analysts Team[/bold cyan]")
-    console.print("[dim]Select your LLM analyst agents for the analysis[/dim]")
-    selected_analysts = select_analysts(
-        asset_type,
-        ticker=selected_ticker if isinstance(selected_ticker, str) else None,
-    )
-    console.print(f"[green]Selected analysts:[/green] {', '.join(analyst.value for analyst in selected_analysts)}")
+        # Step 4: Research depth
+        if step == 4:
+            console.print("\n[bold cyan]Step 5: Research Depth[/bold cyan]")
+            console.print("[dim]Select your research depth level[/dim]")
+            res = select_research_depth(allow_back=allow_back)  # type: ignore[assignment]
+            if res == BACK_VALUE:  # type: ignore[comparison-overlap]
+                step -= 1
+                continue
+            selected_research_depth = res  # type: ignore[assignment]
+            step += 1
+            continue
 
-    # Step 3.5: Data Readiness Check
-    from tradingagents.agents.utils.data_readiness import (
-        check_data_readiness,
-        display_readiness_report,
-    )
+        # Step 5: LLM Provider
+        if step == 5:
+            if provider_from_env:
+                selected_llm_provider = DEFAULT_CONFIG["llm_provider"].lower()
+                backend_url = DEFAULT_CONFIG["backend_url"] or provider_default_url(selected_llm_provider)
+                console.print(f"[green]✓ LLM provider from environment:[/green] {selected_llm_provider}")
+                console.print(f"[green]✓ Backend URL:[/green] {backend_url}")
+                ensure_api_key(selected_llm_provider)
+                step += 1
+                continue
+            console.print("\n[bold cyan]Step 6: LLM Provider[/bold cyan]")
+            console.print("[dim]Select your LLM provider[/dim]")
+            res = select_llm_provider(allow_back=allow_back)  # type: ignore[assignment]
+            if res[0] == BACK_VALUE:  # type: ignore[comparison-overlap]
+                step -= 1
+                continue
+            selected_llm_provider, backend_url = res  # type: ignore[assignment]
+            # Regional sub-steps — allow back to re-pick provider
+            if selected_llm_provider == "qwen":
+                q_res = ask_qwen_region(allow_back=allow_back)
+                if q_res[0] == BACK_VALUE:
+                    continue  # stay on same step, re-pick provider
+                selected_llm_provider, backend_url = q_res  # type: ignore[assignment]
+            elif selected_llm_provider == "minimax":
+                m_res = ask_minimax_region(allow_back=allow_back)
+                if m_res[0] == BACK_VALUE:
+                    continue
+                selected_llm_provider, backend_url = m_res  # type: ignore[assignment]
+            elif selected_llm_provider == "glm":
+                g_res = ask_glm_region(allow_back=allow_back)
+                if g_res[0] == BACK_VALUE:
+                    continue
+                selected_llm_provider, backend_url = g_res  # type: ignore[assignment]
+            if selected_llm_provider == "ollama" and backend_url:
+                confirm_ollama_endpoint(backend_url)
+            ensure_api_key(selected_llm_provider)
+            step += 1
+            continue
 
-    console.print()
-    ticker_for_check = selected_ticker if isinstance(selected_ticker, str) else selected_tickers[0]
-    report = check_data_readiness(
-        ticker=ticker_for_check,
-        trade_date=analysis_date,
-        selected_analysts=[a.value for a in selected_analysts],
-    )
-    display_readiness_report(console, report)
-    if (
-        report.warning_count > 0
-        and not questionary.confirm(
-            "部分数据不可用，是否继续分析？",
-            default=True,
-        ).ask()
-    ):
-        console.print("[yellow]已取消分析[/yellow]")
-        return None
+        # Step 6: Thinking agents
+        if step == 6:
+            if os.environ.get("TRADINGAGENTS_QUICK_THINK_LLM") or os.environ.get("TRADINGAGENTS_DEEP_THINK_LLM"):
+                selected_shallow_thinker = DEFAULT_CONFIG["quick_think_llm"]
+                selected_deep_thinker = DEFAULT_CONFIG["deep_think_llm"]
+                console.print(
+                    f"[green]✓ Thinking agents from environment:[/green] "
+                    f"quick={selected_shallow_thinker}, deep={selected_deep_thinker}"
+                )
+                step += 1
+                continue
+            console.print("\n[bold cyan]Step 7: Thinking Agents[/bold cyan]")
+            console.print("[dim]Select your thinking agents for analysis[/dim]")
+            shallow = select_shallow_thinking_agent(selected_llm_provider, allow_back=allow_back)
+            if shallow == BACK_VALUE:
+                step -= 1
+                continue
+            selected_shallow_thinker = shallow
+            deep = select_deep_thinking_agent(selected_llm_provider, allow_back=allow_back)
+            if deep == BACK_VALUE:
+                # Back from deep goes to shallow within same step
+                continue
+            selected_deep_thinker = deep
+            step += 1
+            continue
 
-    # Step 4: Output language (skipped when set via TRADINGAGENTS_OUTPUT_LANGUAGE)
-    if os.environ.get("TRADINGAGENTS_OUTPUT_LANGUAGE"):
-        output_language = DEFAULT_CONFIG["output_language"]
-        console.print(f"[green]✓ Output language from environment:[/green] {output_language}")
-    else:
-        console.print("\n[bold cyan]Step 4: Output Language[/bold cyan]")
-        console.print("[dim]Select the language for analyst reports and final decision[/dim]")
-        output_language = ask_output_language()
+        # Step 7: Provider-specific thinking configuration
+        if step == 7:
+            provider_lower = selected_llm_provider.lower()
+            if provider_from_env:
+                thinking_level = DEFAULT_CONFIG["google_thinking_level"]
+                reasoning_effort = DEFAULT_CONFIG["openai_reasoning_effort"]
+                anthropic_effort = DEFAULT_CONFIG["anthropic_effort"]
+                step += 1
+                continue
+            if provider_lower == "google":
+                console.print("\n[bold cyan]Step 8: Thinking Mode[/bold cyan]")
+                console.print("[dim]Configure Gemini thinking mode[/dim]")
+                res = ask_gemini_thinking_config(allow_back=allow_back)  # type: ignore[assignment]
+                if res == BACK_VALUE:
+                    step -= 1
+                    continue
+                thinking_level = res  # type: ignore[assignment]
+            elif provider_lower == "openai":
+                console.print("\n[bold cyan]Step 8: Reasoning Effort[/bold cyan]")
+                console.print("[dim]Configure OpenAI reasoning effort level[/dim]")
+                res = ask_openai_reasoning_effort(allow_back=allow_back)  # type: ignore[assignment]
+                if res == BACK_VALUE:
+                    step -= 1
+                    continue
+                reasoning_effort = res  # type: ignore[assignment]
+            elif provider_lower == "anthropic":
+                console.print("\n[bold cyan]Step 8: Effort Level[/bold cyan]")
+                console.print("[dim]Configure Claude effort level[/dim]")
+                res = ask_anthropic_effort(allow_back=allow_back)  # type: ignore[assignment]
+                if res == BACK_VALUE:
+                    step -= 1
+                    continue
+                anthropic_effort = res  # type: ignore[assignment]
+            # other providers have no step 8
+            step += 1
+            continue
 
-    # Step 5: Research depth
-    console.print("\n[bold cyan]Step 5: Research Depth[/bold cyan]")
-    console.print("[dim]Select your research depth level[/dim]")
-    selected_research_depth = select_research_depth()
-
-    # Step 6: LLM Provider (skipped when set via TRADINGAGENTS_LLM_PROVIDER).
-    # The backend URL comes from TRADINGAGENTS_LLM_BACKEND_URL when set,
-    # otherwise the provider's default endpoint — the same value the menu
-    # would have picked.
-    provider_from_env = bool(os.environ.get("TRADINGAGENTS_LLM_PROVIDER"))
-    if provider_from_env:
-        selected_llm_provider = DEFAULT_CONFIG["llm_provider"].lower()
-        backend_url = DEFAULT_CONFIG["backend_url"] or provider_default_url(selected_llm_provider)
-        console.print(f"[green]✓ LLM provider from environment:[/green] {selected_llm_provider}")
-        console.print(f"[green]✓ Backend URL:[/green] {backend_url}")
-        # Still confirm/persist the API key so the run doesn't fail later.
-        ensure_api_key(selected_llm_provider)
-    else:
-        console.print("\n[bold cyan]Step 6: LLM Provider[/bold cyan]")
-        console.print("[dim]Select your LLM provider[/dim]")
-        selected_llm_provider, backend_url = select_llm_provider()
-
-        # Providers with regional endpoints prompt for the region as a secondary
-        # step so the main dropdown stays clean (mainland China and international
-        # accounts cannot share API keys).
-        if selected_llm_provider == "qwen":
-            selected_llm_provider, backend_url = ask_qwen_region()
-        elif selected_llm_provider == "minimax":
-            selected_llm_provider, backend_url = ask_minimax_region()
-        elif selected_llm_provider == "glm":
-            selected_llm_provider, backend_url = ask_glm_region()
-
-        # For Ollama, surface the resolved endpoint (OLLAMA_BASE_URL vs default)
-        # before model selection so it's obvious where we're connecting.
-        if selected_llm_provider == "ollama" and backend_url:
-            confirm_ollama_endpoint(backend_url)
-
-        # Confirm the provider's API key is present; prompt the user to paste
-        # one and persist it to .env if it's missing, so the analysis run
-        # doesn't fail later at the first API call.
-        ensure_api_key(selected_llm_provider)
-
-    # Step 7: Thinking agents (skipped when either model is set via environment)
-    if os.environ.get("TRADINGAGENTS_QUICK_THINK_LLM") or os.environ.get("TRADINGAGENTS_DEEP_THINK_LLM"):
-        selected_shallow_thinker = DEFAULT_CONFIG["quick_think_llm"]
-        selected_deep_thinker = DEFAULT_CONFIG["deep_think_llm"]
-        console.print(
-            f"[green]✓ Thinking agents from environment:[/green] "
-            f"quick={selected_shallow_thinker}, deep={selected_deep_thinker}"
-        )
-    else:
-        console.print("\n[bold cyan]Step 7: Thinking Agents[/bold cyan]")
-        console.print("[dim]Select your thinking agents for analysis[/dim]")
-        selected_shallow_thinker = select_shallow_thinking_agent(selected_llm_provider)
-        selected_deep_thinker = select_deep_thinking_agent(selected_llm_provider)
-
-    # Step 8: Provider-specific thinking configuration
-    thinking_level = None
-    reasoning_effort = None
-    anthropic_effort = None
-
-    provider_lower = selected_llm_provider.lower()
-    # When the provider is configured via environment we keep the run fully
-    # non-interactive and use the config defaults (None = each provider's own
-    # default reasoning/thinking behavior) instead of prompting.
-    if provider_from_env:
-        thinking_level = DEFAULT_CONFIG["google_thinking_level"]
-        reasoning_effort = DEFAULT_CONFIG["openai_reasoning_effort"]
-        anthropic_effort = DEFAULT_CONFIG["anthropic_effort"]
-    elif provider_lower == "google":
-        console.print("\n[bold cyan]Step 8: Thinking Mode[/bold cyan]")
-        console.print("[dim]Configure Gemini thinking mode[/dim]")
-        thinking_level = ask_gemini_thinking_config()
-    elif provider_lower == "openai":
-        console.print("\n[bold cyan]Step 8: Reasoning Effort[/bold cyan]")
-        console.print("[dim]Configure OpenAI reasoning effort level[/dim]")
-        reasoning_effort = ask_openai_reasoning_effort()
-    elif provider_lower == "anthropic":
-        console.print("\n[bold cyan]Step 8: Effort Level[/bold cyan]")
-        console.print("[dim]Configure Claude effort level[/dim]")
-        anthropic_effort = ask_anthropic_effort()
+        # Step 8: terminal sentinel — build return dict
+        if step == 8:
+            break
 
     first_ticker = selected_ticker if isinstance(selected_ticker, str) else selected_tickers[0]
     return {
         "ticker": first_ticker,
         "tickers": selected_tickers if isinstance(selected_ticker, list) else [selected_ticker],
         "company_name": ticker_to_name.get(first_ticker, ""),
-        "asset_type": asset_type.value,
+        "asset_type": asset_type.value,  # type: ignore[union-attr]
         "analysis_date": analysis_date,
         "analysts": selected_analysts,
         "research_depth": selected_research_depth,
@@ -327,8 +410,32 @@ def get_user_selections(preselected_tickers: list[str] | None = None) -> dict | 
 # Intentionally shadows cli.utils.get_analysis_date (pulled in by the star
 # import above): the CLI flow uses this prompt-based variant, and tests patch
 # it by this module-level name.
-def get_analysis_date():  # type: ignore[no-redef]
+def get_analysis_date(allow_back: bool = False):  # type: ignore[no-redef]
     """Get the analysis date from user input."""
+    # When back-navigation is enabled, use questionary so Esc can be mapped
+    # to BACK_VALUE instead of killing the process.
+    if allow_back:
+        import questionary as _q
+        date_str = _q.text(
+            f"Enter the analysis date (YYYY-MM-DD) [default: {datetime.datetime.now().strftime('%Y-%m-%d')}]:",
+            validate=lambda x: (
+                not x.strip()
+                or (lambda v: True if _is_valid_date(v) else "Please use YYYY-MM-DD")(x.strip())
+            ),
+            style=_q.Style([("text", "fg:green"), ("highlighted", "noinherit")]),
+        ).ask()
+        if date_str is None:
+            return BACK_VALUE  # type: ignore[return-value]
+        date_str = date_str.strip() or datetime.datetime.now().strftime("%Y-%m-%d")
+        try:
+            parsed = datetime.datetime.strptime(date_str, "%Y-%m-%d")
+            if parsed.date() > datetime.datetime.now().date():
+                console.print("[red]Error: Analysis date cannot be in the future[/red]")
+                return get_analysis_date(allow_back=True)
+            return date_str
+        except ValueError:
+            console.print("[red]Error: Invalid date format. Please use YYYY-MM-DD[/red]")
+            return get_analysis_date(allow_back=True)
     while True:
         date_str = typer.prompt("", default=datetime.datetime.now().strftime("%Y-%m-%d"))
         try:
@@ -340,6 +447,14 @@ def get_analysis_date():  # type: ignore[no-redef]
             return date_str
         except ValueError:
             console.print("[red]Error: Invalid date format. Please use YYYY-MM-DD[/red]")
+
+
+def _is_valid_date(s: str) -> bool:
+    try:
+        datetime.datetime.strptime(s, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
 
 
 def _parse_tickers_input(raw: str) -> list[str]:
@@ -370,14 +485,17 @@ def _parse_tickers_input(raw: str) -> list[str]:
     return result
 
 
-def ask_mode() -> str:
+def ask_mode(allow_back: bool = False) -> str:
     """Ask user to choose between batch watchlist scan or custom ticker query."""
+    choices = [
+        questionary.Choice("查询自选股票（支持单只或多只，逗号分隔）", "single"),
+        questionary.Choice("批量扫描 Watchlist", "batch"),
+    ]
+    if allow_back:
+        choices.append(questionary.Choice(BACK_LABEL, value=BACK_VALUE))
     choice = questionary.select(
         "Select run mode:",
-        choices=[
-            questionary.Choice("查询自选股票（支持单只或多只，逗号分隔）", "single"),
-            questionary.Choice("批量扫描 Watchlist", "batch"),
-        ],
+        choices=choices,
         style=questionary.Style(
             [
                 ("selected", "fg:green noinherit"),
@@ -387,12 +505,16 @@ def ask_mode() -> str:
         ),
     ).ask()
     if choice is None:
+        if allow_back:
+            return BACK_VALUE  # type: ignore[return-value]
         console.print("[red]No mode selected. Exiting...[/red]")
         exit(1)
+    if choice == BACK_VALUE:
+        return BACK_VALUE  # type: ignore[return-value]
     return choice
 
 
-def select_watchlist_interactive() -> tuple[str, list[str]]:
+def select_watchlist_interactive(allow_back: bool = False) -> tuple[str, list[str]]:
     """Let user pick a saved watchlist or import from file. Returns (name, tickers)."""
     existing = list_watchlists()
     choices = []
@@ -404,6 +526,8 @@ def select_watchlist_interactive() -> tuple[str, list[str]]:
         except Exception:
             choices.append(questionary.Choice(name, value=(name, [])))
     choices.append(questionary.Choice("Import from file...", value=("__import__", [])))
+    if allow_back:
+        choices.append(questionary.Choice(BACK_LABEL, value=BACK_VALUE))
 
     choice = questionary.select(
         "Select watchlist:",
@@ -418,19 +542,24 @@ def select_watchlist_interactive() -> tuple[str, list[str]]:
     ).ask()
 
     if choice is None:
+        if allow_back:
+            return BACK_VALUE, []  # type: ignore[return-value]
         console.print("[red]No watchlist selected. Exiting...[/red]")
         exit(1)
+    if choice == BACK_VALUE:
+        return BACK_VALUE, []  # type: ignore[return-value]
 
     name, tickers = choice
     if name == "__import__":
-        file_path = (
-            questionary.text(
-                "Enter watchlist file path:",
-                validate=lambda x: len(x.strip()) > 0 or "Please enter a valid path.",
-            )
-            .ask()
-            .strip()
-        )
+        file_path_raw = questionary.text(
+            "Enter watchlist file path:",
+            validate=lambda x: len(x.strip()) > 0 or "Please enter a valid path.",
+        ).ask()
+        if file_path_raw is None and allow_back:
+            return BACK_VALUE, []  # type: ignore[return-value]
+        file_path = file_path_raw.strip() if file_path_raw else ""
+        if not file_path and allow_back:
+            return BACK_VALUE, []  # type: ignore[return-value]
         from cli.watchlists import parse_watchlist_content
 
         tickers = parse_watchlist_content(Path(file_path).read_text(encoding="utf-8"))
@@ -438,7 +567,7 @@ def select_watchlist_interactive() -> tuple[str, list[str]]:
     return name, tickers
 
 
-def select_profile_interactive() -> dict | None:
+def select_profile_interactive(allow_back: bool = False) -> dict | None:
     """Let user pick a saved profile or create a new one. Returns profile config dict."""
     existing = list_profiles()
     if existing:
@@ -452,6 +581,8 @@ def select_profile_interactive() -> dict | None:
             except Exception:
                 choices.append(questionary.Choice(name, value=name))
         choices.append(questionary.Choice("Create new profile...", value="__new__"))
+        if allow_back:
+            choices.append(questionary.Choice(BACK_LABEL, value=BACK_VALUE))
         choice = questionary.select(
             "Select profile:",
             choices=choices,
@@ -464,10 +595,20 @@ def select_profile_interactive() -> dict | None:
             ),
         ).ask()
         if choice is None:
+            if allow_back:
+                return BACK_VALUE  # type: ignore[return-value]
             console.print("[red]No profile selected. Exiting...[/red]")
             exit(1)
+        if choice == BACK_VALUE:
+            return BACK_VALUE  # type: ignore[return-value]
         if choice != "__new__":
             return load_profile(choice)["config"]
+    else:
+        if allow_back:
+            # No profiles at all — still allow backing out via Esc
+            # (questionary would have no chance to show back choice).
+            # We surface a confirm: if user cancels elsewhere, treat as back.
+            pass
     # Fall through to create new profile
     return None
 
@@ -1464,94 +1605,170 @@ def analyze(
         )
         return
 
-    # Interactive mode
+    # Interactive mode — now with back navigation at every level.
+    # Esc or “← 返回上一层” at any sub-menu returns to its parent instead
+    # of killing the process. Top-level Esc exits cleanly.
     if not holdings and not holdings_sheet and not sync_holdings:
         holdings = _prompt_sync_holdings_interactive()
-    mode = ask_mode()
-    if mode == "batch":
-        watchlist_name, ticker_list = select_watchlist_interactive()
-        profile_config = select_profile_interactive()
-        if profile_config is None:
-            # User chose to create new profile — run the normal selection flow,
-            # but pass through the watchlist tickers so we don't ask again.
-            selections = get_user_selections(preselected_tickers=ticker_list)
-            if selections is None:
-                return
-            profile_config = {
-                "analysts": [a.value for a in selections["analysts"]],
-                "research_depth": selections["research_depth"],
-                "llm_provider": selections["llm_provider"],
-                "backend_url": selections["backend_url"],
-                "shallow_thinker": selections["shallow_thinker"],
-                "deep_thinker": selections["deep_thinker"],
-                "google_thinking_level": selections.get("google_thinking_level"),
-                "openai_reasoning_effort": selections.get("openai_reasoning_effort"),
-                "anthropic_effort": selections.get("anthropic_effort"),
-                "output_language": selections.get("output_language", "English"),
-            }
-            save_prof = typer.prompt("Save this configuration as a profile?", default="Y").strip().upper()
-            if save_prof in ("Y", "YES", ""):
-                prof_name = typer.prompt("Profile name", default="default").strip()
-                save_profile(prof_name, profile_config)
-                console.print(f"[green]✓ Profile saved:[/green] {prof_name}")
-
-        if len(ticker_list) == 1:
-            # Fall back to single-stock flow for one ticker
-            if profile_config is None:
-                # User just created a new profile via get_user_selections — pass selections through
-                run_analysis(checkpoint=checkpoint, selections=selections, holdings=holdings)
-            else:
-                # User selected an existing profile — use batch flow with a single ticker
-                run_batch_analysis(
-                    [ticker_list[0]],
-                    profile_config,
-                    checkpoint=checkpoint,
-                    output_dir=Path(output_dir) if output_dir else None,
-                    watchlist_name=watchlist_name,
-                    holdings=holdings,
-                    workers=workers,
-                )
+    while True:
+        mode = ask_mode()
+        if mode == BACK_VALUE:
+            console.print("[yellow]已退出[/yellow]")
+            return
+        if mode == "batch":
+            # Batch: watchlist → profile → (optional wizard) → workers → run
+            while True:
+                ws_name, ws_tickers = select_watchlist_interactive(allow_back=True)
+                if ws_name == BACK_VALUE:
+                    break  # back to mode selection
+                watchlist_name, ticker_list = ws_name, ws_tickers
+                while True:
+                    prof_result = select_profile_interactive(allow_back=True)
+                    if prof_result == BACK_VALUE:
+                        break  # back to watchlist selection
+                    if prof_result is None:
+                        selections = get_user_selections(preselected_tickers=ticker_list, allow_back=True)
+                        if selections == BACK_VALUE:
+                            continue  # back to profile menu
+                        if selections is None:
+                            return
+                        profile_config = {
+                            "analysts": [a.value for a in selections["analysts"]],
+                            "research_depth": selections["research_depth"],
+                            "llm_provider": selections["llm_provider"],
+                            "backend_url": selections["backend_url"],
+                            "shallow_thinker": selections["shallow_thinker"],
+                            "deep_thinker": selections["deep_thinker"],
+                            "google_thinking_level": selections.get("google_thinking_level"),
+                            "openai_reasoning_effort": selections.get("openai_reasoning_effort"),
+                            "anthropic_effort": selections.get("anthropic_effort"),
+                            "output_language": selections.get("output_language", "English"),
+                        }
+                        save_prof = questionary.confirm("Save this configuration as a profile?", default=False).ask()
+                        if save_prof:
+                            prof_name_raw = questionary.text("Profile name:", default="default").ask()
+                            prof_name = (prof_name_raw or "default").strip() or "default"
+                            save_profile(prof_name, profile_config)
+                            console.print(f"[green]✓ Profile saved:[/green] {prof_name}")
+                    else:
+                        profile_config = prof_result
+                    # Ready to run — workers step also supports back
+                    if len(ticker_list) == 1:
+                        if prof_result is None:
+                            run_analysis(checkpoint=checkpoint, selections=selections, holdings=holdings)
+                        else:
+                            run_batch_analysis(
+                                [ticker_list[0]],
+                                profile_config,
+                                checkpoint=checkpoint,
+                                output_dir=Path(output_dir) if output_dir else None,
+                                watchlist_name=watchlist_name,
+                                holdings=holdings,
+                                workers=workers,
+                            )
+                        return
+                    else:
+                        if workers <= 1:
+                            w = ask_workers(allow_back=True)
+                            if w == BACK_VALUE:
+                                continue  # back to profile menu
+                            workers = w
+                        run_batch_analysis(
+                            ticker_list,
+                            profile_config,
+                            checkpoint=checkpoint,
+                            output_dir=Path(output_dir) if output_dir else None,
+                            watchlist_name=watchlist_name,
+                            holdings=holdings,
+                            workers=workers,
+                        )
+                        return
+                # broke from profile loop via BACK → re-show watchlist
+                continue
+            # broke from watchlist loop via BACK → re-show mode
+            continue
         else:
-            # Ask for worker count in interactive mode (CLI --workers defaults to 1)
-            if workers <= 1:
-                workers = ask_workers()
-            run_batch_analysis(
-                ticker_list,
-                profile_config,
-                checkpoint=checkpoint,
-                output_dir=Path(output_dir) if output_dir else None,
-                watchlist_name=watchlist_name,
-                holdings=holdings,
-                workers=workers,
-            )
-    else:
-        # Single / custom mode
-        import questionary
+            # Single / custom mode — profile shortcut + full wizard both support back
+            import questionary as _q
 
-        use_profile = questionary.confirm(
-            "使用保存的配置快速开始？（跳过 LLM/分析师等配置）",
-            default=True,
-        ).ask()
-        if use_profile:
-            profile_config = select_profile_interactive()
-            if profile_config:
-                from tradingagents.ticker_resolver import resolve_ticker
+            while True:
+                use_profile = _q.confirm(
+                    "使用保存的配置快速开始？（跳过 LLM/分析师等配置）",
+                    default=True,
+                ).ask()
+                if use_profile is None:
+                    break  # Esc → back to mode selection
+                if use_profile:
+                    prof_result = select_profile_interactive(allow_back=True)
+                    if prof_result == BACK_VALUE:
+                        continue  # back to use_profile question
+                    if prof_result:
+                        profile_config = prof_result
+                        from tradingagents.ticker_resolver import resolve_ticker
 
-                console.print("\n[bold cyan]Step 1: Ticker Symbol[/bold cyan]")
-                console.print("[dim]Enter ticker symbol(s) to analyze[/dim]")
-                raw_tickers = get_ticker()
-                parsed_tickers = _parse_tickers_input(raw_tickers)
-                for pt in parsed_tickers:
-                    r = resolve_ticker(pt)
-                    name = r.get("company_name", "")
-                    console.print(f"[green]  ✓ {r['ticker']}[/green] {name}")
-                default_date = datetime.datetime.now().strftime("%Y-%m-%d")
-                console.print("\n[bold cyan]Step 2: Analysis Date[/bold cyan]")
-                console.print(f"[dim]Using default date: {default_date}[/dim]")
-                tickers_list = parsed_tickers
+                        console.print("\n[bold cyan]Step 1: Ticker Symbol[/bold cyan]")
+                        console.print("[dim]Enter ticker symbol(s) to analyze[/dim]")
+                        raw_tickers = get_ticker(allow_back=True)
+                        if raw_tickers == BACK_VALUE:
+                            continue  # back to use_profile question
+                        parsed_tickers = _parse_tickers_input(raw_tickers)
+                        for pt in parsed_tickers:
+                            r = resolve_ticker(pt)
+                            name = r.get("company_name", "")
+                            console.print(f"[green]  ✓ {r['ticker']}[/green] {name}")
+                        default_date = datetime.datetime.now().strftime("%Y-%m-%d")
+                        console.print("\n[bold cyan]Step 2: Analysis Date[/bold cyan]")
+                        console.print(f"[dim]Using default date: {default_date}[/dim]")
+                        tickers_list = parsed_tickers
+                        if len(tickers_list) > 1:
+                            if workers <= 1:
+                                w = ask_workers(allow_back=True)
+                                if w == BACK_VALUE:
+                                    continue
+                                workers = w
+                            run_batch_analysis(
+                                tickers_list,
+                                profile_config,
+                                checkpoint=checkpoint,
+                                output_dir=Path(output_dir) if output_dir else None,
+                                holdings=holdings,
+                                workers=workers,
+                            )
+                        else:
+                            run_batch_analysis(
+                                tickers_list,
+                                profile_config,
+                                checkpoint=checkpoint,
+                                output_dir=Path(output_dir) if output_dir else None,
+                                holdings=holdings,
+                                workers=workers,
+                            )
+                        return
+                # Fall back to full wizard
+                selections = get_user_selections(allow_back=True)
+                if selections == BACK_VALUE:
+                    continue  # back to use_profile question
+                if selections is None:
+                    return
+                tickers_list = selections.get("tickers", [selections["ticker"]])
                 if len(tickers_list) > 1:
+                    profile_config = {
+                        "analysts": [a.value for a in selections["analysts"]],
+                        "research_depth": selections["research_depth"],
+                        "llm_provider": selections["llm_provider"],
+                        "backend_url": selections["backend_url"],
+                        "shallow_thinker": selections["shallow_thinker"],
+                        "deep_thinker": selections["deep_thinker"],
+                        "google_thinking_level": selections.get("google_thinking_level"),
+                        "openai_reasoning_effort": selections.get("openai_reasoning_effort"),
+                        "anthropic_effort": selections.get("anthropic_effort"),
+                        "output_language": selections.get("output_language", "English"),
+                    }
                     if workers <= 1:
-                        workers = ask_workers()
+                        w = ask_workers(allow_back=True)
+                        if w == BACK_VALUE:
+                            continue
+                        workers = w
                     run_batch_analysis(
                         tickers_list,
                         profile_config,
@@ -1561,47 +1778,10 @@ def analyze(
                         workers=workers,
                     )
                 else:
-                    run_batch_analysis(
-                        tickers_list,
-                        profile_config,
-                        checkpoint=checkpoint,
-                        output_dir=Path(output_dir) if output_dir else None,
-                        holdings=holdings,
-                        workers=workers,
-                    )
+                    run_analysis(checkpoint=checkpoint, selections=selections, holdings=holdings)
                 return
-        # Fall back to full interactive flow
-        selections = get_user_selections()
-        if selections is None:
-            return
-        tickers_list = selections.get("tickers", [selections["ticker"]])
-        if len(tickers_list) > 1:
-            # Batch mode for multiple custom tickers
-            profile_config = {
-                "analysts": [a.value for a in selections["analysts"]],
-                "research_depth": selections["research_depth"],
-                "llm_provider": selections["llm_provider"],
-                "backend_url": selections["backend_url"],
-                "shallow_thinker": selections["shallow_thinker"],
-                "deep_thinker": selections["deep_thinker"],
-                "google_thinking_level": selections.get("google_thinking_level"),
-                "openai_reasoning_effort": selections.get("openai_reasoning_effort"),
-                "anthropic_effort": selections.get("anthropic_effort"),
-                "output_language": selections.get("output_language", "English"),
-            }
-            # Ask for worker count in interactive mode (CLI --workers defaults to 1)
-            if workers <= 1:
-                workers = ask_workers()
-            run_batch_analysis(
-                tickers_list,
-                profile_config,
-                checkpoint=checkpoint,
-                output_dir=Path(output_dir) if output_dir else None,
-                holdings=holdings,
-                workers=workers,
-            )
-        else:
-            run_analysis(checkpoint=checkpoint, selections=selections, holdings=holdings)
+            # Esc from use_profile → re-show mode
+            continue
 
 
 def _prompt_sync_holdings_interactive() -> dict | None:
