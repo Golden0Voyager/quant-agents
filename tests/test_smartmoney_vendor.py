@@ -761,6 +761,93 @@ class GetSectorFundFlowTests(unittest.TestCase):
         self.assertIn("新能源", result)
         self.assertIn("N/A", result)
 
+    def _db_with_stock(self, db_path, code, name, industry):
+        """Create the full fixture DB and add one extra stock_list row."""
+        _create_full_test_db(db_path)
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO stock_list VALUES (?, ?, ?)", (code, name, industry)
+        )
+        conn.commit()
+        conn.close()
+
+    def test_ticker_fallback_resolves_registered_industry(self):
+        """概念名零命中时按 ticker 注册行业解析："新能源" + 600519 → 白酒。"""
+        from tradingagents.dataflows.smartmoney_vendor import get_sector_fund_flow
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = get_sector_fund_flow("新能源汽车", ticker="600519.SS")
+                self.assertIn("白酒 Sector Fund Flow", result)
+                self.assertIn("注册行业 '白酒'", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_ticker_fallback_resolves_ambiguous_via_alias(self):
+        """请求名歧义（军工→军工电子/军工装备）时按注册行业 + 别名定夺：
+        600760 注册行业 "航空装备" → 别名 "军工装备"。"""
+        from tradingagents.dataflows.smartmoney_vendor import get_sector_fund_flow
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            self._db_with_stock(db_path, "600760", "中航沈飞", "航空装备")
+            with _PatchedVendor(db_path):
+                result = get_sector_fund_flow("军工", ticker="600760.SS")
+                self.assertIn("军工装备 Sector Fund Flow", result)
+                self.assertIn("注册行业 '航空装备'", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_ticker_fallback_unresolvable_industry_still_raises(self):
+        """注册行业也无命中（如 "农牧饲渔"，故意不加别名）时仍报错并列出可用板块。"""
+        from tradingagents.dataflows.smartmoney_vendor import get_sector_fund_flow
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            self._db_with_stock(db_path, "300999", "金龙鱼", "农牧饲渔")
+            with _PatchedVendor(db_path):
+                with self.assertRaises(RuntimeError) as ctx:
+                    get_sector_fund_flow("农业概念", ticker="300999.SZ")
+                self.assertIn("Available sectors", str(ctx.exception))
+        finally:
+            os.unlink(db_path)
+
+    def test_ticker_unknown_code_raises_direct_error(self):
+        """ticker 不在 stock_list 时保留原始报错（含候选/可用板块）。"""
+        from tradingagents.dataflows.smartmoney_vendor import get_sector_fund_flow
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                with self.assertRaises(RuntimeError) as ctx:
+                    get_sector_fund_flow("元宇宙", ticker="000000.SZ")
+                self.assertIn("Available sectors", str(ctx.exception))
+                self.assertIn("元宇宙", str(ctx.exception))
+        finally:
+            os.unlink(db_path)
+
+    def test_suffix_stripped_unique_match(self):
+        """后缀归一："元件行业" → 板块 "元件"。"""
+        from tradingagents.dataflows.smartmoney_vendor import get_sector_fund_flow
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = get_sector_fund_flow("元件行业")
+                self.assertIn("元件 Sector Fund Flow", result)
+                self.assertIn("自动匹配到板块", result)
+        finally:
+            os.unlink(db_path)
+
 
 @pytest.mark.unit
 class GetShareholderCountTests(unittest.TestCase):

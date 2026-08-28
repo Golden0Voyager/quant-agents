@@ -1671,15 +1671,93 @@ def get_block_trade(
 # Sector Fund Flow (板块资金流向) — v2.2
 # ===========================================================================
 
-def get_sector_fund_flow(sector_name: str) -> str:
+# ---------------------------------------------------------------------------
+# Sector name resolution helpers
+# ---------------------------------------------------------------------------
+
+# stock_list.industry 的注册行业口径 → sector_fund_flow 板块名的保守别名表。
+# 只收录语义确信的映射；有歧义的（如 "农牧饲渔"）故意不收，留给报错路径。
+_INDUSTRY_SECTOR_ALIASES = {
+    "航空装备": "军工装备",
+    "航天航空": "军工装备",
+    "输配电气": "电网设备",
+    "电信运营": "通信服务",
+    "通讯行业": "通信设备",
+    "有色金属": "工业金属",
+    "家用轻工": "家居用品",
+}
+
+_SECTOR_NAME_SUFFIXES = ("行业", "概念", "板块")
+
+
+def _strip_sector_suffix(name: str) -> str:
+    """剥掉 LLM 自由文本里常见的板块名后缀（如 "白酒行业" → "白酒"）。"""
+    for suffix in _SECTOR_NAME_SUFFIXES:
+        if name.endswith(suffix) and len(name) > len(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+def _resolve_sector_name(requested: str, names: list[str]) -> str:
+    """Resolve a requested sector/industry name to a sector_fund_flow entry.
+
+    Resolution order: exact → unique bidirectional substring (on both the raw
+    and suffix-stripped probe) → alias table. A unique fuzzy hit is used
+    automatically; ambiguous/zero hits raise with the candidate/available
+    names so the LLM can retry with a valid one.
+    """
+    if requested in names:
+        return requested
+    # 双向包含："军工"→军工电子/军工装备；"电子元件"→元件；"白酒行业"→白酒
+    probes = {requested, _strip_sector_suffix(requested)} - {""}
+    candidates = sorted({
+        n for n in names
+        for probe in probes
+        if probe in n or n in probe
+    })
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        raise RuntimeError(
+            f"Sector '{requested}' is ambiguous in quant_core.db; "
+            f"matching sectors: {', '.join(candidates)}. "
+            "Retry with one exact sector name."
+        )
+    alias = _INDUSTRY_SECTOR_ALIASES.get(requested)
+    if alias and alias in names:
+        return alias
+    raise RuntimeError(
+        f"No sector named '{requested}' in quant_core.db. "
+        f"Available sectors: {', '.join(sorted(names))}"
+    )
+
+
+def _registered_industry(ticker: str) -> str | None:
+    """Look up the registered industry of an A-share ticker in stock_list."""
+    code = _to_smartmoney_symbol(ticker)
+    if not code:
+        return None
+    df = _df_from_sql(
+        "SELECT industry FROM stock_list WHERE code = ?",
+        (code,),
+    )
+    if df is None or df.empty:
+        return None
+    industry = df.iloc[0]["industry"]
+    if pd.isna(industry) or not str(industry).strip():
+        return None
+    return str(industry).strip()
+
+
+def get_sector_fund_flow(sector_name: str, ticker: str | None = None) -> str:
     """Fetch sector fund-flow (板块资金流向) from quant_core.db.
 
     The DB stores Shenwan-style industry names (如 "军工电子"、"元件") while LLM
-    analysts ask with colloquial names (如 "军工"、"电子元件"), so an exact match
-    frequently misses even though the data exists. Resolution order:
-    exact → bidirectional substring; a unique fuzzy hit is used automatically,
-    ambiguous/zero hits raise with the candidate/available names so the LLM
-    can retry with a valid one.
+    analysts ask with colloquial or concept names (如 "军工"、"新能源汽车"),
+    so an exact match frequently misses even though the data exists. The
+    requested name is resolved via `_resolve_sector_name`; when that fails
+    and `ticker` is given, the stock's registered industry (stock_list) is
+    resolved instead, turning a free-text guess into a deterministic lookup.
     """
     requested = (sector_name or "").strip()
     resolved = requested
@@ -1688,26 +1766,17 @@ def get_sector_fund_flow(sector_name: str) -> str:
     all_df = _df_from_sql("SELECT DISTINCT sector_name FROM sector_fund_flow", ())
     if all_df is not None and not all_df.empty:
         names = [str(n) for n in all_df["sector_name"].dropna()]
-        if requested not in names:
-            # 双向包含："军工"→军工电子/军工装备；"电子元件"→元件
-            candidates = [
-                n for n in names
-                if requested and (requested in n or n in requested)
-            ]
-            if len(candidates) == 1:
-                resolved = candidates[0]
+        try:
+            resolved = _resolve_sector_name(requested, names)
+            if resolved != requested:
                 note = f"（请求 '{requested}' 自动匹配到板块 '{resolved}'）"
-            elif len(candidates) > 1:
-                raise RuntimeError(
-                    f"Sector '{requested}' is ambiguous in quant_core.db; "
-                    f"matching sectors: {', '.join(sorted(candidates))}. "
-                    "Retry with one exact sector name."
-                )
-            else:
-                raise RuntimeError(
-                    f"No sector named '{requested}' in quant_core.db. "
-                    f"Available sectors: {', '.join(sorted(names))}"
-                )
+        except RuntimeError as direct_error:
+            industry = _registered_industry(ticker) if ticker else None
+            if industry is None:
+                raise direct_error
+            # 注册行业也解析失败时同样抛带候选/可用板块名的错误，供 LLM 重试
+            resolved = _resolve_sector_name(industry, names)
+            note = f"（按 {ticker} 注册行业 '{industry}' 匹配到板块 '{resolved}'）"
 
     df = _df_from_sql(
         """

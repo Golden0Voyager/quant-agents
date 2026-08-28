@@ -82,6 +82,13 @@ def get_sector_fund_flow(
         "This is NOT a ticker symbol — pass the Chinese industry name "
         "exactly as it appears on Eastmoney (akshare) or in the local DB.",
     ],
+    ticker: Annotated[
+        str | None,
+        "Optional ticker symbol of the target stock (e.g. 600519.SS). "
+        "For A-shares ALWAYS pass it: if the sector name does not match, "
+        "the system resolves the sector from the stock's registered "
+        "industry classification instead of guessing.",
+    ] = None,
 ) -> str:
     """
     Retrieve sector-level fund flow data (板块资金流向).
@@ -89,7 +96,11 @@ def get_sector_fund_flow(
     Uses the configured technical_indicators vendor (smartmoney_db local cache or akshare for A-shares).
     Args:
         sector_name (str): Sector or industry name in Chinese (NOT a ticker)
+        ticker (str | None): Target stock ticker; enables registered-industry
+            fallback when the sector name misses (A-shares only)
     Returns:
         str: A formatted report of sector fund flow data
     """
+    if ticker:
+        return route_to_vendor("get_sector_fund_flow", sector_name, ticker=ticker)
     return route_to_vendor("get_sector_fund_flow", sector_name)

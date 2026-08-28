@@ -685,7 +685,7 @@ _METHOD_PARAMETER_SCHEMAS: dict[str, tuple[tuple[str, Any], ...]] = {
         ("look_back_days", 30),
     ),
     "get_fund_flow": (("ticker", _REQUIRED_PARAMETER), ("curr_date", None)),
-    "get_sector_fund_flow": (("sector_name", _REQUIRED_PARAMETER),),
+    "get_sector_fund_flow": (("sector_name", _REQUIRED_PARAMETER), ("ticker", None)),
     "get_limit_up_down": (("trade_date", _REQUIRED_PARAMETER),),
     "get_fundamentals": (
         ("ticker", _REQUIRED_PARAMETER),

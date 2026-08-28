@@ -1230,11 +1230,15 @@ def get_block_trade(
 # ---------------------------------------------------------------------------
 
 
-def get_sector_fund_flow(sector_name: str) -> str:
+def get_sector_fund_flow(sector_name: str, ticker: str | None = None) -> str:
     """Fetch A-share sector fund-flow (板块资金流向) via akshare.
 
     Uses the Eastmoney sector fund-flow history API for the requested
     industry name (e.g. 白酒, 银行, 新能源).
+
+    `ticker` is accepted for signature compatibility with the smartmoney_db
+    vendor (which uses it for registered-industry resolution) and ignored
+    here — the Eastmoney endpoint only takes the sector name.
     """
     with _akshare_task_context(f"🌊 {sector_name} 板块资金流"), no_proxy():
         df = _safe_call(ak.stock_sector_fund_flow_hist, symbol=sector_name)
