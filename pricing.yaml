@@ -40,6 +40,11 @@ openrouter:
 sensenova:
   # SenseNova also routes DeepSeek V4-Flash (same USD rate as deepseek: section above).
   deepseek-v4-flash: [0.44, 1.32]
+  # TokenPlan 2026-08-28 起统一通用积分池（Flash-Lite 另有专属池，消耗 1:1 返赠
+  # 通用积分）；Kimi K3 与 DeepSeek-V4 Pro 同日上线 TokenPlan。以下两条按各自
+  # 官方费率登记，仅供成本参考（TokenPlan 订阅内实际按积分计）。
+  deepseek-v4-pro: [1.32, 3.96]
+  kimi-k3: [3.0, 15.0]
   # GLM-5.2 official rate $1.4/$4.4 (cached input $0.26). On the SenseNova
   # Token Plan it is effectively free (500 calls / 5h per model) — this entry
   # is kept at the official rate for cost-reference only.
