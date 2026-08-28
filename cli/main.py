@@ -60,6 +60,35 @@ def create_question_box(title, prompt, default=None):
     return Panel(box_content, border_style="blue", padding=(1, 2))
 
 
+def display_welcome() -> None:
+    """Render the TradingAgents ASCII welcome panel once at CLI entry."""
+    try:
+        welcome_ascii = (Path(__file__).parent / "static" / "welcome.txt").read_text(encoding="utf-8").rstrip("\n")
+    except Exception:
+        welcome_ascii = "TradingAgents"
+    welcome_content = f"[bold bright_magenta]{welcome_ascii}[/bold bright_magenta]\n"
+    welcome_content += "[bold cyan]TradingAgents[/bold cyan] [dim]·[/dim] [bold white]Multi-Agents LLM Financial Trading Framework[/bold white]  [dim]A-Share Edition[/dim]\n\n"
+    welcome_content += "[bold]Workflow[/bold]  [cyan]I.[/cyan] Analyst Team  [dim]→[/dim]  [magenta]II.[/magenta] Research Team  [dim]→[/dim]  [yellow]III.[/yellow] Trader  [dim]→[/dim]  [red]IV.[/red] Risk Management  [dim]→[/dim]  [green]V.[/green] Portfolio Management\n\n"
+    welcome_content += "[dim]Tip: 按 Esc 或选择 “← 返回上一层” 可随时回退  ·  Built by [link=https://github.com/TauricResearch]Tauric Research[/link][/dim]"
+    welcome_box = Panel(
+        Align.center(welcome_content),
+        border_style="bright_magenta",
+        padding=(1, 2),
+        title="[bold bright_white] Welcome to TradingAgents [/bold bright_white]",
+        subtitle="[dim]A-Share · Multi-Market · Multi-Agent[/dim]",
+        box=__import__("rich.box").box.ROUNDED,
+    )
+    console.print(Align.center(welcome_box))
+    console.print()
+    # Announcements (silent on failure) — shown once at entry, not per wizard invocation
+    try:
+        announcements = fetch_announcements()
+        display_announcements(console, announcements)
+    except Exception:
+        pass
+    console.print()
+
+
 def get_user_selections(preselected_tickers: list[str] | None = None, allow_back: bool = False) -> dict | None:
     """Get all user selections before starting the analysis display.
 
@@ -68,35 +97,6 @@ def get_user_selections(preselected_tickers: list[str] | None = None, allow_back
         allow_back: When True, Esc / “← 返回上一层” returns BACK_VALUE sentinel so
             the caller can navigate to the previous menu instead of exiting.
     """
-    # Display ASCII art welcome message
-    with open(Path(__file__).parent / "static" / "welcome.txt", encoding="utf-8") as f:
-        welcome_ascii = f.read()
-
-    # Create welcome box content
-    welcome_content = f"{welcome_ascii}\n"
-    welcome_content += "[bold green]TradingAgents: Multi-Agents LLM Financial Trading Framework - CLI[/bold green]\n\n"
-    welcome_content += "[bold]Workflow Steps:[/bold]\n"
-    welcome_content += (
-        "I. Analyst Team → II. Research Team → III. Trader → IV. Risk Management → V. Portfolio Management\n\n"
-    )
-    welcome_content += "[dim]Built by [Tauric Research](https://github.com/TauricResearch)[/dim]"
-
-    # Create and center the welcome box
-    welcome_box = Panel(
-        welcome_content,
-        border_style="green",
-        padding=(1, 2),
-        title="Welcome to TradingAgents",
-        subtitle="Multi-Agents LLM Financial Trading Framework",
-    )
-    console.print(Align.center(welcome_box))
-    console.print()
-    console.print()  # Add vertical space before announcements
-
-    # Fetch and display announcements (silent on failure)
-    announcements = fetch_announcements()
-    display_announcements(console, announcements)
-
     from tradingagents.ticker_resolver import resolve_ticker
 
     ticker_to_name: dict[str, str] = {}
@@ -1608,6 +1608,7 @@ def analyze(
     # Interactive mode — now with back navigation at every level.
     # Esc or “← 返回上一层” at any sub-menu returns to its parent instead
     # of killing the process. Top-level Esc exits cleanly.
+    display_welcome()
     if not holdings and not holdings_sheet and not sync_holdings:
         holdings = _prompt_sync_holdings_interactive()
     while True:
