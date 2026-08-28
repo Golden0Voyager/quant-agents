@@ -696,8 +696,12 @@ def render_footer(
             top = sorted(
                 cost_by_model.items(), key=lambda kv: kv[1], reverse=True,
             )[:2]
+            def _label(model: str) -> str:
+                provider = provider_by_model.get(model)
+                return f"{provider}/{model}" if provider else model
+
             breakdown = "  ".join(
-                f"{provider_by_model.get(model) + '/' if provider_by_model.get(model) else ''}{model}: ${cost:.3f}"
+                f"{_label(model)}: ${cost:.3f}"
                 for model, cost in top
             )
             stats_parts.append(f"By model: {breakdown}")
