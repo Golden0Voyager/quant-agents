@@ -32,6 +32,7 @@ from langchain_core.outputs import ChatGeneration, LLMResult
 from cli.stats_handler import (
     StatsCallbackHandler,
     _extract_model_name,
+    _extract_provider,
     _parse_price,
 )
 from tradingagents.llm_clients import pricing
@@ -1167,3 +1168,104 @@ class TestDeepSeekOffPeakPricing:
         _pin_litellm_overlay(monkeypatch, {"deepseek-v4-flash": (1.0, 2.0)})
         assert get_price_for_model("deepseek-v4-flash", at=_utc(0, 12)) == (0.5, 1.0)
         assert get_price_for_model("deepseek-v4-flash", at=_utc(0, 2)) == (1.0, 2.0)
+
+
+# ---- provider attribution ---------------------------------------------------
+
+
+def test_extract_provider_from_openai_api_base():
+    """OpenAI-compatible clients expose ``openai_api_base`` in the serialized
+    kwargs; the host reverse-maps to the provider name."""
+    assert _extract_provider({"kwargs": {
+        "model_name": "deepseek-v4-flash",
+        "openai_api_base": "https://token.sensenova.cn/v1",
+    }}) == "sensenova"
+    assert _extract_provider({"kwargs": {
+        "openai_api_base": "https://api-inference.modelscope.cn/v1",
+    }}) == "modelscope"
+    assert _extract_provider({"kwargs": {
+        "openai_api_base": "https://api.deepseek.com",
+    }}) == "deepseek"
+    assert _extract_provider({"kwargs": {
+        "openai_api_base": "https://openrouter.ai/api/v1",
+    }}) == "openrouter"
+
+
+def test_extract_provider_native_openai_host():
+    """api.openai.com is not in _PROVIDER_BASE_URL (native default) but must
+    still attribute to ``openai``."""
+    assert _extract_provider({"kwargs": {
+        "openai_api_base": "https://api.openai.com/v1",
+    }}) == "openai"
+
+
+def test_extract_provider_from_module_path_for_native_clients():
+    """Anthropic / Google / Azure integrations have no openai_api_base; the
+    class module path in serialized["id"] identifies them."""
+    assert _extract_provider({
+        "id": ["langchain_anthropic", "chat_models", "ChatAnthropic"],
+        "kwargs": {"model": "claude-opus-4-5"},
+    }) == "anthropic"
+    assert _extract_provider({
+        "id": ["langchain_google_genai", "chat_models", "ChatGoogleGenerativeAI"],
+        "kwargs": {"model": "gemini-3-pro"},
+    }) == "google"
+
+
+def test_extract_provider_returns_none_when_unattributable():
+    assert _extract_provider({}) is None
+    assert _extract_provider(None) is None
+    assert _extract_provider("not-a-dict") is None
+    # Custom gateways / env-overridden endpoints are unknown hosts.
+    assert _extract_provider({"kwargs": {
+        "openai_api_base": "https://gateway.corp.example/v1",
+    }}) is None
+
+
+def test_callback_records_provider_by_model():
+    """The handler surfaces model → provider so summaries can prefix the
+    provider (model names alone are ambiguous across providers)."""
+    handler = StatsCallbackHandler()
+    handler.on_chat_model_start(
+        serialized={"kwargs": {
+            "model_name": "deepseek-v4-flash",
+            "openai_api_base": "https://token.sensenova.cn/v1",
+        }},
+        messages=[],
+    )
+    handler.on_llm_end(_make_chat_result("deepseek-v4-flash", 1000, 100))
+    stats = handler.get_stats()
+    assert stats["provider_by_model"] == {"deepseek-v4-flash": "sensenova"}
+
+
+def test_callback_provider_first_observation_wins():
+    """A model served by two providers in one run keeps the first mapping —
+    later observations don't rewrite the label mid-run."""
+    handler = StatsCallbackHandler()
+    handler.on_chat_model_start(
+        serialized={"kwargs": {
+            "model_name": "deepseek-v4-flash",
+            "openai_api_base": "https://token.sensenova.cn/v1",
+        }},
+        messages=[],
+    )
+    handler.on_chat_model_start(
+        serialized={"kwargs": {
+            "model_name": "deepseek-v4-flash",
+            "openai_api_base": "https://api.deepseek.com",
+        }},
+        messages=[],
+    )
+    stats = handler.get_stats()
+    assert stats["provider_by_model"] == {"deepseek-v4-flash": "sensenova"}
+
+
+def test_callback_provider_absent_when_unattributable():
+    """Unknown / legacy serialized forms simply omit the provider key."""
+    handler = StatsCallbackHandler()
+    handler.on_chat_model_start(
+        serialized={"kwargs": {"model_name": "mystery-model"}},
+        messages=[],
+    )
+    stats = handler.get_stats()
+    assert stats["provider_by_model"] == {}

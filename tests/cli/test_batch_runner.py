@@ -257,7 +257,8 @@ def test_parse_summary_size_preserves_numeric_for_entry_stop():
 # ---- batch stats accumulation + summary surface --------------------------
 
 
-def _stats_handler_mock(tokens_in=1000, tokens_out=500, cost=0.01, cost_by_model=None):
+def _stats_handler_mock(tokens_in=1000, tokens_out=500, cost=0.01, cost_by_model=None,
+                        provider_by_model=None):
     """Build a stub that quacks like StatsCallbackHandler.get_stats()."""
     handler = MagicMock()
     handler.get_stats.return_value = {
@@ -268,6 +269,7 @@ def _stats_handler_mock(tokens_in=1000, tokens_out=500, cost=0.01, cost_by_model
         "tokens_out": tokens_out,
         "cost": cost,
         "cost_by_model": cost_by_model or {"gpt-5.4": cost},
+        "provider_by_model": provider_by_model or {},
         "tokens_by_model": {
             "gpt-5.4": {"in": tokens_in, "out": tokens_out},
         },
@@ -296,6 +298,48 @@ def test_accumulate_stats_sums_token_cost_per_model(tmp_path):
     assert runner.batch_stats["cost_by_model"]["deepseek-v4-flash"] == pytest.approx(0.005)
     assert runner.batch_stats["per_ticker"]["AAPL"]["tokens_in"] == 1000
     assert runner.batch_stats["per_ticker"]["MSFT"]["cost_by_model"]["deepseek-v4-flash"] == pytest.approx(0.005)
+
+
+def test_accumulate_stats_merges_provider_by_model(tmp_path):
+    """Provider attribution rolls up across tickers; first observation wins
+    and handlers without the new key (older mocks) merge cleanly."""
+    runner = BatchRunner(
+        tickers=["AAPL", "MSFT"],
+        profile_config={"llm_provider": "openai"},
+        output_dir=tmp_path / "reports",
+    )
+    h1 = _stats_handler_mock(provider_by_model={"deepseek-v4-flash": "sensenova"})
+    h2 = _stats_handler_mock(provider_by_model={
+        "deepseek-v4-flash": "deepseek",  # conflicting — first wins
+        "ZhipuAI/GLM-5.2": "modelscope",
+    })
+
+    runner._accumulate_stats("AAPL", h1)
+    runner._accumulate_stats("MSFT", h2)
+
+    assert runner.batch_stats["provider_by_model"] == {
+        "deepseek-v4-flash": "sensenova",
+        "ZhipuAI/GLM-5.2": "modelscope",
+    }
+
+
+def test_accumulate_stats_tolerates_missing_provider_key(tmp_path):
+    """Stats dicts without provider_by_model (legacy shape) still merge."""
+    runner = BatchRunner(
+        tickers=["AAPL"],
+        profile_config={"llm_provider": "openai"},
+        output_dir=tmp_path / "reports",
+    )
+    handler = MagicMock()
+    handler.get_stats.return_value = {
+        "llm_calls": 1,
+        "tokens_in": 10,
+        "tokens_out": 5,
+        "cost": None,
+        "cost_by_model": {},
+    }
+    runner._accumulate_stats("AAPL", handler)
+    assert runner.batch_stats["provider_by_model"] == {}
 
 
 def test_accumulate_stats_sums_calls_and_tokens_by_model(tmp_path):

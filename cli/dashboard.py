@@ -691,12 +691,18 @@ def render_footer(
         # readable; the full map is still in stats["cost_by_model"] for
         # callers that want the long form.
         cost_by_model = stats.get("cost_by_model") or {}
+        provider_by_model = stats.get("provider_by_model") or {}
         if len(cost_by_model) > 1:
             top = sorted(
                 cost_by_model.items(), key=lambda kv: kv[1], reverse=True,
             )[:2]
+            def _label(model: str) -> str:
+                provider = provider_by_model.get(model)
+                return f"{provider}/{model}" if provider else model
+
             breakdown = "  ".join(
-                f"{model}: ${cost:.3f}" for model, cost in top
+                f"{_label(model)}: ${cost:.3f}"
+                for model, cost in top
             )
             stats_parts.append(f"By model: {breakdown}")
 
