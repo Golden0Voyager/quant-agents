@@ -249,6 +249,31 @@ def _is_native_openai_base_url(base_url: str | None) -> bool:
     return host == "api.openai.com" or host.endswith(".openai.com")
 
 
+def provider_for_base_url(base_url: str | None) -> str | None:
+    """Reverse-map an OpenAI-compatible base URL to its provider name.
+
+    The CLI stats handler uses this to attribute per-model cost to the
+    provider that actually served the call — the model name alone is
+    ambiguous (e.g. ``deepseek-v4-flash`` is served by both ``deepseek``
+    and ``sensenova``). Matching is by URL host, so trailing paths and
+    slashes don't matter. Returns ``None`` for unrecognized hosts
+    (custom gateways, env-overridden Ollama endpoints).
+    """
+    if not base_url:
+        return None
+    if "://" not in base_url:
+        base_url = "https://" + base_url
+    host = urlparse(base_url).hostname or ""
+    if not host:
+        return None
+    if host == "api.openai.com" or host.endswith(".openai.com"):
+        return "openai"
+    for provider, url in _PROVIDER_BASE_URL.items():
+        if urlparse(url).hostname == host:
+            return provider
+    return None
+
+
 class OpenAIClient(BaseLLMClient):
     """Client for OpenAI, Ollama, OpenRouter, and xAI providers.
 

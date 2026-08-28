@@ -73,6 +73,7 @@ class BatchRunner:
             "cost_by_model": {},
             "calls_by_model": {},
             "tokens_by_model": {},
+            "provider_by_model": {},
             "per_ticker": {},
         }
         self.dashboard = BatchDashboard(total=len(tickers), profile_name=profile_config.get("name", "default"))
@@ -761,6 +762,9 @@ class BatchRunner:
             calls_by_model = {}
         if not isinstance(tokens_by_model, dict):
             tokens_by_model = {}
+        provider_by_model = stats.get("provider_by_model")
+        if not isinstance(provider_by_model, dict):
+            provider_by_model = {}
         with self._lock:
             self.batch_stats["tokens_in"] += in_tokens
             self.batch_stats["tokens_out"] += out_tokens
@@ -788,6 +792,9 @@ class BatchRunner:
                     ) + float(cost)
                 except (TypeError, ValueError):
                     continue
+            for model, provider in provider_by_model.items():
+                if isinstance(provider, str) and provider:
+                    self.batch_stats["provider_by_model"].setdefault(model, provider)
             self.batch_stats["per_ticker"][ticker] = {
                 "tokens_in": in_tokens,
                 "tokens_out": out_tokens,
@@ -1239,13 +1246,15 @@ class BatchRunner:
             lines.append(f"- **Total tokens**: {tin_str}↑ {tout_str}↓")
             lines.append(f"- **Total LLM calls**: {self.batch_stats['llm_calls']}")
             cost_by_model = self.batch_stats["cost_by_model"]
+            provider_by_model = self.batch_stats.get("provider_by_model", {})
             if cost_by_model:
                 total_cost = sum(cost_by_model.values())
                 cny_rate = get_usd_to_cny_rate()
                 lines.append(f"- **Total cost**: ${total_cost:.4f}（¥{total_cost * cny_rate:.2f}）")
                 lines.append("- **By model**:")
                 for model, cost in sorted(cost_by_model.items(), key=lambda kv: -kv[1]):
-                    lines.append(f"  - {model}: ${cost:.4f}（¥{cost * cny_rate:.2f}）")
+                    label = f"{provider_by_model[model]}/{model}" if provider_by_model.get(model) else model
+                    lines.append(f"  - {label}: ${cost:.4f}（¥{cost * cny_rate:.2f}）")
             else:
                 lines.append("- **Total cost**: — (no priced models in this batch)")
 
@@ -1261,6 +1270,7 @@ class BatchRunner:
                 total_tout = 0
                 total_cost = 0.0
                 for model in models:
+                    label = f"{provider_by_model[model]}/{model}" if provider_by_model.get(model) else model
                     calls = calls_by_model.get(model, 0)
                     t_in = tokens_by_model.get(model, {}).get("in", 0)
                     t_out = tokens_by_model.get(model, {}).get("out", 0)
@@ -1274,7 +1284,7 @@ class BatchRunner:
                     else:
                         cost_cell = "—"
                     lines.append(
-                        f"| {model} | {calls} | {self._format_number(t_in)} | "
+                        f"| {label} | {calls} | {self._format_number(t_in)} | "
                         f"{self._format_number(t_out)} | {cost_cell} |"
                     )
                 total_cost_cell = f"${total_cost:.4f}" if cost_by_model else "—"
@@ -1296,6 +1306,7 @@ class BatchRunner:
                 "tokens_out": self.batch_stats.get("tokens_out", 0),
                 "llm_calls": self.batch_stats.get("llm_calls", 0),
                 "cost_by_model": dict(self.batch_stats.get("cost_by_model", {})),
+                "provider_by_model": dict(self.batch_stats.get("provider_by_model", {})),
                 "calls_by_model": dict(self.batch_stats.get("calls_by_model", {})),
                 "tokens_by_model": {
                     k: {"in": int(v.get("in", 0)), "out": int(v.get("out", 0))}
@@ -1344,6 +1355,7 @@ class BatchRunner:
                     "tokens_out": snapshot.get("tokens_out", 0),
                     "cost": total_cost,
                     "cost_by_model": cost_by_model,
+                    "provider_by_model": dict(snapshot.get("provider_by_model") or {}),
                     "calls_by_model": calls_by_model,
                     "tokens_by_model": tokens_by_model,
                 }

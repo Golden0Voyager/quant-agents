@@ -7,6 +7,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import LLMResult
 
+from tradingagents.llm_clients.openai_client import provider_for_base_url
 from tradingagents.llm_clients.pricing import get_price_for_model
 
 
@@ -43,6 +44,34 @@ def _extract_model_name(serialized: Any) -> str | None:
     return kwargs.get("model_name") or kwargs.get("model")
 
 
+def _extract_provider(serialized: Any) -> str | None:
+    """Best-effort provider attribution for a serialized chat model.
+
+    OpenAI-compatible clients expose ``openai_api_base`` in their
+    serialized kwargs, so the host is reverse-mapped to a provider name
+    (the model name alone is ambiguous — e.g. ``deepseek-v4-flash`` is
+    served by both ``deepseek`` and ``sensenova``). Native Anthropic /
+    Google / Azure integrations are identified by their class module
+    path in ``serialized["id"]``. Returns None when neither signal is
+    available.
+    """
+    if not isinstance(serialized, dict):
+        return None
+    kwargs = serialized.get("kwargs") or {}
+    if isinstance(kwargs, dict):
+        base_url = kwargs.get("openai_api_base") or kwargs.get("base_url")
+        provider = provider_for_base_url(base_url)
+        if provider:
+            return provider
+    id_parts = serialized.get("id")
+    if isinstance(id_parts, list):
+        module_path = ".".join(str(part) for part in id_parts).lower()
+        for name in ("anthropic", "google", "azure"):
+            if name in module_path:
+                return name
+    return None
+
+
 class StatsCallbackHandler(BaseCallbackHandler):
     """Callback handler that tracks LLM calls, tool calls, and token usage.
 
@@ -76,6 +105,10 @@ class StatsCallbackHandler(BaseCallbackHandler):
         self.tokens_by_model: dict[str, list[int]] = {}
         self.cost_by_model: dict[str, float] = {}
         self.llm_calls_by_model: dict[str, int] = {}
+        # Model → serving provider (first observation wins). Model names
+        # alone are ambiguous across providers, so summaries prefix the
+        # provider for readability, e.g. "sensenova/deepseek-v4-flash".
+        self.provider_by_model: dict[str, str] = {}
 
     # ---- model-name capture ------------------------------------------
 
@@ -90,6 +123,9 @@ class StatsCallbackHandler(BaseCallbackHandler):
             self.llm_calls += 1
             model_name = _extract_model_name(serialized) or "unknown"
             self.llm_calls_by_model[model_name] = self.llm_calls_by_model.get(model_name, 0) + 1
+            provider = _extract_provider(serialized)
+            if provider:
+                self.provider_by_model.setdefault(model_name, provider)
             self._current_model = model_name
 
     def on_llm_start(
@@ -103,6 +139,9 @@ class StatsCallbackHandler(BaseCallbackHandler):
             self.llm_calls += 1
             model_name = _extract_model_name(serialized) or "unknown"
             self.llm_calls_by_model[model_name] = self.llm_calls_by_model.get(model_name, 0) + 1
+            provider = _extract_provider(serialized)
+            if provider:
+                self.provider_by_model.setdefault(model_name, provider)
             # Some integrations only set the model on the legacy
             # ``on_llm_start`` path; capture it there too so we don't
             # miss the model in cost estimation.
@@ -198,6 +237,7 @@ class StatsCallbackHandler(BaseCallbackHandler):
                 "tokens_out": self.tokens_out,
                 "cost": total_cost,
                 "cost_by_model": dict(self.cost_by_model),
+                "provider_by_model": dict(self.provider_by_model),
                 "tokens_by_model": {
                     k: {"in": v[0], "out": v[1]} for k, v in self.tokens_by_model.items()
                 },
