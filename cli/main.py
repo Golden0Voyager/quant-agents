@@ -261,11 +261,11 @@ def get_user_selections(preselected_tickers: list[str] | None = None, allow_back
                 continue
             console.print("\n[bold cyan]Step 4: Output Language[/bold cyan]")
             console.print("[dim]Select the language for analyst reports and final decision[/dim]")
-            res = ask_output_language(allow_back=allow_back)
+            res = ask_output_language(allow_back=allow_back)  # type: ignore[assignment]
             if res == BACK_VALUE:
                 step -= 1
                 continue
-            output_language = res
+            output_language = res  # type: ignore[assignment]
             step += 1
             continue
 
@@ -273,7 +273,7 @@ def get_user_selections(preselected_tickers: list[str] | None = None, allow_back
         if step == 4:
             console.print("\n[bold cyan]Step 5: Research Depth[/bold cyan]")
             console.print("[dim]Select your research depth level[/dim]")
-            res = select_research_depth(allow_back=allow_back)
+            res = select_research_depth(allow_back=allow_back)  # type: ignore[assignment]
             if res == BACK_VALUE:  # type: ignore[comparison-overlap]
                 step -= 1
                 continue
@@ -293,7 +293,7 @@ def get_user_selections(preselected_tickers: list[str] | None = None, allow_back
                 continue
             console.print("\n[bold cyan]Step 6: LLM Provider[/bold cyan]")
             console.print("[dim]Select your LLM provider[/dim]")
-            res = select_llm_provider(allow_back=allow_back)
+            res = select_llm_provider(allow_back=allow_back)  # type: ignore[assignment]
             if res[0] == BACK_VALUE:  # type: ignore[comparison-overlap]
                 step -= 1
                 continue
@@ -358,27 +358,27 @@ def get_user_selections(preselected_tickers: list[str] | None = None, allow_back
             if provider_lower == "google":
                 console.print("\n[bold cyan]Step 8: Thinking Mode[/bold cyan]")
                 console.print("[dim]Configure Gemini thinking mode[/dim]")
-                res = ask_gemini_thinking_config(allow_back=allow_back)
+                res = ask_gemini_thinking_config(allow_back=allow_back)  # type: ignore[assignment]
                 if res == BACK_VALUE:
                     step -= 1
                     continue
-                thinking_level = res
+                thinking_level = res  # type: ignore[assignment]
             elif provider_lower == "openai":
                 console.print("\n[bold cyan]Step 8: Reasoning Effort[/bold cyan]")
                 console.print("[dim]Configure OpenAI reasoning effort level[/dim]")
-                res = ask_openai_reasoning_effort(allow_back=allow_back)
+                res = ask_openai_reasoning_effort(allow_back=allow_back)  # type: ignore[assignment]
                 if res == BACK_VALUE:
                     step -= 1
                     continue
-                reasoning_effort = res
+                reasoning_effort = res  # type: ignore[assignment]
             elif provider_lower == "anthropic":
                 console.print("\n[bold cyan]Step 8: Effort Level[/bold cyan]")
                 console.print("[dim]Configure Claude effort level[/dim]")
-                res = ask_anthropic_effort(allow_back=allow_back)
+                res = ask_anthropic_effort(allow_back=allow_back)  # type: ignore[assignment]
                 if res == BACK_VALUE:
                     step -= 1
                     continue
-                anthropic_effort = res
+                anthropic_effort = res  # type: ignore[assignment]
             # other providers have no step 8
             step += 1
             continue
