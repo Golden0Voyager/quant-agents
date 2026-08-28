@@ -8,7 +8,6 @@ from pathlib import Path
 
 import questionary
 import typer
-from rich.align import Align
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
