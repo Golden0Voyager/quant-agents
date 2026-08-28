@@ -28,7 +28,7 @@ def create_industry_analyst(llm):
         "get_industry_valuation": "Use get_industry_valuation for peer and historical valuation comparisons.",
         "get_concept_board": "Use get_concept_board to identify concept themes, hot-sector topics, and theme momentum.",
         "get_macro_indicators": "Use get_macro_indicators to assess the macro backdrop influencing sector valuation.",
-        "get_sector_fund_flow": "Use get_sector_fund_flow to track sector capital flows and rotation patterns.",
+        "get_sector_fund_flow": "Use get_sector_fund_flow to track sector capital flows and rotation patterns. Always pass the target stock's ticker so the sector can be resolved from its registered industry when the name misses.",
     }
 
     def industry_analyst_node(state):

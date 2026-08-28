@@ -155,6 +155,19 @@ class TestGetSectorFundFlow:
 
         mock_route.assert_called_once_with("get_sector_fund_flow", "新能源")
 
+    def test_with_ticker_passes_ticker_kwarg(self):
+        from tradingagents.agents.utils.fund_flow_tools import get_sector_fund_flow
+
+        with _make_mock_vendor("sector flow via ticker") as mock_route:
+            result = get_sector_fund_flow.invoke({
+                "sector_name": "新能源汽车", "ticker": "600519.SS"
+            })
+
+        mock_route.assert_called_once_with(
+            "get_sector_fund_flow", "新能源汽车", ticker="600519.SS"
+        )
+        assert result == "sector flow via ticker"
+
 
 # ===================================================================
 # Cross-cutting: error propagation

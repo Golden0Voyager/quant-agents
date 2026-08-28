@@ -33,6 +33,10 @@
   2026-08 起频繁断连（反爬），表格挂时由 hithink hot-stock-list 补位当前排名行（双失败才
   保留 `<hot-rank table unavailable>` 占位符 → partial）；未进 top-100 是明确阴性信号，
   以普通文本渲染（不用尖括号占位符），避免被 `_eastmoney_payload` 误判 partial 稀释降级信号
+- **板块名解析**：`get_sector_fund_flow` 的板块名经 `_resolve_sector_name`
+  （精确→唯一双向子串→剥"行业/概念/板块"后缀→别名表 `_INDUSTRY_SECTOR_ALIASES`）解析；
+  LLM 传概念名（"新能源汽车"）解析失败且有 `ticker` 时，按 `stock_list` 注册行业再解析一次。
+  语义有歧义的映射（如 "农牧饲渔"）故意不收进别名表，走报错路径让 LLM 用可用板块名重试
 
 ## 验证
 
