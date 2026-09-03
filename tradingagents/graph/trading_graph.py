@@ -190,6 +190,12 @@ class TradingAgentsGraph:
         if temperature is not None and temperature != "":
             kwargs["temperature"] = float(temperature)
 
+        # Per-request HTTP timeout so a stalled socket fails fast into the
+        # retry/fallback logic instead of hanging the run indefinitely.
+        timeout = self.config.get("llm_request_timeout")
+        if timeout:
+            kwargs["timeout"] = float(timeout)
+
         # Retry/backoff configuration for transient LLM errors.
         if self.config.get("llm_retry_enabled", True):
             kwargs["retry_config"] = RetryConfig(

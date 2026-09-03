@@ -22,6 +22,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_LLM_RETRY_ENABLED":    "llm_retry_enabled",
     "TRADINGAGENTS_LLM_RETRY_MAX_RETRIES": "llm_retry_max_retries",
     "TRADINGAGENTS_LLM_RETRY_BASE_DELAY": "llm_retry_base_delay",
+    "TRADINGAGENTS_LLM_REQUEST_TIMEOUT":  "llm_request_timeout",
     "TRADINGAGENTS_RESULTS_DIR":          "results_dir",
     "TRADINGAGENTS_CACHE_DIR":            "data_cache_dir",
     "TRADINGAGENTS_MEMORY_LOG_PATH":      "memory_log_path",
@@ -98,6 +99,13 @@ _BASE_CONFIG = {
     "llm_retry_enabled": True,
     "llm_retry_max_retries": 3,
     "llm_retry_base_delay": 2.0,
+    # Per-request HTTP timeout (seconds) for every LLM call. Without it the
+    # OpenAI-compatible SDKs wait on a half-open socket indefinitely — a
+    # stalled connection then looks like a frozen run (observed: an 8-hour
+    # silent hang). Must exceed the slowest legitimate deep-think call
+    # (portfolio-manager decisions have been measured at ~380s); on timeout
+    # the retry/backoff and fallback-chain logic takes over.
+    "llm_request_timeout": 600.0,
     # Checkpoint/resume: when True, LangGraph saves state after each node
     # so a crashed run can resume from the last successful step.
     "checkpoint_enabled": False,
