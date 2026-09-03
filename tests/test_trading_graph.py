@@ -1984,6 +1984,40 @@ class RateLimitPlumbingTests(unittest.TestCase):
         for c in g._mocks["create_llm"].call_args_list:
             self.assertNotIn("requests_per_minute", c.kwargs)
 
+    def test_model_specific_rpm_wins_over_provider(self):
+        g = _construct_graph(
+            config_override={
+                "llm_requests_per_minute": {
+                    "sensenova": 5,
+                    "sensenova/deepseek-v4-flash": 1.7,
+                }
+            }
+        )
+        for c in g._mocks["create_llm"].call_args_list:
+            if c.kwargs.get("provider") != "sensenova":
+                continue
+            if c.kwargs.get("model") == "deepseek-v4-flash":
+                self.assertEqual(c.kwargs.get("requests_per_minute"), 1.7)
+            else:
+                self.assertEqual(c.kwargs.get("requests_per_minute"), 5)
+
+
+@pytest.mark.unit
+class RequestTimeoutPlumbingTests(unittest.TestCase):
+    """_get_provider_kwargs forwards llm_request_timeout to every LLM client."""
+
+    def test_timeout_forwarded_to_all_tiers(self):
+        g = _construct_graph(config_override={"llm_request_timeout": 321.0})
+        calls = g._mocks["create_llm"].call_args_list
+        self.assertTrue(calls, "expected create_llm_client to be called")
+        for c in calls:
+            self.assertEqual(c.kwargs.get("timeout"), 321.0)
+
+    def test_no_timeout_kwarg_when_unset(self):
+        g = _construct_graph(config_override={"llm_request_timeout": None})
+        for c in g._mocks["create_llm"].call_args_list:
+            self.assertNotIn("timeout", c.kwargs)
+
 
 if __name__ == "__main__":
     unittest.main()

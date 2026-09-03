@@ -121,9 +121,18 @@ class OpenAIClientGetLlmTests(unittest.TestCase):
         _, kwargs = mock_chat.call_args
         limiter = kwargs.get("rate_limiter")
         self.assertIsNotNone(limiter)
-        # The registry hands back the same shared instance for this provider.
-        self.assertIs(limiter, get_shared_rate_limiter("sensenova", 15))
+        # The registry hands back the same shared instance for this
+        # provider/model scope (SenseNova Token Plan meters per model).
+        self.assertIs(
+            limiter,
+            get_shared_rate_limiter("sensenova", 15, model="deepseek-v4-flash"),
+        )
         self.assertAlmostEqual(limiter.requests_per_second, 15 / 60)
+        # A different model on the same provider gets its own bucket.
+        self.assertIsNot(
+            limiter, get_shared_rate_limiter("sensenova", 15, model="other-model")
+        )
+        self.assertIsNot(limiter, get_shared_rate_limiter("sensenova", 15))
         # The raw rpm scalar must not leak through to the ChatOpenAI kwargs.
         self.assertNotIn("requests_per_minute", kwargs)
 

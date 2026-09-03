@@ -84,6 +84,22 @@ from .setup import GraphSetup
 from .signal_processing import SignalProcessor
 
 
+def _lookup_rpm(
+    rpm_map: dict[str, Any], provider: str, model: str | None
+) -> Any:
+    """Resolve the requests-per-minute cap for a provider/model pair.
+
+    A model-specific ``"provider/model"`` entry wins over the bare provider
+    entry because plans like the SenseNova Token Plan meter each model
+    independently. Returns None when neither entry exists.
+    """
+    if model:
+        rpm = rpm_map.get(f"{provider}/{model}")
+        if rpm is not None:
+            return rpm
+    return rpm_map.get(provider)
+
+
 class TradingAgentsGraph:
     """Main class that orchestrates the trading agents framework."""
 
@@ -273,7 +289,7 @@ class TradingAgentsGraph:
                 else None
             )
             tier_kwargs = dict(llm_kwargs)
-            tier_rpm = rpm_map.get(entry["provider"])
+            tier_rpm = _lookup_rpm(rpm_map, entry["provider"], entry["model"])
             if tier_rpm:
                 tier_kwargs["requests_per_minute"] = tier_rpm
             try:
@@ -313,7 +329,11 @@ class TradingAgentsGraph:
         model_key = "deep_think_llm" if "deep" in config_key else "quick_think_llm"
         provider = self.config["llm_provider"]
         legacy_kwargs = dict(llm_kwargs)
-        legacy_rpm = (self.config.get("llm_requests_per_minute") or {}).get(provider)
+        legacy_rpm = _lookup_rpm(
+            self.config.get("llm_requests_per_minute") or {},
+            provider,
+            self.config[model_key],
+        )
         if legacy_rpm:
             legacy_kwargs["requests_per_minute"] = legacy_rpm
         client = create_llm_client(

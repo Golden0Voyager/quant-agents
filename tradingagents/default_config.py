@@ -146,14 +146,26 @@ _BASE_CONFIG = {
         {"provider": "openrouter",  "model": "nvidia/nemotron-3-ultra-550b-a55b:free"},
         {"provider": "openrouter",  "model": "nvidia/nemotron-3-super-120b-a12b:free"},
     ],
-    # Client-side request pacing, keyed by provider (requests per minute).
-    # A process-wide shared token-bucket limiter caps aggregate RPM across all
-    # batch workers and both think tiers, preventing 429 "rpm exhausted" bursts
-    # against low-quota plans (e.g. the SenseNova token plan). A provider not
-    # listed here is not rate-limited client-side. Tune each value to your
-    # plan's quota; set to {} to disable pacing entirely.
+    # Client-side request pacing (requests per minute). Keys are either a
+    # bare provider ("sensenova") or a provider/model pair
+    # ("sensenova/deepseek-v4-flash"); the model-specific entry wins when both
+    # are present. A process-wide shared token-bucket limiter per key caps
+    # aggregate RPM across all batch workers and both think tiers, preventing
+    # 429 bursts against low-quota plans. A provider/model not listed here is
+    # not rate-limited client-side. Set to {} to disable pacing entirely.
+    #
+    # SenseNova Token Plan quotas are per model per 5-hour window
+    # (docs/sensenova-deepseek-integration.md):
+    #   sensenova-6.8-flash-lite: 1500 calls / 5h -> 5 rpm sustained
+    #   deepseek-v4-flash:         500 calls / 5h -> ~1.7 rpm sustained
+    # Pacing above the sustained rate drains the 5h bucket mid-batch and
+    # forces fallback cascades, so model entries track the documented quotas.
+    # The bare "sensenova" fallback (for models without a documented quota,
+    # e.g. glm-5.2) uses the most conservative documented sustained rate.
     "llm_requests_per_minute": {
-        "sensenova": 15,
+        "sensenova/sensenova-6.8-flash-lite": 5.0,
+        "sensenova/deepseek-v4-flash": 1.7,
+        "sensenova": 5.0,
     },
     "input_token_price_per_1m": None,
     "output_token_price_per_1m": None,

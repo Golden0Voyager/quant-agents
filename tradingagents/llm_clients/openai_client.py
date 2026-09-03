@@ -337,10 +337,12 @@ class OpenAIClient(BaseLLMClient):
 
         # Client-side request pacing: attach a process-wide shared token-bucket
         # limiter so concurrent batch workers and both think tiers stay under
-        # the provider's per-minute quota, preventing 429 "rpm exhausted"
-        # bursts. ``requests_per_minute`` is passed by the graph from the
+        # the plan's quota, preventing 429 "rpm exhausted" bursts.
+        # ``requests_per_minute`` is passed by the graph from the
         # ``llm_requests_per_minute`` config and is not forwarded to ChatOpenAI
-        # itself (it is not in _PASSTHROUGH_KWARGS).
+        # itself (it is not in _PASSTHROUGH_KWARGS). The limiter is scoped per
+        # provider/model because plans like the SenseNova Token Plan meter
+        # each model independently (per-model calls per 5-hour window).
         rpm = self.kwargs.get("requests_per_minute")
         try:
             rpm = float(rpm) if rpm is not None else 0.0
@@ -355,7 +357,9 @@ class OpenAIClient(BaseLLMClient):
         if rpm > 0:
             from .rate_limit import get_shared_rate_limiter
 
-            llm_kwargs["rate_limiter"] = get_shared_rate_limiter(self.provider, rpm)
+            llm_kwargs["rate_limiter"] = get_shared_rate_limiter(
+                self.provider, rpm, model=self.model
+            )
 
         # Native OpenAI: use Responses API for consistent behavior across
         # all model families. Third-party providers use Chat Completions.

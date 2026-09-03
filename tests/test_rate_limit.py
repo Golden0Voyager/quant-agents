@@ -58,6 +58,41 @@ class TestBasicCreation:
 
 
 @pytest.mark.unit
+class TestModelScopedLimiters:
+    """Per-model quota scoping (SenseNova Token Plan meters per model)."""
+
+    def test_same_model_returns_shared_instance(self) -> None:
+        a = get_shared_rate_limiter("sensenova", 5, model="deepseek-v4-flash")
+        b = get_shared_rate_limiter("sensenova", 5, model="deepseek-v4-flash")
+        assert a is b
+
+    def test_distinct_models_get_distinct_limiters(self) -> None:
+        a = get_shared_rate_limiter("sensenova", 5, model="model-a")
+        b = get_shared_rate_limiter("sensenova", 1.7, model="model-b")
+        assert a is not b
+
+    def test_model_scoped_differs_from_provider_scoped(self) -> None:
+        scoped = get_shared_rate_limiter("sensenova", 5, model="model-a")
+        provider_wide = get_shared_rate_limiter("sensenova", 5)
+        assert scoped is not provider_wide
+
+    def test_model_key_is_case_insensitive(self) -> None:
+        a = get_shared_rate_limiter("sensenova", 5, model="DeepSeek-V4-Flash")
+        b = get_shared_rate_limiter("sensenova", 5, model="  deepseek-v4-flash ")
+        assert a is b
+
+    def test_cache_key_uses_provider_slash_model(self) -> None:
+        limiter = get_shared_rate_limiter("SenseNova", 5, model="M")
+        assert _LIMITERS["sensenova/m"] is limiter
+
+    def test_first_rate_wins_per_model_scope(self) -> None:
+        first = get_shared_rate_limiter("sensenova", 5, model="model-a")
+        second = get_shared_rate_limiter("sensenova", 60, model="model-a")
+        assert second is first
+        assert first.requests_per_second == pytest.approx(5 / 60)
+
+
+@pytest.mark.unit
 class TestValidation:
     """Input validation for requests_per_minute."""
 
