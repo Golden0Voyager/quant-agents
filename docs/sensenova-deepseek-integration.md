@@ -30,6 +30,17 @@
 - 使用 `deepseek-v4-flash` 做 trader/manager（串行），而非并行的 researcher
 - 避免同时运行多个 ticker 的分析
 
+**客户端限流（按模型）**：框架按 `llm_requests_per_minute` 配置做进程级 pacing，
+键可以是 `"provider/model"`（模型级条目优先于裸 provider 条目），默认值已按上表
+5 小时窗口配额折算（flash-lite 5 rpm、deepseek-v4-flash 1.7 rpm）。配额计量是按模型的，
+ pacing 超过持续速率会在 batch 中途耗尽 5 小时窗口并触发 fallback 级联。
+配额耗尽类错误（quota exceeded / insufficient balance）不会在同档重试，
+直接进入 fallback 链的下一个 provider/model。
+
+**请求超时**：`llm_request_timeout`（默认 600 秒，可用
+`TRADINGAGENTS_LLM_REQUEST_TIMEOUT` 覆盖）为每次 LLM 请求设 HTTP 超时，
+避免半开连接导致运行无限期挂起；超时后走重试/fallback。
+
 ---
 
 ## 2. 快速接入

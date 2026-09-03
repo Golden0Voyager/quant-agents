@@ -22,6 +22,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_LLM_RETRY_ENABLED":    "llm_retry_enabled",
     "TRADINGAGENTS_LLM_RETRY_MAX_RETRIES": "llm_retry_max_retries",
     "TRADINGAGENTS_LLM_RETRY_BASE_DELAY": "llm_retry_base_delay",
+    "TRADINGAGENTS_LLM_REQUEST_TIMEOUT":  "llm_request_timeout",
     "TRADINGAGENTS_RESULTS_DIR":          "results_dir",
     "TRADINGAGENTS_CACHE_DIR":            "data_cache_dir",
     "TRADINGAGENTS_MEMORY_LOG_PATH":      "memory_log_path",
@@ -98,6 +99,13 @@ _BASE_CONFIG = {
     "llm_retry_enabled": True,
     "llm_retry_max_retries": 3,
     "llm_retry_base_delay": 2.0,
+    # Per-request HTTP timeout (seconds) for every LLM call. Without it the
+    # OpenAI-compatible SDKs wait on a half-open socket indefinitely — a
+    # stalled connection then looks like a frozen run (observed: an 8-hour
+    # silent hang). Must exceed the slowest legitimate deep-think call
+    # (portfolio-manager decisions have been measured at ~380s); on timeout
+    # the retry/backoff and fallback-chain logic takes over.
+    "llm_request_timeout": 600.0,
     # Checkpoint/resume: when True, LangGraph saves state after each node
     # so a crashed run can resume from the last successful step.
     "checkpoint_enabled": False,
@@ -138,14 +146,26 @@ _BASE_CONFIG = {
         {"provider": "openrouter",  "model": "nvidia/nemotron-3-ultra-550b-a55b:free"},
         {"provider": "openrouter",  "model": "nvidia/nemotron-3-super-120b-a12b:free"},
     ],
-    # Client-side request pacing, keyed by provider (requests per minute).
-    # A process-wide shared token-bucket limiter caps aggregate RPM across all
-    # batch workers and both think tiers, preventing 429 "rpm exhausted" bursts
-    # against low-quota plans (e.g. the SenseNova token plan). A provider not
-    # listed here is not rate-limited client-side. Tune each value to your
-    # plan's quota; set to {} to disable pacing entirely.
+    # Client-side request pacing (requests per minute). Keys are either a
+    # bare provider ("sensenova") or a provider/model pair
+    # ("sensenova/deepseek-v4-flash"); the model-specific entry wins when both
+    # are present. A process-wide shared token-bucket limiter per key caps
+    # aggregate RPM across all batch workers and both think tiers, preventing
+    # 429 bursts against low-quota plans. A provider/model not listed here is
+    # not rate-limited client-side. Set to {} to disable pacing entirely.
+    #
+    # SenseNova Token Plan quotas are per model per 5-hour window
+    # (docs/sensenova-deepseek-integration.md):
+    #   sensenova-6.8-flash-lite: 1500 calls / 5h -> 5 rpm sustained
+    #   deepseek-v4-flash:         500 calls / 5h -> ~1.7 rpm sustained
+    # Pacing above the sustained rate drains the 5h bucket mid-batch and
+    # forces fallback cascades, so model entries track the documented quotas.
+    # The bare "sensenova" fallback (for models without a documented quota,
+    # e.g. glm-5.2) uses the most conservative documented sustained rate.
     "llm_requests_per_minute": {
-        "sensenova": 15,
+        "sensenova/sensenova-6.8-flash-lite": 5.0,
+        "sensenova/deepseek-v4-flash": 1.7,
+        "sensenova": 5.0,
     },
     "input_token_price_per_1m": None,
     "output_token_price_per_1m": None,

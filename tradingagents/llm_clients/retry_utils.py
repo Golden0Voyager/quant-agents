@@ -72,6 +72,29 @@ _TRANSIENT_MESSAGE_MARKERS: frozenset[str] = frozenset(
     }
 )
 
+# Subset of transient markers that signal an exhausted quota/balance rather
+# than a momentary burst. These do not clear within a short backoff window
+# (e.g. the SenseNova Token Plan resets per-model quotas on a 5-hour cycle),
+# so same-tier retries just burn time; the fallback chain should advance to
+# the next provider/model immediately instead.
+_QUOTA_EXHAUSTION_MARKERS: frozenset[str] = frozenset(
+    {
+        "insufficient_quota",
+        "quota exceeded",
+        "quota_exceeded",
+        "exceeded quota",
+        "api key quota",
+        "out of quota",
+        "insufficient balance",
+        "insufficient_balance",
+        "balance insufficient",
+        "credit limit",
+        "no credit",
+        "over quota",
+        "over_quota",
+    }
+)
+
 
 @dataclass(frozen=True)
 class RetryConfig:
@@ -191,6 +214,17 @@ def is_transient_llm_error(exc: BaseException) -> bool:
     return any(marker in message for marker in _TRANSIENT_MESSAGE_MARKERS)
 
 
+def is_quota_exhaustion_error(exc: BaseException) -> bool:
+    """Return True if *exc* means the plan's quota/balance is exhausted.
+
+    These errors stay "transient" for the fallback chain (a different
+    provider/model has its own quota), but same-tier backoff retries are
+    futile because the window does not reset for hours.
+    """
+    message = str(exc).lower()
+    return any(marker in message for marker in _QUOTA_EXHAUSTION_MARKERS)
+
+
 def llm_retry(func: Callable[[], T], *, retry_config: RetryConfig | None = None) -> T:
     """Call *func* with exponential backoff on transient LLM failures.
 
@@ -206,7 +240,14 @@ def llm_retry(func: Callable[[], T], *, retry_config: RetryConfig | None = None)
         try:
             return func()
         except Exception as exc:
-            if attempt == cfg.max_retries or not is_transient_llm_error(exc):
+            if (
+                attempt == cfg.max_retries
+                or not is_transient_llm_error(exc)
+                # Quota/balance exhaustion survives backoff (the window resets
+                # in hours, not seconds) — raise at once so the fallback
+                # chain can advance to the next provider/model.
+                or is_quota_exhaustion_error(exc)
+            ):
                 raise
             delay = cfg.delay_for_attempt(attempt)
             if attempt < cfg.max_retries - 1:

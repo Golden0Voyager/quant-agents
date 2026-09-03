@@ -29,6 +29,10 @@ LLM 客户端层：多提供商接入、能力探测、定价与限流。
   服务（400）、`MiniMax/MiniMax-M3` 已下架（400）——这些都不要放进 fallback 链
 - 新提供商密钥入 `.env`：如 `AGNES_API_KEY`、`MODELSCOPE_API_KEY`、`NVIDIA_API_KEY`；
   远程 Ollama 用 `OLLAMA_BASE_URL`
+- 每次 LLM 请求带 `llm_request_timeout`（默认 600s，env
+  `TRADINGAGENTS_LLM_REQUEST_TIMEOUT`），防止半开连接无限挂起
+- 客户端 pacing 按 `provider/model` 作用域（SenseNova Token Plan 按模型计量
+  5 小时窗口配额）；配额耗尽类错误不在同档重试，直接进 fallback 链下一档
 
 ## 验证
 

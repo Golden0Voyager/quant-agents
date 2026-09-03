@@ -15,6 +15,7 @@ from tradingagents.llm_clients.retry_utils import (
     DEFAULT_RETRY_CONFIG,
     RetryConfig,
     _get_status_code,
+    is_quota_exhaustion_error,
     is_transient_llm_error,
     llm_retry,
     with_llm_retry,
@@ -359,6 +360,37 @@ class TestLlmRetry:
             llm_retry(fn, retry_config=RetryConfig(max_retries=3, base_delay=0.1))
         fn.assert_called_once()
         mock_sleep.assert_not_called()
+
+    @patch("tradingagents.llm_clients.retry_utils.time.sleep")
+    def test_quota_exhaustion_raises_immediately(self, mock_sleep: MagicMock) -> None:
+        """Exhausted quota does not clear within backoff — no same-tier retry."""
+        fn = MagicMock(side_effect=Exception("quota_exceeded: 500 calls per 5h"))
+        with pytest.raises(Exception, match="quota_exceeded"):
+            llm_retry(fn, retry_config=RetryConfig(max_retries=3, base_delay=0.1))
+        fn.assert_called_once()
+        mock_sleep.assert_not_called()
+
+    @patch("tradingagents.llm_clients.retry_utils.time.sleep")
+    def test_quota_exhaustion_still_transient_for_fallback(self, mock_sleep: MagicMock) -> None:
+        """The fallback chain relies on is_transient_llm_error to advance tiers."""
+        exc = Exception("insufficient balance")
+        assert is_quota_exhaustion_error(exc)
+        assert is_transient_llm_error(exc)
+
+    @patch("tradingagents.llm_clients.retry_utils.time.sleep")
+    def test_burst_rate_limit_still_retried(self, mock_sleep: MagicMock) -> None:
+        """A momentary 429 (not quota exhaustion) keeps the backoff retry."""
+        calls: list[int] = []
+
+        def fn() -> str:
+            calls.append(len(calls))
+            if len(calls) < 2:
+                raise Exception("rate limit exceeded, retry later")
+            return "ok"
+
+        result = llm_retry(fn, retry_config=RetryConfig(max_retries=3, base_delay=0.1))
+        assert result == "ok"
+        assert len(calls) == 2
 
     @patch("tradingagents.llm_clients.retry_utils.time.sleep")
     def test_disabled_config_skips_retry(self, mock_sleep: MagicMock) -> None:
