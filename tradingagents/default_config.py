@@ -154,14 +154,12 @@ _BASE_CONFIG = {
     # 429 bursts against low-quota plans. A provider/model not listed here is
     # not rate-limited client-side. Set to {} to disable pacing entirely.
     #
-    # SenseNova Token Plan quotas are per model per 5-hour window
-    # (docs/sensenova-deepseek-integration.md):
-    #   sensenova-6.8-flash-lite: 1500 calls / 5h -> 5 rpm sustained
-    #   deepseek-v4-flash:         500 calls / 5h -> ~1.7 rpm sustained
-    # Pacing above the sustained rate drains the 5h bucket mid-batch and
-    # forces fallback cascades, so model entries track the documented quotas.
-    # The bare "sensenova" fallback (for models without a documented quota,
-    # e.g. glm-5.2) uses the most conservative documented sustained rate.
+    # SenseNova Token Plan (2026-08-28 起) is credit-based: 通用积分 +
+    # Flash-Lite 专属积分 pools, each 60k credits / rolling 5h and 600k /
+    # rolling week, deducted by actual token usage at per-model rates (see
+    # docs/sensenova-deepseek-integration.md). The values below are therefore
+    # conservative call-rate pacers, NOT quota conversions — tune them against
+    # the real per-model credit rates shown in the account's 积分明细.
     "llm_requests_per_minute": {
         "sensenova/sensenova-6.8-flash-lite": 5.0,
         "sensenova/deepseek-v4-flash": 1.7,

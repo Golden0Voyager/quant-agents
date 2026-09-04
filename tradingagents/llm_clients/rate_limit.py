@@ -8,8 +8,9 @@ would therefore never coordinate, so this module hands out a *single* limiter
 per quota scope, cached process-wide and safe to share across threads.
 
 The quota scope is the provider by default, or the provider/model pair when
-*model* is given: plans like the SenseNova Token Plan meter each model
-independently (per-model calls per 5-hour window), so pacing two models
+*model* is given. Plans like the SenseNova Token Plan (credit-based since
+2026-08: 通用积分 + Flash-Lite 专属积分 pools with rolling 5h/weekly windows,
+deducted by token usage) price each model differently, so pacing two models
 through one bucket would both serialize them needlessly and let a fast model
 drain the slow model's budget.
 
@@ -57,7 +58,7 @@ def get_shared_rate_limiter(
         requests_per_minute: Aggregate request cap. Must be > 0.
         model: Optional model name. When set, the limiter is scoped to the
             ``provider/model`` pair because plans like the SenseNova Token
-            Plan meter each model independently.
+            Plan price each model differently (per-model credit rates).
 
     Returns:
         A shared :class:`InMemoryRateLimiter` for the scope.

@@ -31,8 +31,9 @@ LLM 客户端层：多提供商接入、能力探测、定价与限流。
   远程 Ollama 用 `OLLAMA_BASE_URL`
 - 每次 LLM 请求带 `llm_request_timeout`（默认 600s，env
   `TRADINGAGENTS_LLM_REQUEST_TIMEOUT`），防止半开连接无限挂起
-- 客户端 pacing 按 `provider/model` 作用域（SenseNova Token Plan 按模型计量
-  5 小时窗口配额）；配额耗尽类错误不在同档重试，直接进 fallback 链下一档
+- 客户端 pacing 按 `provider/model` 作用域（SenseNova Token Plan 2026-08 起按
+  积分池滚动 5h/周窗口计量，不同模型费率不同）；配额耗尽类错误不在同档重试，
+  直接进 fallback 链下一档
 
 ## 验证
 
