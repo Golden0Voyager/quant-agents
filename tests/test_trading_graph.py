@@ -671,17 +671,12 @@ class ConstructorTests(unittest.TestCase):
                 ]
                 return [primary, *rest]
 
-            # Constructor builds: base deep chain, quick chain, then one extra
-            # chain for the research_manager role override. Trader and PM
-            # overrides equal the base deep model, so they share its chain.
+            # Constructor builds: base deep chain and quick chain. With no
+            # per-role overrides configured (the default), all three
+            # structured decision roles share the base deep chain.
             expected = (
                 expected_chain("deep_think_llm", "deep_think_fallback")
                 + expected_chain("quick_think_llm", "quick_think_fallback")
-                + expected_chain(
-                    "deep_think_llm",
-                    "deep_think_fallback",
-                    model_override=cfg["deep_think_llm_roles"]["research_manager"],
-                )
             )
             created = [
                 (c.kwargs["provider"], c.kwargs["model"])
@@ -700,16 +695,13 @@ class ConstructorTests(unittest.TestCase):
                 f"llm:{primary_provider}:{cfg['quick_think_llm']}",
             )
 
-            # Role LLMs: trader/PM share the base deep chain; the research
-            # manager gets a dedicated chain for its override model.
+            # Role LLMs: without overrides, every role shares the base chain.
             self.assertIs(g.deep_think_role_llms["trader"], g.deep_thinking_llm)
             self.assertIs(
                 g.deep_think_role_llms["portfolio_manager"], g.deep_thinking_llm
             )
-            self.assertEqual(
-                g.deep_think_role_llms["research_manager"],
-                f"llm:{primary_provider}:"
-                f"{cfg['deep_think_llm_roles']['research_manager']}",
+            self.assertIs(
+                g.deep_think_role_llms["research_manager"], g.deep_thinking_llm
             )
             # GraphSetup receives the role mapping.
             self.assertIs(
