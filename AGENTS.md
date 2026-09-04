@@ -41,7 +41,7 @@ Analyst execution timing via `tradingagents/graph/analyst_execution.py`.
 
 - `quick_think_llm` — Analysts (parallel, tool-heavy)
 - `deep_think_llm` — Bull/Bear researchers, risk debaters, and the default for the serial decision roles
-- `deep_think_llm_roles` — Optional per-role model overrides for `research_manager` / `trader` / `portfolio_manager`; roles not listed share the base `deep_think_llm` chain
+- `deep_think_llm_roles` — Optional per-role model overrides for `research_manager` / `trader` / `portfolio_manager` and the debaters (`bull_researcher` / `bear_researcher` / `aggressive_debater` / `neutral_debater` / `conservative_debater`); roles not listed share the base `deep_think_llm` chain
 - Primary tier comes from `*_think_llm` + `llm_provider` + `backend_url`; `*_think_fallback` entries only add fallback tiers (entries duplicating the primary provider+model are skipped)
 
 ### Data Vendors (`tradingagents/dataflows/`)

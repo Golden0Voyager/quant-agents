@@ -236,8 +236,76 @@ class SetupGraphTests(unittest.TestCase):
 
     def test_role_llms_default_to_base_deep_llm(self):
         gs = GraphSetup(self.quick, self.deep, self.tools, self.cl)
-        for role in ("research_manager", "trader", "portfolio_manager"):
+        for role in (
+            "research_manager",
+            "trader",
+            "portfolio_manager",
+            "bull_researcher",
+            "bear_researcher",
+            "aggressive_debater",
+            "neutral_debater",
+            "conservative_debater",
+        ):
             self.assertIs(gs._role_llm(role), self.deep)
+
+    @patch("tradingagents.graph.setup.StateGraph")
+    @patch("tradingagents.graph.setup.create_market_analyst")
+    @patch("tradingagents.graph.setup.create_sentiment_analyst")
+    @patch("tradingagents.graph.setup.create_news_analyst")
+    @patch("tradingagents.graph.setup.create_fundamentals_analyst")
+    @patch("tradingagents.graph.setup.create_bull_researcher")
+    @patch("tradingagents.graph.setup.create_bear_researcher")
+    @patch("tradingagents.graph.setup.create_research_manager")
+    @patch("tradingagents.graph.setup.create_trader")
+    @patch("tradingagents.graph.setup.create_aggressive_debator")
+    @patch("tradingagents.graph.setup.create_neutral_debator")
+    @patch("tradingagents.graph.setup.create_conservative_debator")
+    @patch("tradingagents.graph.setup.create_portfolio_manager")
+    @patch("tradingagents.graph.setup.create_msg_delete")
+    def test_debater_role_llms_route_to_matching_factories(
+        self,
+        mock_delete,
+        mock_pm,
+        mock_cons,
+        mock_neutral,
+        mock_agg,
+        mock_trader,
+        mock_rm,
+        mock_bear,
+        mock_bull,
+        mock_fund,
+        mock_news,
+        mock_sent,
+        mock_market,
+        mock_stategraph,
+    ):
+        bull_llm, bear_llm = _mock_llm(), _mock_llm()
+        agg_llm, neutral_llm, cons_llm = _mock_llm(), _mock_llm(), _mock_llm()
+        gs = GraphSetup(
+            self.quick,
+            self.deep,
+            self.tools,
+            self.cl,
+            role_llms={
+                "bull_researcher": bull_llm,
+                "bear_researcher": bear_llm,
+                "aggressive_debater": agg_llm,
+                "neutral_debater": neutral_llm,
+                "conservative_debater": cons_llm,
+            },
+        )
+        mock_stategraph.return_value = MagicMock()
+        gs.setup_graph()
+
+        # Debaters get their dedicated LLMs; decision roles stay on base.
+        mock_bull.assert_called_once_with(bull_llm)
+        mock_bear.assert_called_once_with(bear_llm)
+        mock_agg.assert_called_once_with(agg_llm)
+        mock_neutral.assert_called_once_with(neutral_llm)
+        mock_cons.assert_called_once_with(cons_llm)
+        mock_rm.assert_called_once_with(self.deep)
+        mock_trader.assert_called_once_with(self.deep)
+        mock_pm.assert_called_once_with(self.deep)
 
 
 if __name__ == "__main__":

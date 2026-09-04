@@ -336,6 +336,13 @@ class BatchRunner:
         config["google_thinking_level"] = self.profile_config.get("google_thinking_level")
         config["openai_reasoning_effort"] = self.profile_config.get("openai_reasoning_effort")
         config["anthropic_effort"] = self.profile_config.get("anthropic_effort")
+        # Per-role deep model overrides (research_manager / trader /
+        # portfolio_manager / debater roles); absent = all roles share the
+        # base deep_think_llm chain.
+        if self.profile_config.get("deep_think_llm_roles") is not None:
+            config["deep_think_llm_roles"] = self.profile_config[
+                "deep_think_llm_roles"
+            ]
         config["output_language"] = self.profile_config.get("output_language", "English")
         # A forced regeneration must bypass both report-copy detection and the
         # completed full-state log in TradingAgentsGraph.propagate().
