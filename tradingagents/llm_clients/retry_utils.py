@@ -74,9 +74,9 @@ _TRANSIENT_MESSAGE_MARKERS: frozenset[str] = frozenset(
 
 # Subset of transient markers that signal an exhausted quota/balance rather
 # than a momentary burst. These do not clear within a short backoff window
-# (e.g. the SenseNova Token Plan resets per-model quotas on a 5-hour cycle),
-# so same-tier retries just burn time; the fallback chain should advance to
-# the next provider/model immediately instead.
+# (e.g. the SenseNova Token Plan's credit pools recover on a rolling 5-hour
+# window), so same-tier retries just burn time; the fallback chain should
+# advance to the next provider/model immediately instead.
 _QUOTA_EXHAUSTION_MARKERS: frozenset[str] = frozenset(
     {
         "insufficient_quota",

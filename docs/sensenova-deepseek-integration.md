@@ -13,29 +13,39 @@
 
 ### 1.1 可用模型清单
 
-| 模型名称 | Model ID | 上下文长度 | 速率限制 | 描述 |
-|---------|---------|-----------|---------|------|
-| SenseNova 6.8 Flash-Lite | `sensenova-6.8-flash-lite` | 256K | 每5小时1500次 | 轻量多模态智能体模型，支持文本对话与图像输入 |
-| DeepSeek V4 Flash | `deepseek-v4-flash` | 256K | 每5小时500次 | 高性能对话模型，支持思考/非思考模式、工具调用 |
+| 模型名称 | Model ID | 上下文长度 | 描述 |
+|---------|---------|-----------|------|
+| SenseNova 6.8 Flash-Lite | `sensenova-6.8-flash-lite` | 256K | 轻量多模态智能体模型，支持文本对话与图像输入 |
+| DeepSeek V4 Flash | `deepseek-v4-flash` | 256K | 高效经济型通用模型，支持思考/非思考模式、工具调用 |
+| DeepSeek V4 Pro | `deepseek-v4-pro` | 1M | 旗舰通用模型，面向复杂 Agent 与高强度推理 |
+| GLM-5.2 | `glm-5.2` | 1M | 智谱旗舰开源模型，长程 Coding / 复杂工程任务 |
+| Kimi K3 | `kimi-k3` | 1M | 月之暗面旗舰开源多模态 Agent 模型 |
 
-### 1.2 速率限制
+### 1.2 积分规则（2026-08-28 起，公测）
 
-| 模型 | QPS | RPM | TPM | 备注 |
-|------|-----|-----|-----|------|
-| sensenova-6.8-flash-lite | — | 每5小时1500次 | — | 按时间窗口计数 |
-| deepseek-v4-flash | — | 每5小时500次 | — | 思考模式开销更大 |
+配额按**积分（token 实际用量）**计量，不是按调用次数。账户有两类积分池：
 
-**影响**：并行运行的 researcher agent 容易被限流，建议：
+| 积分池 | 适用范围 | 滚动 5 小时额度 | 滚动周额度 |
+|--------|---------|----------------|-----------|
+| 通用积分 | 所有已开放模型 | 60,000 积分 | 600,000 积分 |
+| Flash-Lite 专属积分 | 仅 Flash-Lite 系列 | 60,000 积分 | 600,000 积分 |
+
+- 使用 Flash-Lite 时**优先扣专属积分**，专属不足后再扣通用积分（通用部分不参与返赠）；其他模型只扣通用积分
+- 不同模型按实际用量扣除不同积分，具体费率以账户"积分明细"为准
+- **Flash-Lite 消费返赠**（2026-08-28 起）：每消耗 1 专属积分返赠 1 通用积分，按自然日汇总、每小时结算到账，返赠自到账起 30 天有效且**不占用**滚动 5 小时/周额度——Flash-Lite 用量实质上是"负成本"的
+
+**影响**：并行运行的 researcher agent 容易在 5 小时窗口内耗尽通用积分，建议：
 - 研究深度（debate rounds）不要设太高
-- 使用 `deepseek-v4-flash` 做 trader/manager（串行），而非并行的 researcher
-- 避免同时运行多个 ticker 的分析
+- deep 角色优先用 `deepseek-v4-flash`（思考链短、积分消耗低），而非 GLM-5.2 / V4 Pro / K3
+- 能用 Flash-Lite 的角色尽量用 Flash-Lite（烧专属积分 = 返赠通用积分）
+- batch 均匀贴着滚动 5 小时窗口跑，避免集中爆发
 
-**客户端限流（按模型）**：框架按 `llm_requests_per_minute` 配置做进程级 pacing，
-键可以是 `"provider/model"`（模型级条目优先于裸 provider 条目），默认值已按上表
-5 小时窗口配额折算（flash-lite 5 rpm、deepseek-v4-flash 1.7 rpm）。配额计量是按模型的，
- pacing 超过持续速率会在 batch 中途耗尽 5 小时窗口并触发 fallback 级联。
-配额耗尽类错误（quota exceeded / insufficient balance）不会在同档重试，
-直接进入 fallback 链的下一个 provider/model。
+**客户端限流（按模型 pacing）**：框架按 `llm_requests_per_minute` 配置做进程级 pacing，
+键可以是 `"provider/model"`（模型级条目优先于裸 provider 条目）。默认值
+（flash-lite 5 rpm、deepseek-v4-flash 1.7 rpm、兜底 5 rpm）是**保守的调用速率
+pacer**，并非积分配额的直接换算——积分按 token 计量，精确的窗口预算需要根据账户
+"积分明细"里的实际费率折算。配额耗尽类错误（quota exceeded / insufficient
+balance）不会在同档重试，直接进入 fallback 链的下一个 provider/model。
 
 **请求超时**：`llm_request_timeout`（默认 600 秒，可用
 `TRADINGAGENTS_LLM_REQUEST_TIMEOUT` 覆盖）为每次 LLM 请求设 HTTP 超时，
@@ -144,12 +154,13 @@ config["deep_think_llm_kwargs"] = {"reasoning_effort": "high"}
 
 | Agent 角色 | 推荐模型 | 理由 |
 |-----------|---------|------|
-| **Analyst** (并行) | `sensenova-6.8-flash-lite` | 轻量快速，256K 上下文，每5小时1500次额度充足 |
-| **Research Manager** | `sensenova-6.8-flash-lite` | 结构化输出，无需深度推理 |
-| **Trader** | `deepseek-v4-flash` | 需要强推理能力做交易决策 |
+| **Analyst** (并行) | `sensenova-6.8-flash-lite` | 轻量快速，256K 上下文；烧专属积分还能 1:1 返赠通用积分 |
+| **Research Manager** | `sensenova-6.8-flash-lite` | 结构化输出，无需深度推理；同上吃返赠 |
+| **Trader** | `deepseek-v4-flash` | 需要强推理能力做交易决策，思考链短、积分消耗低 |
 | **Portfolio Manager** | `deepseek-v4-flash` | 需要强推理能力做风险评估 |
 
-**注意**：`deepseek-v4-flash` 每5小时仅500次请求，不建议用于并行的 analyst 节点。
+**注意**：积分按 token 实际用量扣减（见 1.2），`glm-5.2` / `deepseek-v4-pro` / `kimi-k3`
+的费率通常更高，免费策略下不建议放进日常角色。
 
 ---
 
@@ -169,9 +180,10 @@ config["deep_think_llm_kwargs"] = {"reasoning_effort": "high"}
 
 **解决**：
 - 降低 `max_debate_rounds`（建议 ≤ 2）
-- Analyst 使用 `sensenova-6.8-flash-lite`，避免用 `deepseek-v4-flash`
+- Analyst 使用 `sensenova-6.8-flash-lite`（专属积分池），避免占用通用积分
 - 避免同时运行多个 ticker 的分析
-- 等待 5 小时窗口重置
+- 滚动 5 小时窗口随时间自然恢复，无需等整点
+- 框架会自动走 fallback 链（ModelScope / OpenRouter 免费档），配额耗尽错误不再同档重试
 
 ### 5.3 中文公司名称幻觉
 
@@ -187,7 +199,8 @@ config["deep_think_llm_kwargs"] = {"reasoning_effort": "high"}
 
 - [ ] 确保 `.env` 中 `SENSENOVA_API_KEY` 已配置
 - [ ] quick_think 用 `sensenova-6.8-flash-lite`，deep_think 用 `deepseek-v4-flash`
-- [ ] 监控额度使用情况，避免 5 小时窗口内超限
+- [ ] 在账户"积分明细"中核对各模型实际费率，规划每个 5 小时窗口的 batch 量
+- [ ] 监控额度使用情况，避免滚动 5 小时/周窗口内超限
 - [ ] 中文 A 股场景下，配合 `ticker_resolver.py` 使用
 - [ ] 如需图像输入，`sensenova-6.8-flash-lite` 支持 `image_url` 类型的 content 块
 
