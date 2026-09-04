@@ -1140,7 +1140,16 @@ class CreateRoleLlmTests(unittest.TestCase):
             role_llms = g._create_role_llms({})
 
         mock_create.assert_not_called()
-        for role in ("research_manager", "trader", "portfolio_manager"):
+        for role in (
+            "research_manager",
+            "trader",
+            "portfolio_manager",
+            "bull_researcher",
+            "bear_researcher",
+            "aggressive_debater",
+            "neutral_debater",
+            "conservative_debater",
+        ):
             self.assertIs(role_llms[role], g.deep_thinking_llm)
 
     def test_override_equal_to_base_model_shares_base_chain(self):
@@ -1191,6 +1200,44 @@ class CreateRoleLlmTests(unittest.TestCase):
         mock_logger.warning.assert_called_once()
         self.assertIn("not_a_role", mock_logger.warning.call_args[0][1])
         for role in ("research_manager", "trader", "portfolio_manager"):
+            self.assertIs(role_llms[role], g.deep_thinking_llm)
+
+    def test_debater_override_builds_dedicated_chain(self):
+        g = self._make_graph(
+            {
+                "deep_think_llm_roles": {
+                    "aggressive_debater": "sensenova-6.8-flash-lite",
+                    "bull_researcher": "sensenova-6.8-flash-lite",
+                }
+            }
+        )
+        mock_client = MagicMock()
+        mock_client.get_llm.side_effect = lambda: MagicMock(name="debater_llm")
+
+        with patch(
+            "tradingagents.graph.trading_graph.create_llm_client",
+            return_value=mock_client,
+        ) as mock_create:
+            role_llms = g._create_role_llms({})
+
+        # Each overridden debater got a dedicated chain: override model as
+        # primary tier, followed by the non-duplicate fallback tier(s).
+        models = [c.kwargs["model"] for c in mock_create.call_args_list]
+        self.assertEqual(
+            models,
+            ["sensenova-6.8-flash-lite", "deepseek-v4-flash"] * 2,
+        )
+        self.assertIsNot(role_llms["aggressive_debater"], g.deep_thinking_llm)
+        self.assertIsNot(role_llms["bull_researcher"], g.deep_thinking_llm)
+        # Untouched roles still share the base chain.
+        for role in (
+            "research_manager",
+            "trader",
+            "portfolio_manager",
+            "bear_researcher",
+            "neutral_debater",
+            "conservative_debater",
+        ):
             self.assertIs(role_llms[role], g.deep_thinking_llm)
 
 

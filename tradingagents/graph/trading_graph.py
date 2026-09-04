@@ -225,15 +225,27 @@ class TradingAgentsGraph:
         return kwargs
 
     def _create_role_llms(self, llm_kwargs: dict) -> dict[str, Any]:
-        """Build per-role deep-think LLMs for the structured decision roles.
+        """Build per-role deep-think LLMs for roles that support overrides.
 
-        Reads ``config["deep_think_llm_roles"]`` — a mapping of role name
-        (``research_manager`` / ``trader`` / ``portfolio_manager``) to a
-        model override. Roles without an override, or whose override equals
-        the base ``deep_think_llm`` model, share the base deep-think chain
-        so no duplicate clients are created.
+        Reads ``config["deep_think_llm_roles"]`` — a mapping of role name to a
+        model override. Supported roles: the three structured serial decision
+        roles (``research_manager`` / ``trader`` / ``portfolio_manager``) and
+        the debaters (``bull_researcher`` / ``bear_researcher`` /
+        ``aggressive_debater`` / ``neutral_debater`` /
+        ``conservative_debater``). Roles without an override, or whose
+        override equals the base ``deep_think_llm`` model, share the base
+        deep-think chain so no duplicate clients are created.
         """
-        roles = ("research_manager", "trader", "portfolio_manager")
+        roles = (
+            "research_manager",
+            "trader",
+            "portfolio_manager",
+            "bull_researcher",
+            "bear_researcher",
+            "aggressive_debater",
+            "neutral_debater",
+            "conservative_debater",
+        )
         role_llms: dict[str, Any] = dict.fromkeys(roles, self.deep_thinking_llm)
         base_model = self.config.get("deep_think_llm")
         for role, model in (self.config.get("deep_think_llm_roles") or {}).items():

@@ -155,12 +155,30 @@ config["deep_think_llm_kwargs"] = {"reasoning_effort": "high"}
 | Agent 角色 | 推荐模型 | 理由 |
 |-----------|---------|------|
 | **Analyst** (并行) | `sensenova-6.8-flash-lite` | 轻量快速，256K 上下文；烧专属积分还能 1:1 返赠通用积分 |
-| **Research Manager** | `sensenova-6.8-flash-lite` | 结构化输出，无需深度推理；同上吃返赠 |
+| **Bull/Bear 研究员、风险辩论员** | `sensenova-6.8-flash-lite` | 立场文/辩论产出占 deep 角色 token 量 90%+，对抗结构容错好；下放后返赠收益最大 |
+| **Research Manager** | `deepseek-v4-flash` | 全线判断密度最高的仲裁节点（评级校准），不建议用轻量模型 |
 | **Trader** | `deepseek-v4-flash` | 需要强推理能力做交易决策，思考链短、积分消耗低 |
 | **Portfolio Manager** | `deepseek-v4-flash` | 需要强推理能力做风险评估 |
 
 **注意**：积分按 token 实际用量扣减（见 1.2），`glm-5.2` / `deepseek-v4-pro` / `kimi-k3`
 的费率通常更高，免费策略下不建议放进日常角色。
+
+**按角色换模型**：`deep_think_llm_roles` 支持
+`research_manager` / `trader` / `portfolio_manager` 三个决策角色以及
+`bull_researcher` / `bear_researcher` / `aggressive_debater` / `neutral_debater` /
+`conservative_debater` 五个辩论角色；未列出的角色共用 `deep_think_llm` 基准链，
+每个 override 角色自动带完整 fallback 链。batch 配置文件（如 `config/daily-my.json`）
+里同样生效。例如只下放风险辩论员：
+
+```json
+"deep_think_llm_roles": {
+  "aggressive_debater": "sensenova-6.8-flash-lite",
+  "neutral_debater": "sensenova-6.8-flash-lite",
+  "conservative_debater": "sensenova-6.8-flash-lite"
+}
+```
+
+更换关键角色后建议用 `scripts/rating_backtest.py` 对比评级准确率基线，确认无回归。
 
 ---
 

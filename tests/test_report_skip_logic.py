@@ -171,6 +171,27 @@ class TestForceRegeneration:
         assert runner._build_config()["checkpoint_enabled"] is False
 
 
+class TestRoleOverridesPassthrough:
+    def test_deep_think_llm_roles_passed_to_config(self, tmp_path):
+        """Batch profiles can override per-role deep models (e.g. debaters
+        onto a cheaper/返赠 model); the mapping must reach the graph config."""
+        roles = {"aggressive_debater": "sensenova-6.8-flash-lite"}
+        runner = BatchRunner(
+            tickers=["AAPL"],
+            profile_config={"deep_think_llm_roles": roles},
+            output_dir=tmp_path,
+        )
+        assert runner._build_config()["deep_think_llm_roles"] == roles
+
+    def test_deep_think_llm_roles_absent_keeps_default(self, tmp_path):
+        runner = BatchRunner(
+            tickers=["AAPL"],
+            profile_config={},
+            output_dir=tmp_path,
+        )
+        assert runner._build_config()["deep_think_llm_roles"] == {}
+
+
 class TestSaveReportToDisk:
     def test_includes_analysis_date_in_header(self, tmp_path, sample_final_state):
         save_path = tmp_path / "reports" / "AAPL"

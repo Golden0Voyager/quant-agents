@@ -72,13 +72,16 @@ _BASE_CONFIG = {
     "llm_provider": "sensenova",
     "deep_think_llm": "deepseek-v4-flash",
     "quick_think_llm": "sensenova-6.8-flash-lite",
-    # Per-role deep-think model overrides for the three structured serial
-    # decision roles (research_manager / trader / portfolio_manager). Roles
+    # Per-role deep-think model overrides. Supported roles: the three
+    # structured serial decision roles (research_manager / trader /
+    # portfolio_manager) and the debaters (bull_researcher / bear_researcher
+    # / aggressive_debater / neutral_debater / conservative_debater). Roles
     # not listed — or mapped to None / the base model — share the
-    # ``deep_think_llm`` chain; bull/bear researchers and risk debaters
-    # always use ``deep_think_llm``. Empty by default: all deep roles run on
+    # ``deep_think_llm`` chain. Empty by default: all deep roles run on
     # deepseek-v4-flash, the most credit-efficient deep model on the
-    # SenseNova Token Plan (~1/3.3 the per-token rate of glm-5.2).
+    # SenseNova Token Plan (~1/3.3 the per-token rate of glm-5.2). To shift
+    # work onto Flash-Lite 专属积分 (1:1 返赠通用积分), point the
+    # error-tolerant debater roles at sensenova-6.8-flash-lite.
     "deep_think_llm_roles": {},
     # SenseNova Token Plan endpoint; upstream default is None (per-provider fallback)
     "backend_url": "https://token.sensenova.cn/v1",

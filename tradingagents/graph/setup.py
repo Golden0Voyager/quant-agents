@@ -25,10 +25,12 @@ class GraphSetup:
     ):
         """Initialize with required components.
 
-        ``role_llms`` optionally maps the structured decision roles
-        (``research_manager`` / ``trader`` / ``portfolio_manager``) to a
-        dedicated deep-think LLM; roles absent from the mapping use
-        ``deep_thinking_llm``.
+        ``role_llms`` optionally maps deep-think roles — the structured
+        decision roles (``research_manager`` / ``trader`` /
+        ``portfolio_manager``) and the debaters (``bull_researcher`` /
+        ``bear_researcher`` / ``aggressive_debater`` / ``neutral_debater`` /
+        ``conservative_debater``) — to a dedicated deep-think LLM; roles
+        absent from the mapping use ``deep_thinking_llm``.
         """
         self.quick_thinking_llm = quick_thinking_llm
         self.deep_thinking_llm = deep_thinking_llm
@@ -68,15 +70,15 @@ class GraphSetup:
         }
 
         # Create researcher and manager nodes
-        bull_researcher_node = create_bull_researcher(self.deep_thinking_llm)
-        bear_researcher_node = create_bear_researcher(self.deep_thinking_llm)
+        bull_researcher_node = create_bull_researcher(self._role_llm("bull_researcher"))
+        bear_researcher_node = create_bear_researcher(self._role_llm("bear_researcher"))
         research_manager_node = create_research_manager(self._role_llm("research_manager"))
         trader_node = create_trader(self._role_llm("trader"))
 
         # Create risk analysis nodes
-        aggressive_analyst = create_aggressive_debator(self.deep_thinking_llm)
-        neutral_analyst = create_neutral_debator(self.deep_thinking_llm)
-        conservative_analyst = create_conservative_debator(self.deep_thinking_llm)
+        aggressive_analyst = create_aggressive_debator(self._role_llm("aggressive_debater"))
+        neutral_analyst = create_neutral_debator(self._role_llm("neutral_debater"))
+        conservative_analyst = create_conservative_debator(self._role_llm("conservative_debater"))
         portfolio_manager_node = create_portfolio_manager(self._role_llm("portfolio_manager"))
 
         # Create workflow
