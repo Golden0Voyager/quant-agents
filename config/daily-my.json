@@ -19,6 +19,11 @@
     "backend_url": "https://token.sensenova.cn/v1",
     "shallow_thinker": "sensenova-6.8-flash-lite",
     "deep_thinker": "deepseek-v4-flash",
+    "deep_think_llm_roles": {
+      "aggressive_debater": "sensenova-6.8-flash-lite",
+      "neutral_debater": "sensenova-6.8-flash-lite",
+      "conservative_debater": "sensenova-6.8-flash-lite"
+    },
     "output_language": "Chinese",
     "checkpoint_enabled": true,
     "max_debate_rounds": 1,
