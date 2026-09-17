@@ -14,7 +14,8 @@ Agent 角色层：分析师 → 研究辩论 → 经理 → 交易员 → 风险
 - 结构化输出统一走 `utils/structured.py` 的 `bind_structured()` + `invoke_structured_or_freetext()` 回退，
   不要在节点内直接调用 `with_structured_output`（deepseek-reasoner 不支持 `tool_choice`，会抛
   `NotImplementedError`，必须保留自由文本回退路径）
-- Dual-LLM 分工：分析师/辩论者用 `quick_think_llm`，经理/交易员/组合经理用 `deep_think_llm`
+- Dual-LLM 分工：分析师/辩论者用 `quick_think_llm`，经理/交易员/组合经理用 `deep_think_llm`；
+  单个分析师与 reflector 可经 `quick_think_llm_roles` 覆盖模型
 - 修改 `schemas.py` 字段时同步检查消费方（managers、trader、cli 报告渲染）与相关单测
 
 ## 验证
