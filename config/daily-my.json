@@ -17,12 +17,12 @@
     "research_depth": 3,
     "llm_provider": "sensenova",
     "backend_url": "https://token.sensenova.cn/v1",
-    "shallow_thinker": "sensenova-6.8-flash-lite",
+    "shallow_thinker": "deepseek-v4-flash",
     "deep_thinker": "deepseek-v4-flash",
-    "deep_think_llm_roles": {
-      "aggressive_debater": "sensenova-6.8-flash-lite",
-      "neutral_debater": "sensenova-6.8-flash-lite",
-      "conservative_debater": "sensenova-6.8-flash-lite"
+    "quick_think_llm_roles": {
+      "reflector": "sensenova-6.8-flash-lite",
+      "social": "sensenova-6.8-flash-lite",
+      "news": "sensenova-6.8-flash-lite"
     },
     "output_language": "Chinese",
     "checkpoint_enabled": true,
