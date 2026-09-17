@@ -22,6 +22,7 @@ class GraphSetup:
         tool_nodes: dict[str, ToolNode],
         conditional_logic: ConditionalLogic,
         role_llms: dict[str, Any] | None = None,
+        analyst_llms: dict[str, Any] | None = None,
     ):
         """Initialize with required components.
 
@@ -31,16 +32,26 @@ class GraphSetup:
         ``bear_researcher`` / ``aggressive_debater`` / ``neutral_debater`` /
         ``conservative_debater``) — to a dedicated deep-think LLM; roles
         absent from the mapping use ``deep_thinking_llm``.
+
+        ``analyst_llms`` optionally maps the six analyst keys (``market`` /
+        ``social`` / ``news`` / ``fundamentals`` / ``governance`` /
+        ``industry``) to a dedicated quick-think LLM; keys absent from the
+        mapping use ``quick_thinking_llm``.
         """
         self.quick_thinking_llm = quick_thinking_llm
         self.deep_thinking_llm = deep_thinking_llm
         self.tool_nodes = tool_nodes
         self.conditional_logic = conditional_logic
         self.role_llms = role_llms or {}
+        self.analyst_llms = analyst_llms or {}
 
     def _role_llm(self, role: str) -> Any:
         """Return the LLM bound to a decision role (base deep LLM by default)."""
         return self.role_llms.get(role, self.deep_thinking_llm)
+
+    def _analyst_llm(self, key: str) -> Any:
+        """Return the LLM bound to an analyst (base quick LLM by default)."""
+        return self.analyst_llms.get(key, self.quick_thinking_llm)
 
     def setup_graph(
         self, selected_analysts=None
@@ -61,12 +72,12 @@ class GraphSetup:
         plan = build_analyst_execution_plan(selected_analysts)
 
         analyst_factories = {
-            "market": lambda: create_market_analyst(self.quick_thinking_llm),
-            "social": lambda: create_sentiment_analyst(self.quick_thinking_llm),
-            "news": lambda: create_news_analyst(self.quick_thinking_llm),
-            "fundamentals": lambda: create_fundamentals_analyst(self.quick_thinking_llm),
-            "governance": lambda: create_governance_analyst(self.quick_thinking_llm),
-            "industry": lambda: create_industry_analyst(self.quick_thinking_llm),
+            "market": lambda: create_market_analyst(self._analyst_llm("market")),
+            "social": lambda: create_sentiment_analyst(self._analyst_llm("social")),
+            "news": lambda: create_news_analyst(self._analyst_llm("news")),
+            "fundamentals": lambda: create_fundamentals_analyst(self._analyst_llm("fundamentals")),
+            "governance": lambda: create_governance_analyst(self._analyst_llm("governance")),
+            "industry": lambda: create_industry_analyst(self._analyst_llm("industry")),
         }
 
         # Create researcher and manager nodes

@@ -141,6 +141,7 @@ class TradingAgentsGraph:
         self.deep_thinking_llm = self._create_fallback_llm("deep_think_fallback", llm_kwargs)
         self.quick_thinking_llm = self._create_fallback_llm("quick_think_fallback", llm_kwargs)
         self.deep_think_role_llms = self._create_role_llms(llm_kwargs)
+        self.quick_think_role_llms = self._create_quick_role_llms(llm_kwargs)
 
         self.memory_log = TradingMemoryLog(self.config)
         self.node_timings: list[dict[str, Any]] = []
@@ -159,12 +160,13 @@ class TradingAgentsGraph:
             self.tool_nodes,
             self.conditional_logic,
             role_llms=self.deep_think_role_llms,
+            analyst_llms=self.quick_think_role_llms,
         )
 
         self.propagator = Propagator(
             max_recur_limit=self.config.get("max_recur_limit", 100),
         )
-        self.reflector = Reflector(self.quick_thinking_llm)
+        self.reflector = Reflector(self.quick_think_role_llms["reflector"])
         self.signal_processor = SignalProcessor(self.quick_thinking_llm)
 
         # State tracking
@@ -236,26 +238,77 @@ class TradingAgentsGraph:
         override equals the base ``deep_think_llm`` model, share the base
         deep-think chain so no duplicate clients are created.
         """
-        roles = (
-            "research_manager",
-            "trader",
-            "portfolio_manager",
-            "bull_researcher",
-            "bear_researcher",
-            "aggressive_debater",
-            "neutral_debater",
-            "conservative_debater",
+        return self._build_role_llms(
+            llm_kwargs,
+            roles=(
+                "research_manager",
+                "trader",
+                "portfolio_manager",
+                "bull_researcher",
+                "bear_researcher",
+                "aggressive_debater",
+                "neutral_debater",
+                "conservative_debater",
+            ),
+            base_llm=self.deep_thinking_llm,
+            base_model=self.config.get("deep_think_llm"),
+            config_key="deep_think_fallback",
+            roles_config_key="deep_think_llm_roles",
         )
-        role_llms: dict[str, Any] = dict.fromkeys(roles, self.deep_thinking_llm)
-        base_model = self.config.get("deep_think_llm")
-        for role, model in (self.config.get("deep_think_llm_roles") or {}).items():
+
+    def _create_quick_role_llms(self, llm_kwargs: dict) -> dict[str, Any]:
+        """Build per-role quick-think LLMs for roles that support overrides.
+
+        Reads ``config["quick_think_llm_roles"]`` — a mapping of role name to
+        a model override. Supported roles: the six analysts (``market`` /
+        ``social`` / ``news`` / ``fundamentals`` / ``governance`` /
+        ``industry``) and the ``reflector``. Roles without an override, or
+        whose override equals the base ``quick_think_llm`` model, share the
+        base quick-think chain so no duplicate clients are created.
+        """
+        return self._build_role_llms(
+            llm_kwargs,
+            roles=(
+                "market",
+                "social",
+                "news",
+                "fundamentals",
+                "governance",
+                "industry",
+                "reflector",
+            ),
+            base_llm=self.quick_thinking_llm,
+            base_model=self.config.get("quick_think_llm"),
+            config_key="quick_think_fallback",
+            roles_config_key="quick_think_llm_roles",
+        )
+
+    def _build_role_llms(
+        self,
+        llm_kwargs: dict,
+        roles: tuple[str, ...],
+        base_llm: Any,
+        base_model: str | None,
+        config_key: str,
+        roles_config_key: str,
+    ) -> dict[str, Any]:
+        """Shared per-role LLM builder backing both think tiers.
+
+        Every role defaults to ``base_llm``; an entry in
+        ``config[roles_config_key]`` whose model differs from ``base_model``
+        gets a dedicated fallback chain built from ``config_key``. Unknown
+        roles are warned about and ignored; empty or base-equal overrides
+        keep sharing the base chain.
+        """
+        role_llms: dict[str, Any] = dict.fromkeys(roles, base_llm)
+        for role, model in (self.config.get(roles_config_key) or {}).items():
             if role not in role_llms:
-                logger.warning("Unknown deep_think_llm_roles entry %r ignored", role)
+                logger.warning(f"Unknown {roles_config_key} entry %r ignored", role)
                 continue
             if not model or model == base_model:
                 continue
             role_llms[role] = self._create_fallback_llm(
-                "deep_think_fallback", llm_kwargs, model_override=model
+                config_key, llm_kwargs, model_override=model
             )
         return role_llms
 
