@@ -1241,6 +1241,118 @@ class CreateRoleLlmTests(unittest.TestCase):
             self.assertIs(role_llms[role], g.deep_thinking_llm)
 
 
+@pytest.mark.unit
+class CreateQuickRoleLlmTests(unittest.TestCase):
+    """Tests for TradingAgentsGraph._create_quick_role_llms."""
+
+    QUICK_ROLES = (
+        "market",
+        "social",
+        "news",
+        "fundamentals",
+        "governance",
+        "industry",
+        "reflector",
+    )
+
+    def _make_graph(self, config_overrides=None):
+        from tradingagents.graph.trading_graph import TradingAgentsGraph
+        with patch.object(TradingAgentsGraph, "__init__", return_value=None):
+            g = TradingAgentsGraph.__new__(TradingAgentsGraph)
+            g.config = {
+                "llm_provider": "sensenova",
+                "deep_think_llm": "glm-5.2",
+                "quick_think_llm": "deepseek-v4-flash",
+                "backend_url": "https://api.example.com",
+                "quick_think_fallback": [
+                    {"provider": "sensenova", "model": "sensenova-6.8-flash-lite"},
+                ],
+                "quick_think_llm_roles": None,
+                **(config_overrides or {}),
+            }
+            g.quick_thinking_llm = MagicMock(name="base_quick")
+            return g
+
+    def test_no_role_config_shares_base_chain(self):
+        g = self._make_graph({"quick_think_llm_roles": None})
+        with patch(
+            "tradingagents.graph.trading_graph.create_llm_client"
+        ) as mock_create:
+            role_llms = g._create_quick_role_llms({})
+
+        mock_create.assert_not_called()
+        for role in self.QUICK_ROLES:
+            self.assertIs(role_llms[role], g.quick_thinking_llm)
+
+    def test_override_equal_to_base_model_shares_base_chain(self):
+        g = self._make_graph({"quick_think_llm_roles": {"news": "deepseek-v4-flash"}})
+        with patch(
+            "tradingagents.graph.trading_graph.create_llm_client"
+        ) as mock_create:
+            role_llms = g._create_quick_role_llms({})
+
+        mock_create.assert_not_called()
+        self.assertIs(role_llms["news"], g.quick_thinking_llm)
+
+    def test_differing_override_builds_dedicated_chain(self):
+        g = self._make_graph({"quick_think_llm_roles": {"news": "some-cheap-model"}})
+        mock_client = MagicMock()
+        mock_client.get_llm.return_value = MagicMock(name="news_llm")
+
+        with patch(
+            "tradingagents.graph.trading_graph.create_llm_client",
+            return_value=mock_client,
+        ) as mock_create:
+            role_llms = g._create_quick_role_llms({})
+
+        # Override model as primary tier, followed by the non-duplicate
+        # fallback tier.
+        models = [c.kwargs["model"] for c in mock_create.call_args_list]
+        self.assertEqual(models, ["some-cheap-model", "sensenova-6.8-flash-lite"])
+        self.assertIsNot(role_llms["news"], g.quick_thinking_llm)
+        for role in self.QUICK_ROLES:
+            if role != "news":
+                self.assertIs(role_llms[role], g.quick_thinking_llm)
+
+    def test_unknown_role_is_warned_and_ignored(self):
+        g = self._make_graph({"quick_think_llm_roles": {"trader": "some-model"}})
+        with (
+            patch("tradingagents.graph.trading_graph.create_llm_client") as mock_create,
+            patch("tradingagents.graph.trading_graph.logger") as mock_logger,
+        ):
+            role_llms = g._create_quick_role_llms({})
+
+        mock_create.assert_not_called()
+        mock_logger.warning.assert_called_once()
+        self.assertIn("trader", mock_logger.warning.call_args[0][1])
+        for role in self.QUICK_ROLES:
+            self.assertIs(role_llms[role], g.quick_thinking_llm)
+
+    def test_reflector_override_builds_dedicated_chain(self):
+        g = self._make_graph(
+            {"quick_think_llm_roles": {"reflector": "sensenova-6.8-flash-lite"}}
+        )
+        mock_client = MagicMock()
+        mock_client.get_llm.return_value = MagicMock(name="reflector_llm")
+
+        with patch(
+            "tradingagents.graph.trading_graph.create_llm_client",
+            return_value=mock_client,
+        ) as mock_create:
+            role_llms = g._create_quick_role_llms({})
+
+        # The single fallback tier duplicates the override, so only one
+        # client is created and returned unpatched.
+        mock_create.assert_called_once()
+        self.assertEqual(
+            mock_create.call_args.kwargs["model"], "sensenova-6.8-flash-lite"
+        )
+        self.assertIsNot(role_llms["reflector"], g.quick_thinking_llm)
+        for role in self.QUICK_ROLES:
+            if role != "reflector":
+                self.assertIs(role_llms[role], g.quick_thinking_llm)
+
+
 # ---------------------------------------------------------------------------
 # _fetch_crypto_returns (pure logic via patching network calls)
 # ---------------------------------------------------------------------------
