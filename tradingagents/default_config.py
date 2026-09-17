@@ -83,6 +83,15 @@ _BASE_CONFIG = {
     # work onto Flash-Lite 专属积分 (1:1 返赠通用积分), point the
     # error-tolerant debater roles at sensenova-6.8-flash-lite.
     "deep_think_llm_roles": {},
+    # Per-role quick-think model overrides. Supported roles: the six
+    # analysts (market / social / news / fundamentals / governance /
+    # industry) and the reflector. Roles not listed — or mapped to None /
+    # the base model — share the ``quick_think_llm`` chain. Intended use:
+    # route error-tolerant roles (e.g. reflector / social / news) to
+    # sensenova-6.8-flash-lite to consume Flash-Lite 专属积分, while keeping
+    # precision-sensitive analysts (market / fundamentals / governance /
+    # industry) on the base model.
+    "quick_think_llm_roles": {},
     # SenseNova Token Plan endpoint; upstream default is None (per-provider fallback)
     "backend_url": "https://token.sensenova.cn/v1",
     # Provider-specific thinking configuration
