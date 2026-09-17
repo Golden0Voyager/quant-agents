@@ -343,6 +343,12 @@ class BatchRunner:
             config["deep_think_llm_roles"] = self.profile_config[
                 "deep_think_llm_roles"
             ]
+        # Per-role quick model overrides (six analysts + reflector); absent =
+        # all quick roles share the base quick_think_llm chain.
+        if self.profile_config.get("quick_think_llm_roles") is not None:
+            config["quick_think_llm_roles"] = self.profile_config[
+                "quick_think_llm_roles"
+            ]
         config["output_language"] = self.profile_config.get("output_language", "English")
         # A forced regeneration must bypass both report-copy detection and the
         # completed full-state log in TradingAgentsGraph.propagate().
