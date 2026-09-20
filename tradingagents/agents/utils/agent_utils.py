@@ -6,6 +6,11 @@ from typing import Any
 import yfinance as yf
 from langchain_core.messages import HumanMessage, RemoveMessage
 
+from tradingagents.agents.utils.commodity_data_tools import (  # noqa: F401
+    get_commodity_futures,
+    get_lithium_spot,
+)
+
 # Import tools from separate utility files
 from tradingagents.agents.utils.core_stock_tools import (  # noqa: F401
     get_chip_distribution,
