@@ -408,3 +408,47 @@ class TestIndustryAnalystCommodityTools:
         full_text = captured.get("full", "")
         assert "get_lithium_spot" in full_text
         assert "get_commodity_futures" in full_text
+
+
+# ===================================================================
+# Macro archive tools (US macro / CFTC COT / EIA petroleum)
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestIndustryAnalystMacroTools:
+    """The Industry analyst carries the macro archive tools and their guidance."""
+
+    def test_macro_tools_bound(self):
+        llm = _make_llm()
+        node = create_industry_analyst(llm)
+        node(dict(_BASE_STATE))
+        bound = llm.bind_tools.call_args[0][0]
+        names = [tool.name for tool in bound]
+        assert "get_us_macro" in names
+        assert "get_cftc_cot" in names
+        assert "get_eia_petroleum" in names
+
+    def test_tool_guidance_mentions_macro_tools(self):
+        llm = MagicMock()
+        captured = {}
+
+        def capture_invoke(prompt_val):
+            captured["full"] = str(prompt_val)
+            result = MagicMock()
+            result.content = "Analysis"
+            result.tool_calls = []
+            result.additional_kwargs = {}
+            return result
+
+        bound_llm = MagicMock()
+        bound_llm.side_effect = capture_invoke
+        llm.bind_tools.return_value = bound_llm
+
+        node = create_industry_analyst(llm)
+        node(dict(_BASE_STATE))
+
+        full_text = captured.get("full", "")
+        assert "get_us_macro" in full_text
+        assert "get_cftc_cot" in full_text
+        assert "get_eia_petroleum" in full_text
