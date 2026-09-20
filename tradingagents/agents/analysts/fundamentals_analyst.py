@@ -4,6 +4,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_balance_sheet,
     get_cashflow,
     get_dividend_history,
+    get_dividend_summary,
     get_earnings_estimates,
     get_earnings_forecast,
     get_fundamentals,
@@ -31,6 +32,8 @@ def create_fundamentals_analyst(llm):
         get_earnings_estimates,
         get_shareholder_count,
         get_dividend_history,
+    get_dividend_summary,
+        get_dividend_summary,
     ]
     bound_tools = BoundToolsByMarket(llm, tools)
     tool_guidance = {
@@ -43,6 +46,7 @@ def create_fundamentals_analyst(llm):
         "get_earnings_estimates": "Use get_earnings_estimates for forward consensus revenue, EPS, and profit expectations.",
         "get_shareholder_count": "Use get_shareholder_count to assess changes in shareholder concentration.",
         "get_dividend_history": "Use get_dividend_history to evaluate shareholder-return policy and dividend-yield trends.",
+        "get_dividend_summary": "Use get_dividend_summary for the lifetime dividend vs fundraising record (累计分红 vs 累计募资) — a one-line shareholder-return scorecard.",
     }
 
     def fundamentals_analyst_node(state):
