@@ -135,7 +135,18 @@ class TestGetLithiumSpot:
 
         conn = sqlite3.connect(empty_db)
         conn.execute(
-            "CREATE TABLE lithium_spot_daily (spot_date DATE, spot_price REAL)"
+            """
+            CREATE TABLE lithium_spot_daily (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                spot_date DATE NOT NULL,
+                spot_price REAL,
+                near_contract TEXT, near_contract_price REAL,
+                dom_contract TEXT, dom_contract_price REAL,
+                dom_basis REAL, dom_basis_rate REAL,
+                data_source TEXT, updated_at DATETIME,
+                UNIQUE(spot_date)
+            )
+            """
         )
         conn.commit()
         conn.close()
@@ -202,7 +213,17 @@ class TestGetCommodityFutures:
 
         conn = sqlite3.connect(empty_db)
         conn.execute(
-            "CREATE TABLE futures_daily (trade_date DATE, symbol TEXT, close REAL)"
+            """
+            CREATE TABLE futures_daily (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_date DATE NOT NULL,
+                symbol TEXT NOT NULL,
+                name TEXT, open REAL, high REAL, low REAL, close REAL,
+                volume BIGINT, hold BIGINT, change_pct REAL,
+                data_source TEXT, updated_at DATETIME,
+                UNIQUE(trade_date, symbol)
+            )
+            """
         )
         conn.commit()
         conn.close()
