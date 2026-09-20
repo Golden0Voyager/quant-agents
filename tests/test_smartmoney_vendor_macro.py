@@ -236,6 +236,35 @@ class TestGetCftcCot:
         with _PatchedVendor(empty_db), pytest.raises(NoMarketDataError):
             get_cftc_cot("白银")
 
+    def test_goods_overview_raises_when_table_missing(self, empty_db):
+        from tradingagents.dataflows.smartmoney_vendor import get_cftc_cot
+
+        with _PatchedVendor(empty_db), pytest.raises(NoMarketDataError):
+            get_cftc_cot()
+
+    def test_goods_overview_raises_when_empty(self, empty_db):
+        from tradingagents.dataflows.smartmoney_vendor import get_cftc_cot
+
+        conn = sqlite3.connect(empty_db)
+        conn.execute(
+            """
+            CREATE TABLE cftc_cot_weekly (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_date DATE NOT NULL,
+                market TEXT NOT NULL,
+                instrument TEXT NOT NULL,
+                long_positions REAL, short_positions REAL, net_positions REAL,
+                data_source TEXT, updated_at DATETIME,
+                UNIQUE(trade_date, market, instrument)
+            )
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        with _PatchedVendor(empty_db), pytest.raises(NoMarketDataError):
+            get_cftc_cot()
+
 
 @pytest.mark.unit
 class TestGetEiaPetroleum:
@@ -293,6 +322,12 @@ class TestGetEiaPetroleum:
         )
         conn.commit()
         conn.close()
+
+        with _PatchedVendor(empty_db), pytest.raises(NoMarketDataError):
+            get_eia_petroleum()
+
+    def test_all_series_raises_when_table_missing(self, empty_db):
+        from tradingagents.dataflows.smartmoney_vendor import get_eia_petroleum
 
         with _PatchedVendor(empty_db), pytest.raises(NoMarketDataError):
             get_eia_petroleum()
