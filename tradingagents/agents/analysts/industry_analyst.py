@@ -2,15 +2,22 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
+    get_central_bank_balance,
     get_cftc_cot,
     get_commodity_futures,
     get_concept_board,
     get_eia_petroleum,
+    get_fx_rate,
+    get_gold_price,
+    get_hk_tech_index,
+    get_index_futures_basis,
     get_industry_valuation,
     get_language_instruction,
     get_lithium_spot,
     get_macro_indicators,
+    get_sector_daily,
     get_sector_fund_flow,
+    get_sector_valuation,
     get_us_macro,
     sanitize_company_name_in_report,
 )
@@ -32,6 +39,13 @@ def create_industry_analyst(llm):
         get_sector_fund_flow,
         get_lithium_spot,
         get_commodity_futures,
+        get_sector_daily,
+        get_sector_valuation,
+        get_index_futures_basis,
+        get_gold_price,
+        get_hk_tech_index,
+        get_fx_rate,
+        get_central_bank_balance,
     ]
     bound_tools = BoundToolsByMarket(llm, tools)
     tool_guidance = {
@@ -44,6 +58,13 @@ def create_industry_analyst(llm):
         "get_sector_fund_flow": "Use get_sector_fund_flow to track sector capital flows and rotation patterns. Always pass the target stock's ticker so the sector can be resolved from its registered industry when the name misses.",
         "get_lithium_spot": "Use get_lithium_spot when analyzing lithium mining, lithium battery, or new-energy supply-chain names to track lithium carbonate spot prices and futures basis.",
         "get_commodity_futures": "Use get_commodity_futures when the target is sensitive to a commodity price (e.g. silver/precious metals, copper/aluminium, lithium, chemicals) to track the underlying futures trend, volume, and open interest.",
+        "get_sector_daily": "Use get_sector_daily for the target sector's own price trend (板块日线), complementing sector fund flow with pure price evidence.",
+        "get_sector_valuation": "Use get_sector_valuation to anchor the target's PE/PB against its own sector's valuation history (板块估值).",
+        "get_index_futures_basis": "Use get_index_futures_basis for index-futures basis (期指基差); a deepening discount signals bearish hedging sentiment in the broad market.",
+        "get_gold_price": "Use get_gold_price for SGE gold quotes when analyzing gold miners, jewellery retailers, or precious-metals-linked names.",
+        "get_hk_tech_index": "Use get_hk_tech_index for the Hang Seng Tech trend — the China-tech risk-appetite gauge for tech supply-chain names.",
+        "get_fx_rate": "Use get_fx_rate for CNY quotes (central parity and BOC prices); RMB moves matter for exporters, importers, and airlines.",
+        "get_central_bank_balance": "Use get_central_bank_balance for the PBOC balance sheet (reserve money, FX reserves) — the liquidity-cycle backdrop.",
     }
 
     def industry_analyst_node(state):
