@@ -126,6 +126,23 @@ _POLICIES: dict[str, ToolPolicy] = {
         impact="medium",
         allowed_vendors=("smartmoney_db", "akshare", "fred"),
     ),
+    # Commodity spot/futures are market-agnostic industry context archived
+    # only in quant_core.db (no akshare/hithink equivalent); the variety code
+    # is not a ticker, so latest_snapshot keeps it out of date rewriting.
+    "get_lithium_spot": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
+    "get_commodity_futures": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
     "get_limit_up_down": ToolPolicy(
         applicable_markets=frozenset({"XSHG"}),
         date_policy="market_session",

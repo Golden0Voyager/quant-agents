@@ -2,9 +2,11 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
+    get_commodity_futures,
     get_concept_board,
     get_industry_valuation,
     get_language_instruction,
+    get_lithium_spot,
     get_macro_indicators,
     get_sector_fund_flow,
     sanitize_company_name_in_report,
@@ -22,6 +24,8 @@ def create_industry_analyst(llm):
         get_concept_board,
         get_macro_indicators,
         get_sector_fund_flow,
+        get_lithium_spot,
+        get_commodity_futures,
     ]
     bound_tools = BoundToolsByMarket(llm, tools)
     tool_guidance = {
@@ -29,6 +33,8 @@ def create_industry_analyst(llm):
         "get_concept_board": "Use get_concept_board to identify concept themes, hot-sector topics, and theme momentum.",
         "get_macro_indicators": "Use get_macro_indicators to assess the macro backdrop influencing sector valuation.",
         "get_sector_fund_flow": "Use get_sector_fund_flow to track sector capital flows and rotation patterns. Always pass the target stock's ticker so the sector can be resolved from its registered industry when the name misses.",
+        "get_lithium_spot": "Use get_lithium_spot when analyzing lithium mining, lithium battery, or new-energy supply-chain names to track lithium carbonate spot prices and futures basis.",
+        "get_commodity_futures": "Use get_commodity_futures when the target is sensitive to a commodity price (e.g. silver/precious metals, copper/aluminium, lithium, chemicals) to track the underlying futures trend, volume, and open interest.",
     }
 
     def industry_analyst_node(state):
@@ -50,6 +56,8 @@ def create_industry_analyst(llm):
             + tool_guidance_for(market_tools, tool_guidance)
             + " "
             "Assess whether the stock is relatively overvalued, undervalued, or fairly priced within its sector. "
+            "For commodity-sensitive names (lithium, silver/precious metals, nonferrous, chemicals), factor the "
+            "underlying commodity spot/futures evidence into the industry view. "
             "Highlight any valuation anomalies or regime shifts. Provide specific, actionable "
             "insights with supporting evidence to help traders make informed decisions."
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""

@@ -2292,3 +2292,131 @@ def get_concept_board(symbol: str) -> str:
         "- 概念标签: " + ", ".join(concepts[:15]),
     ]
     return "\n".join(lines)
+
+
+# ===========================================================================
+# Commodity data (商品现货/期货) — lithium spot & commodity futures
+# ===========================================================================
+
+def get_lithium_spot(periods: int = 60) -> str:
+    """Fetch lithium carbonate (碳酸锂) spot & futures basis from quant_core.db.
+
+    Reads the market-level ``lithium_spot_daily`` table (no code dimension):
+    生意社 spot quote plus near/dominant GFEX contract prices and basis.
+    Rows are returned oldest-first so trend reading is natural.
+    """
+    df = _df_from_sql(
+        """
+        SELECT spot_date AS Date, spot_price, near_contract, near_contract_price,
+               dom_contract, dom_contract_price, dom_basis, dom_basis_rate
+        FROM lithium_spot_daily
+        ORDER BY spot_date DESC
+        LIMIT ?
+        """,
+        (max(int(periods), 1),),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            "lithium_spot",
+            detail="lithium_spot_daily query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            "lithium_spot",
+            detail="no lithium spot data in quant_core.db.",
+        )
+
+    df = df.iloc[::-1].reset_index(drop=True)
+
+    def _fmt(value, digits: int = 2) -> str:
+        return f"{value:,.{digits}f}" if pd.notna(value) else "N/A"
+
+    lines = [
+        "## Lithium Carbonate Spot (碳酸锂现货与基差) "
+        "(source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)} days",
+        "",
+    ]
+    for _, row in df.iterrows():
+        lines.append(f"**Date**: {row['Date']}")
+        lines.append(f"- 现货价: {_fmt(row['spot_price'])}")
+        lines.append(
+            f"- 近月合约 {row['near_contract']}: {_fmt(row['near_contract_price'])}"
+        )
+        lines.append(
+            f"- 主力合约 {row['dom_contract']}: {_fmt(row['dom_contract_price'])}"
+        )
+        basis_rate = row["dom_basis_rate"]
+        basis_rate_str = f"{basis_rate * 100:.2f}%" if pd.notna(basis_rate) else "N/A"
+        lines.append(f"- 主力基差: {_fmt(row['dom_basis'])} ({basis_rate_str})")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def get_commodity_futures(variety: str, periods: int = 60) -> str:
+    """Fetch Chinese commodity futures daily bars from quant_core.db.
+
+    Reads the ``futures_daily`` table for one variety code, e.g.
+    ``AG`` (白银), ``LC`` (碳酸锂), ``CU`` (铜). Rows are returned
+    oldest-first so trend reading is natural.
+    """
+    code = variety.strip().upper()
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, name, open AS Open, high AS High,
+               low AS Low, close AS Close, volume AS Volume,
+               hold AS Hold, change_pct AS ChangePct
+        FROM futures_daily
+        WHERE symbol = ?
+        ORDER BY trade_date DESC
+        LIMIT ?
+        """,
+        (code, max(int(periods), 1)),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            variety, code,
+            "futures_daily query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        available = _df_from_sql(
+            "SELECT DISTINCT symbol FROM futures_daily ORDER BY symbol",
+        )
+        known = ", ".join(available["symbol"].tolist()) if available is not None and not available.empty else "N/A"
+        raise NoMarketDataError(
+            variety, code,
+            f"no futures_daily data in quant_core.db for variety {code!r}. "
+            f"Available varieties: {known}.",
+        )
+
+    df = df.iloc[::-1].reset_index(drop=True)
+    name = df["name"].dropna().iloc[-1] if df["name"].notna().any() else code
+
+    def _fmt_num(value) -> str:
+        return f"{value:,.0f}" if pd.notna(value) else "N/A"
+
+    def _fmt_px(value) -> str:
+        return f"{value:,.2f}" if pd.notna(value) else "N/A"
+
+    lines = [
+        f"## {code} Futures Daily ({name}) "
+        "(source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)} trading days",
+        "",
+    ]
+    for _, row in df.iterrows():
+        change = row["ChangePct"]
+        change_str = f"{change:+.2f}%" if pd.notna(change) else "N/A"
+        lines.append(f"**Date**: {row['Date']}")
+        lines.append(f"- Close: {_fmt_px(row['Close'])} ({change_str})")
+        lines.append(
+            f"- Open/High/Low: {_fmt_px(row['Open'])} / {_fmt_px(row['High'])} / {_fmt_px(row['Low'])}"
+        )
+        lines.append(f"- Volume: {_fmt_num(row['Volume'])} | Open Interest: {_fmt_num(row['Hold'])}")
+        lines.append("")
+    return "\n".join(lines)

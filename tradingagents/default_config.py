@@ -217,6 +217,9 @@ _BASE_CONFIG = {
         "fundamental_data": "smartmoney_db,hithink,akshare,yfinance",
         "news_data": "akshare,yfinance",  # news not stored locally
         "macro_data": "akshare,fred",        # akshare → FRED fallback
+        # Commodity spot/futures live only in the local quant_core.db archive
+        # (akshare/hithink have no matching interface), so no online fallback.
+        "commodity_data": "smartmoney_db",
         "research_opinion": "akshare,smartmoney_db",  # analyst reports: AkShare online → local DB fallback
     },
     # Tool-level configuration (takes precedence over category-level)
