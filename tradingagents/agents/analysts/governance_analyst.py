@@ -55,7 +55,7 @@ def create_governance_analyst(llm):
         "get_block_trade": "Use get_block_trade to monitor large-block transactions and premium/discount signals.",
         "get_placement_announcements": "Use get_placement_announcements for the placement (定增) history — repeated rounds signal dilution and financing dependence.",
         "get_stock_repurchase": "Use get_stock_repurchase for buyback announcements (amount, price range, progress) — management-confidence and shareholder-return signals.",
-        "get_south_flow": "Use get_south_flow for the daily mainland-to-HK southbound flow; pair with get_northbound_hold for the full cross-border picture.",
+        "get_south_flow": "Use get_south_flow for the daily mainland-to-HK southbound flow; pair it with northbound positioning for the full cross-border picture.",
     }
 
     def governance_analyst_node(state):
