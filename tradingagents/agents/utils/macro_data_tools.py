@@ -104,3 +104,57 @@ def get_eia_petroleum(
     """
     return route_to_vendor("get_eia_petroleum", series_id, periods)
 
+
+
+@tool
+def get_hk_tech_index(
+    periods: Annotated[int, "Number of recent trading days to return (default 120)"] = 120,
+) -> str:
+    """
+    Retrieve Hang Seng Tech Index (恒生科技指数) daily OHLCV bars from the
+    local archive — the risk-appetite gauge for China tech, relevant when
+    analyzing tech supply-chain or platform-economy names.
+    Uses the configured macro_data vendor (smartmoney_db local archive only).
+    Args:
+        periods (int): Number of recent trading days to return (default 120)
+    Returns:
+        str: A CSV-formatted table of Hang Seng Tech daily bars
+    """
+    return route_to_vendor("get_hk_tech_index", periods)
+
+
+@tool
+def get_fx_rate(
+    currency: Annotated[str, "Currency name in Chinese, e.g. '美元'"] = "美元",
+    periods: Annotated[int, "Number of recent days to return (default 60)"] = 60,
+) -> str:
+    """
+    Retrieve onshore CNY central-parity / BOC quotes (在岸人民币牌价):
+    central parity, bank/cash buy and sell prices. RMB appreciation
+    benefits importers and airlines; depreciation benefits exporters.
+    Uses the configured macro_data vendor (smartmoney_db local archive only).
+    Args:
+        currency (str): Currency name in Chinese (default 美元)
+        periods (int): Number of recent days to return (default 60)
+    Returns:
+        str: A formatted table of CNY quotes
+    """
+    return route_to_vendor("get_fx_rate", currency, periods)
+
+
+@tool
+def get_central_bank_balance(
+    periods: Annotated[int, "Number of recent months to return (default 36)"] = 36,
+) -> str:
+    """
+    Retrieve the PBOC balance sheet (央行资产负债表, monthly): total assets,
+    reserve money, currency in circulation, claims on banks/government,
+    government deposits, foreign assets and FX reserves. Liquidity-cycle
+    context for the whole market.
+    Uses the configured macro_data vendor (smartmoney_db local archive only).
+    Args:
+        periods (int): Number of recent months to return (default 36)
+    Returns:
+        str: A CSV-formatted table of the PBOC balance sheet
+    """
+    return route_to_vendor("get_central_bank_balance", periods)
