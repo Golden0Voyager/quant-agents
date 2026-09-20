@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import shutil
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -292,3 +292,54 @@ class TestDoSyncHoldingsPreservesTransactions:
         assert saved.holdings["AAPL"].shares == 100.0
         assert len(saved.transactions) == 1
         assert saved.transactions[0].ticker == "AAPL"
+
+
+@pytest.mark.smoke
+class TestIsMyWatchlist:
+    """Test watchlist recognition for auto-syncing Google Sheet holdings."""
+
+    def test_is_my_watchlist_variants(self):
+        from cli.main import _is_my_watchlist
+
+        assert _is_my_watchlist("my") is True
+        assert _is_my_watchlist("my-list") is True
+        assert _is_my_watchlist("my_list") is True
+        assert _is_my_watchlist("my.txt") is True
+        assert _is_my_watchlist("my-list.txt") is True
+        assert _is_my_watchlist("/some/path/my.txt") is True
+        assert _is_my_watchlist("/some/path/my-list.txt") is True
+
+        assert _is_my_watchlist("other") is False
+        assert _is_my_watchlist("watch") is False
+        assert _is_my_watchlist("") is False
+        assert _is_my_watchlist(None) is False
+
+    @patch("cli.main._sync_portfolio_for_my_list")
+    @patch("cli.main.BatchRunner")
+    def test_run_batch_analysis_triggers_sync_for_my_list_variant(
+        self, mock_batch_runner_cls, mock_sync
+    ):
+        from cli.main import run_batch_analysis
+
+        from pathlib import Path
+
+        mock_runner = MagicMock()
+        mock_runner.generate_summary.return_value = Path("batch_summary.md")
+        mock_runner.completed_tickers = {"AAPL"}
+        mock_runner.failures = {}
+        mock_runner.summaries = {"AAPL": {"company": "Apple", "rating": "Buy"}}
+        mock_runner.batch_stats = {"tokens_in": 0}
+        mock_batch_runner_cls.return_value = mock_runner
+
+        run_batch_analysis(
+            tickers=["AAPL"],
+            profile_config={},
+            watchlist_name="my-list",
+            holdings={"stale": {}},
+            headless=True,
+        )
+
+        mock_sync.assert_called_once()
+        # Verify holdings was reset to None so runner reloads freshly synced cache
+        call_kwargs = mock_batch_runner_cls.call_args[1]
+        assert call_kwargs["holdings"] is None
