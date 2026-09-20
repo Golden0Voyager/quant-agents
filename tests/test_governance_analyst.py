@@ -167,3 +167,46 @@ class TestGovernanceAnalystEdgeCases:
         del s["company_name"]
         r = create_governance_analyst(_make_llm(content="ok"))(s)
         assert r["governance_report"] == "ok"
+
+
+# ===================================================================
+# Full-table coverage tools
+# ===================================================================
+
+
+_ASHARE_STATE = {**_BASE_STATE, "company_of_interest": "600519.SS", "company_name": "贵州茅台"}
+
+
+@pytest.mark.unit
+class TestGovernanceFullCoverageTools:
+    def test_capital_operation_tools_bound(self):
+        llm = _make_llm()
+        create_governance_analyst(llm)(dict(_ASHARE_STATE))
+        bound = llm.bind_tools.call_args[0][0]
+        names = [tool.name for tool in bound]
+        assert "get_placement_announcements" in names
+        assert "get_stock_repurchase" in names
+        assert "get_south_flow" in names
+
+    def test_tool_guidance_mentions_new_tools(self):
+        llm = MagicMock()
+        captured = {}
+
+        def capture_invoke(prompt_val):
+            captured["full"] = str(prompt_val)
+            result = MagicMock()
+            result.content = "Analysis"
+            result.tool_calls = []
+            result.additional_kwargs = {}
+            return result
+
+        bound_llm = MagicMock()
+        bound_llm.side_effect = capture_invoke
+        llm.bind_tools.return_value = bound_llm
+
+        create_governance_analyst(llm)(dict(_ASHARE_STATE))
+
+        full_text = captured.get("full", "")
+        assert "get_placement_announcements" in full_text
+        assert "get_stock_repurchase" in full_text
+        assert "get_south_flow" in full_text

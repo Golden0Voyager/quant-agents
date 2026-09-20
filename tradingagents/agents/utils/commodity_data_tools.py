@@ -46,3 +46,20 @@ def get_commodity_futures(
         str: A formatted report of futures daily bars
     """
     return route_to_vendor("get_commodity_futures", variety, periods)
+
+
+@tool
+def get_gold_price(
+    periods: Annotated[int, "Number of recent quotes to return (default 60)"] = 60,
+) -> str:
+    """
+    Retrieve SGE gold prices (上海金交所金价): daily evening and morning
+    settlement quotes. Key input for gold miners, jewellery retailers and
+    precious-metals-linked names.
+    Uses the configured commodity_data vendor (smartmoney_db local archive only).
+    Args:
+        periods (int): Number of recent quotes to return (default 60)
+    Returns:
+        str: A formatted table of SGE gold prices
+    """
+    return route_to_vendor("get_gold_price", periods)

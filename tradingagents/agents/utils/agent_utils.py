@@ -8,23 +8,31 @@ from langchain_core.messages import HumanMessage, RemoveMessage
 
 from tradingagents.agents.utils.commodity_data_tools import (  # noqa: F401
     get_commodity_futures,
+    get_gold_price,
     get_lithium_spot,
 )
 
 # Import tools from separate utility files
 from tradingagents.agents.utils.core_stock_tools import (  # noqa: F401
+    get_ah_premium,
+    get_cb_index,
+    get_cb_quotation,
+    get_cb_redeem,
     get_chip_distribution,
+    get_etf_daily,
     get_stock_data,
 )
 from tradingagents.agents.utils.fund_flow_tools import (  # noqa: F401
     get_fund_flow,
     get_margin_trading,
     get_sector_fund_flow,
+    get_south_flow,
 )
 from tradingagents.agents.utils.fundamental_data_tools import (  # noqa: F401
     get_balance_sheet,
     get_cashflow,
     get_dividend_history,
+    get_dividend_summary,
     get_earnings_estimates,
     get_earnings_forecast,
     get_fundamentals,
@@ -38,14 +46,21 @@ from tradingagents.agents.utils.industry_data_tools import (  # noqa: F401
     get_industry_valuation,
 )
 from tradingagents.agents.utils.macro_data_tools import (  # noqa: F401
+    get_central_bank_balance,
     get_cftc_cot,
     get_eia_petroleum,
+    get_fx_rate,
+    get_hk_tech_index,
     get_macro_indicators,
     get_us_macro,
 )
 from tradingagents.agents.utils.market_breadth_tools import (  # noqa: F401
     get_auction_snapshot,
+    get_index_futures_basis,
     get_limit_up_down,
+    get_option_sentiment,
+    get_sector_daily,
+    get_sector_valuation,
     get_short_term_benchmark,
 )
 from tradingagents.agents.utils.market_data_validation_tools import get_verified_market_snapshot  # noqa: F401
@@ -61,9 +76,11 @@ from tradingagents.agents.utils.news_data_tools import (  # noqa: F401
     get_institutional_intelligence,
     get_news,
     get_northbound_hold,
+    get_placement_announcements,
     get_pledge_ratio,
     get_research_reports,
     get_restricted_release,
+    get_stock_repurchase,
 )
 from tradingagents.agents.utils.prediction_markets_tools import get_prediction_markets  # noqa: F401
 from tradingagents.agents.utils.technical_indicators_tools import get_indicators  # noqa: F401

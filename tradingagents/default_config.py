@@ -236,6 +236,13 @@ _BASE_CONFIG = {
         "get_us_macro": "smartmoney_db",
         "get_cftc_cot": "smartmoney_db",
         "get_eia_petroleum": "smartmoney_db",
+        # Full-table coverage methods in categories whose chain excludes the
+        # local archive must be pinned per tool (news_data is akshare,yfinance;
+        # macro_data is akshare,fred).
+        "get_south_flow": "smartmoney_db",
+        "get_hk_tech_index": "smartmoney_db",
+        "get_fx_rate": "smartmoney_db",
+        "get_central_bank_balance": "smartmoney_db",
         # CNINFO is available through the existing AkShare dependency and
         # provides a second announcement index after the local archive.
         "get_company_announcements": "smartmoney_db,cninfo,akshare",

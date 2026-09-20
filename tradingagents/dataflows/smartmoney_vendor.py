@@ -2686,3 +2686,905 @@ def get_eia_petroleum(series_id: str | None = None, periods: int = 156) -> str:
         )
         lines.append(f"| {date} | {cells} |")
     return "\n".join(lines)
+
+
+# ===========================================================================
+# Full-table coverage (全表接入) — events, cross-market, breadth snapshots
+# ===========================================================================
+
+def _available_column_values(table: str, column: str, where: str = "") -> str:
+    """Comma-separated distinct values of *column* for error messages."""
+    available = _df_from_sql(
+        f"SELECT DISTINCT {column} AS v FROM {table} {where} ORDER BY {column}"
+    )
+    if available is None or available.empty:
+        return "N/A"
+    return ", ".join(str(v) for v in available["v"].tolist())
+
+
+def get_placement_announcements(symbol: str, periods: int = 10) -> str:
+    """Fetch private-placement (定增) announcements from quant_core.db."""
+    code = _to_smartmoney_symbol(symbol)
+
+    df = _df_from_sql(
+        """
+        SELECT issue_date AS Date, name, symbol, issue_method
+        FROM placement_announcements
+        WHERE ts_code = ?
+        ORDER BY issue_date DESC
+        LIMIT ?
+        """,
+        (code, max(int(periods), 1)),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            symbol, code,
+            "placement_announcements query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            symbol, code,
+            f"no placement announcements in quant_core.db for {symbol}.",
+        )
+
+    lines = [
+        f"## {symbol.upper()} Placement Announcements (定增公告) "
+        "(source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)} announcements",
+        "",
+        "| Date | Name | Symbol | Method |",
+        "| --- | --- | --- | --- |",
+    ]
+    for _, row in df.iterrows():
+        lines.append(
+            f"| {row['Date']} | {row['name']} | {row['symbol']} | {row['issue_method']} |"
+        )
+    return "\n".join(lines)
+
+
+def get_stock_repurchase(symbol: str, periods: int = 10) -> str:
+    """Fetch share-repurchase (回购) announcements from quant_core.db."""
+    code = _to_smartmoney_symbol(symbol)
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, stock_name, repurchase_amount,
+               repurchase_price, repurchase_price_lower, repurchase_price_upper,
+               repurchase_quantity, progress_status
+        FROM stock_repurchase
+        WHERE stock_code = ?
+        ORDER BY trade_date DESC
+        LIMIT ?
+        """,
+        (code, max(int(periods), 1)),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            symbol, code,
+            "stock_repurchase query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            symbol, code,
+            f"no repurchase announcements in quant_core.db for {symbol}.",
+        )
+
+    def _fmt(value) -> str:
+        return f"{value:,.2f}" if pd.notna(value) else "N/A"
+
+    lines = [
+        f"## {symbol.upper()} Share Repurchase (回购公告) "
+        "(source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)} announcements",
+        "",
+    ]
+    for _, row in df.iterrows():
+        lines.append(f"**Date**: {row['Date']} [{row['progress_status']}]")
+        lines.append(f"- 回购金额: {_fmt(row['repurchase_amount'])}")
+        lines.append(
+            f"- 回购价格: {_fmt(row['repurchase_price'])} "
+            f"(区间 {_fmt(row['repurchase_price_lower'])} ~ {_fmt(row['repurchase_price_upper'])})"
+        )
+        lines.append(f"- 回购数量: {_fmt(row['repurchase_quantity'])}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def get_dividend_summary(symbol: str) -> str:
+    """Fetch the dividend & fundraising overview (分红募资总览) for one stock."""
+    code = _to_smartmoney_symbol(symbol)
+
+    df = _df_from_sql(
+        """
+        SELECT name, list_date, cumulative_dividend, avg_annual_dividend,
+               dividend_count, total_raise_amount, raise_count
+        FROM dividend_summary
+        WHERE ts_code = ?
+        """,
+        (code,),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            symbol, code,
+            "dividend_summary query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            symbol, code,
+            f"no dividend summary in quant_core.db for {symbol}.",
+        )
+
+    row = df.iloc[0]
+
+    def _fmt(value) -> str:
+        return f"{value:,.2f}" if pd.notna(value) else "N/A"
+
+    return "\n".join([
+        f"## {symbol.upper()} Dividend & Fundraising Summary (分红募资总览) "
+        "(source: quant_core.db / local SQLite)",
+        f"- 名称: {row['name']}",
+        f"- 上市日期: {row['list_date']}",
+        f"- 累计分红: {_fmt(row['cumulative_dividend'])} (年均 {_fmt(row['avg_annual_dividend'])}, 共 {row['dividend_count']} 次)",
+        f"- 累计募资: {_fmt(row['total_raise_amount'])} (共 {row['raise_count']} 次)",
+    ])
+
+
+def get_ah_premium(symbol: str, periods: int = 60) -> str:
+    """Fetch the A/H premium series (AH溢价) for one stock."""
+    code = _to_smartmoney_symbol(symbol)
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, h_code, a_price, h_price, premium
+        FROM ah_premium
+        WHERE ts_code = ?
+        ORDER BY trade_date DESC
+        LIMIT ?
+        """,
+        (code, max(int(periods), 1)),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            symbol, code,
+            "ah_premium query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            symbol, code,
+            f"no A/H premium data in quant_core.db for {symbol} (A-share only).",
+        )
+
+    df = df.iloc[::-1].reset_index(drop=True)
+
+    def _fmt(value) -> str:
+        return f"{value:,.2f}" if pd.notna(value) else "N/A"
+
+    lines = [
+        f"## {symbol.upper()} A/H Premium (AH溢价) "
+        "(source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)} trading days",
+        "",
+        "| Date | H Code | A Price | H Price | Premium |",
+        "| --- | --- | ---: | ---: | ---: |",
+    ]
+    for _, row in df.iterrows():
+        lines.append(
+            f"| {row['Date']} | {row['h_code']} | {_fmt(row['a_price'])} "
+            f"| {_fmt(row['h_price'])} | {_fmt(row['premium'])} |"
+        )
+    return "\n".join(lines)
+
+
+def get_gold_price(periods: int = 60) -> str:
+    """Fetch SGE gold prices (SGE金价) from quant_core.db."""
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, trading_time, evening_price, morning_price
+        FROM gold_price
+        ORDER BY trade_date DESC, trading_time DESC
+        LIMIT ?
+        """,
+        (max(int(periods), 1),),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            "gold_price",
+            detail="gold_price query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            "gold_price",
+            detail="no gold price data in quant_core.db.",
+        )
+
+    df = df.iloc[::-1].reset_index(drop=True)
+
+    def _fmt(value) -> str:
+        return f"{value:,.2f}" if pd.notna(value) else "N/A"
+
+    lines = [
+        "## SGE Gold Price (SGE 金价) (source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)} quotes",
+        "",
+        "| Date | Evening | Morning |",
+        "| --- | ---: | ---: |",
+    ]
+    for _, row in df.iterrows():
+        lines.append(
+            f"| {row['Date']} | {_fmt(row['evening_price'])} | {_fmt(row['morning_price'])} |"
+        )
+    return "\n".join(lines)
+
+
+def get_hk_tech_index(periods: int = 120) -> str:
+    """Fetch the Hang Seng Tech Index (恒生科技指数) daily bars."""
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, open AS Open, high AS High, low AS Low,
+               close AS Close, change_pct AS ChangePct, volume AS Volume,
+               amount AS Amount
+        FROM hk_tech_index_daily
+        ORDER BY trade_date DESC
+        LIMIT ?
+        """,
+        (max(int(periods), 1),),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            "hk_tech_index",
+            detail="hk_tech_index_daily query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            "hk_tech_index",
+            detail="no Hang Seng Tech index data in quant_core.db.",
+        )
+
+    df = df.iloc[::-1].set_index("Date")
+    for col in ("Open", "High", "Low", "Close", "ChangePct", "Volume", "Amount"):
+        df[col] = pd.to_numeric(df[col], errors="coerce").round(4)
+
+    header = (
+        "## Hang Seng Tech Index (恒生科技指数日线)\n"
+        f"# Total records: {len(df)} trading days\n"
+        "# Source: quant_core.db / hk_tech_index_daily (local SQLite)\n\n"
+    )
+    return header + df.to_csv()
+
+
+def get_fx_rate(currency: str = "美元", periods: int = 60) -> str:
+    """Fetch onshore CNY central-parity quotes (在岸人民币牌价) from quant_core.db."""
+    name = currency.strip()
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, currency, central_parity_rate,
+               bank_buy_price, cash_buy_price, cash_sell_price, boc_convert_price
+        FROM fx_rate
+        WHERE currency = ?
+        ORDER BY trade_date DESC
+        LIMIT ?
+        """,
+        (name, max(int(periods), 1)),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            currency, name,
+            "fx_rate query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            currency, name,
+            f"no fx rate data in quant_core.db for currency {name!r}. "
+            f"Available currencies: {_available_column_values('fx_rate', 'currency')}.",
+        )
+
+    df = df.iloc[::-1].reset_index(drop=True)
+
+    def _fmt(value) -> str:
+        return f"{value:,.4f}" if pd.notna(value) else "N/A"
+
+    lines = [
+        f"## CNY FX Rate — {name} (在岸人民币牌价) "
+        "(source: quant_core.db / local SQLite, 中行牌价)",
+        f"Total records: {len(df)} days",
+        "",
+        "| Date | Central Parity | Bank Buy | Cash Buy | Cash Sell | BOC Convert |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for _, row in df.iterrows():
+        lines.append(
+            f"| {row['Date']} | {_fmt(row['central_parity_rate'])} | {_fmt(row['bank_buy_price'])} "
+            f"| {_fmt(row['cash_buy_price'])} | {_fmt(row['cash_sell_price'])} | {_fmt(row['boc_convert_price'])} |"
+        )
+    return "\n".join(lines)
+
+
+def get_cb_quotation() -> str:
+    """Fetch the convertible-bond snapshot (可转债行情), top 50 by double-low.
+
+    Double-low (双低值 = price + premium) ascending is the classic cheap-CB
+    ranking; distressed bonds with nonsensical values sort to the front, so
+    bonds priced below 50 are excluded as delisted/junk artefacts.
+    """
+    df = _df_from_sql(
+        """
+        SELECT ts_code, bond_name, price, premium, double_low, expire_date
+        FROM cb_quotation
+        WHERE double_low IS NOT NULL AND price >= 50
+        ORDER BY double_low ASC
+        LIMIT 50
+        """,
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            "cb_quotation",
+            detail="cb_quotation query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            "cb_quotation",
+            detail="no convertible-bond quotation data in quant_core.db.",
+        )
+
+    def _fmt(value) -> str:
+        return f"{value:,.2f}" if pd.notna(value) else "N/A"
+
+    lines = [
+        "## Convertible Bond Quotation (可转债行情, 双低前50) "
+        "(source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)} bonds (double-low ascending, price >= 50)",
+        "",
+        "| Code | Name | Price | Premium | Double Low | Expire |",
+        "| --- | --- | ---: | ---: | ---: | --- |",
+    ]
+    for _, row in df.iterrows():
+        lines.append(
+            f"| {row['ts_code']} | {row['bond_name']} | {_fmt(row['price'])} "
+            f"| {_fmt(row['premium'])} | {_fmt(row['double_low'])} | {row['expire_date']} |"
+        )
+    return "\n".join(lines)
+
+
+def get_cb_redeem() -> str:
+    """Fetch convertible bonds with an active redemption flag (可转债强赎状态)."""
+    df = _df_from_sql(
+        """
+        SELECT ts_code, bond_name, redeem_flag, redeem_price, redeem_date
+        FROM cb_redeem
+        WHERE redeem_flag IS NOT NULL AND redeem_flag != ''
+        ORDER BY ts_code
+        """,
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            "cb_redeem",
+            detail="cb_redeem query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            "cb_redeem",
+            detail="no convertible bonds with an active redemption flag in quant_core.db.",
+        )
+
+    def _fmt(value) -> str:
+        return f"{value:,.2f}" if pd.notna(value) else "N/A"
+
+    lines = [
+        "## Convertible Bond Redemption Flags (可转债强赎/不强赎公告) "
+        "(source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)} bonds",
+        "",
+        "| Code | Name | Flag | Redeem Price | Redeem Date |",
+        "| --- | --- | --- | ---: | --- |",
+    ]
+    for _, row in df.iterrows():
+        lines.append(
+            f"| {row['ts_code']} | {row['bond_name']} | {row['redeem_flag']} "
+            f"| {_fmt(row['redeem_price'])} | {row['redeem_date']} |"
+        )
+    return "\n".join(lines)
+
+
+def get_cb_index(index_code: str | None = None, periods: int = 120) -> str:
+    """Fetch convertible-bond index (转债指数) daily bars from quant_core.db."""
+    limit = max(int(periods), 1)
+
+    if index_code:
+        code = index_code.strip()
+        df = _df_from_sql(
+            """
+            SELECT trade_date AS Date, index_name, open AS Open, high AS High,
+                   low AS Low, close AS Close, volume AS Volume
+            FROM cb_index
+            WHERE index_code = ? AND index_code != ''
+            ORDER BY trade_date DESC
+            LIMIT ?
+            """,
+            (code, limit),
+        )
+
+        if df is None:
+            raise NoMarketDataError(
+                index_code, code,
+                "cb_index query failed in quant_core.db (table missing or schema mismatch).",
+            )
+
+        if df.empty:
+            known = _available_column_values("cb_index", "index_code", "WHERE index_code != ''")
+            raise NoMarketDataError(
+                index_code, code,
+                f"no cb_index data in quant_core.db for index {code!r}. "
+                f"Available index codes: {known}.",
+            )
+
+        df = df.iloc[::-1].set_index("Date")
+        name = df["index_name"].dropna().iloc[-1] if df["index_name"].notna().any() else code
+        df = df.drop(columns=["index_name"])
+        for col in ("Open", "High", "Low", "Close", "Volume"):
+            df[col] = pd.to_numeric(df[col], errors="coerce").round(4)
+
+        header = (
+            f"## CB Index {code} ({name}) (source: quant_core.db / local SQLite)\n"
+            f"# Total records: {len(df)} trading days\n\n"
+        )
+        return header + df.to_csv()
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, index_code, index_name, close AS Close
+        FROM cb_index
+        WHERE index_code != ''
+        ORDER BY trade_date DESC
+        LIMIT ?
+        """,
+        (limit * 5,),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            "cb_index",
+            detail="cb_index query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            "cb_index",
+            detail="no cb_index data in quant_core.db.",
+        )
+
+    df["Label"] = df["index_code"] + " " + df["index_name"].fillna("")
+    pivot = df.pivot_table(index="Date", columns="Label", values="Close", aggfunc="last")
+    pivot = pivot.sort_index(ascending=False).head(limit).iloc[::-1]
+
+    lines = [
+        "## CB Index Daily (转债指数) (source: quant_core.db / local SQLite)",
+        f"Total records: {len(pivot)} days x {len(pivot.columns)} indices",
+        "",
+        "| Date | " + " | ".join(pivot.columns) + " |",
+        "| --- |" + " ---: |" * len(pivot.columns),
+    ]
+    for date, row in pivot.iterrows():
+        cells = " | ".join(f"{row[col]:,.2f}" if pd.notna(row[col]) else "N/A" for col in pivot.columns)
+        lines.append(f"| {date} | {cells} |")
+    return "\n".join(lines)
+
+
+def get_etf_daily(ts_code: str, periods: int = 120) -> str:
+    """Fetch ETF daily bars (ETF日线) from quant_core.db."""
+    code = _to_smartmoney_symbol(ts_code)
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, name, open AS Open, high AS High, low AS Low,
+               close AS Close, volume AS Volume, amount AS Amount, adj_factor
+        FROM etf_daily
+        WHERE ts_code = ?
+        ORDER BY trade_date DESC
+        LIMIT ?
+        """,
+        (code, max(int(periods), 1)),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            ts_code, code,
+            "etf_daily query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            ts_code, code,
+            f"no ETF daily data in quant_core.db for {code!r}. "
+            f"Available ETF codes: {_available_column_values('etf_daily', 'ts_code')}.",
+        )
+
+    df = df.iloc[::-1].set_index("Date")
+    name = df["name"].dropna().iloc[-1] if df["name"].notna().any() else code
+    df = df.drop(columns=["name"])
+    for col in ("Open", "High", "Low", "Close", "Volume", "Amount", "adj_factor"):
+        df[col] = pd.to_numeric(df[col], errors="coerce").round(4)
+
+    header = (
+        f"## ETF {code} ({name}) Daily (source: quant_core.db / local SQLite)\n"
+        f"# Total records: {len(df)} trading days\n\n"
+    )
+    return header + df.to_csv()
+
+
+def get_option_sentiment(periods: int = 60) -> str:
+    """Fetch 50ETF option sentiment (期权情绪: QVIX, PCR, volumes, OI)."""
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, qvix, pcr, put_volume, call_volume,
+               put_oi, call_oi, implied_vol_avg
+        FROM option_sentiment
+        ORDER BY trade_date DESC
+        LIMIT ?
+        """,
+        (max(int(periods), 1),),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            "option_sentiment",
+            detail="option_sentiment query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            "option_sentiment",
+            detail="no option sentiment data in quant_core.db.",
+        )
+
+    df = df.iloc[::-1].reset_index(drop=True)
+
+    def _fmt(value, digits: int = 2) -> str:
+        return f"{value:,.{digits}f}" if pd.notna(value) else "N/A"
+
+    def _fmt_int(value) -> str:
+        return f"{value:,.0f}" if pd.notna(value) else "N/A"
+
+    lines = [
+        "## Option Sentiment — 50ETF options (期权情绪) "
+        "(source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)} trading days",
+        "",
+        "| Date | QVIX | PCR | Put Vol | Call Vol | Put OI | Call OI | IV Avg |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for _, row in df.iterrows():
+        lines.append(
+            f"| {row['Date']} | {_fmt(row['qvix'])} | {_fmt(row['pcr'])} "
+            f"| {_fmt_int(row['put_volume'])} | {_fmt_int(row['call_volume'])} "
+            f"| {_fmt_int(row['put_oi'])} | {_fmt_int(row['call_oi'])} | {_fmt(row['implied_vol_avg'])} |"
+        )
+    return "\n".join(lines)
+
+
+def get_south_flow(market: str | None = None, periods: int = 60) -> str:
+    """Fetch southbound (南向资金) daily flow from quant_core.db."""
+    limit = max(int(periods), 1)
+
+    if market:
+        name = market.strip()
+        df = _df_from_sql(
+            """
+            SELECT trade_date AS Date, net_buy_amount, buy_amount, sell_amount, cumulative_net_buy
+            FROM south_flow
+            WHERE market = ? AND market != ''
+            ORDER BY trade_date DESC
+            LIMIT ?
+            """,
+            (name, limit),
+        )
+
+        if df is None:
+            raise NoMarketDataError(
+                market, name,
+                "south_flow query failed in quant_core.db (table missing or schema mismatch).",
+            )
+
+        if df.empty:
+            known = _available_column_values("south_flow", "market", "WHERE market != ''")
+            raise NoMarketDataError(
+                market, name,
+                f"no south-flow data in quant_core.db for market {name!r}. "
+                f"Available markets: {known}.",
+            )
+
+        df = df.iloc[::-1].reset_index(drop=True)
+
+        def _fmt(value) -> str:
+            return f"{value:,.2f}" if pd.notna(value) else "N/A"
+
+        lines = [
+            f"## Southbound Flow — {name} (南向资金) "
+            "(source: quant_core.db / local SQLite)",
+            f"Total records: {len(df)} trading days",
+            "",
+            "| Date | Net Buy | Buy | Sell | Cumulative Net Buy |",
+            "| --- | ---: | ---: | ---: | ---: |",
+        ]
+        for _, row in df.iterrows():
+            lines.append(
+                f"| {row['Date']} | {_fmt(row['net_buy_amount'])} | {_fmt(row['buy_amount'])} "
+                f"| {_fmt(row['sell_amount'])} | {_fmt(row['cumulative_net_buy'])} |"
+            )
+        return "\n".join(lines)
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, market, net_buy_amount
+        FROM south_flow
+        WHERE market != ''
+        ORDER BY trade_date DESC
+        LIMIT ?
+        """,
+        (limit * 5,),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            "south_flow",
+            detail="south_flow query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            "south_flow",
+            detail="no south-flow data in quant_core.db.",
+        )
+
+    pivot = df.pivot_table(index="Date", columns="market", values="net_buy_amount", aggfunc="last")
+    pivot = pivot.sort_index(ascending=False).head(limit).iloc[::-1]
+
+    lines = [
+        "## Southbound Flow (南向资金) (source: quant_core.db / local SQLite)",
+        f"Total records: {len(pivot)} days x {len(pivot.columns)} markets",
+        "",
+        "| Date | " + " | ".join(pivot.columns) + " |",
+        "| --- |" + " ---: |" * len(pivot.columns),
+    ]
+    for date, row in pivot.iterrows():
+        cells = " | ".join(f"{row[col]:,.2f}" if pd.notna(row[col]) else "N/A" for col in pivot.columns)
+        lines.append(f"| {date} | {cells} |")
+    return "\n".join(lines)
+
+
+def get_index_futures_basis(futures_code: str | None = None, periods: int = 60) -> str:
+    """Fetch index-futures basis (期指基差: IF/IC/IM/IH) from quant_core.db."""
+    limit = max(int(periods), 1)
+
+    if futures_code:
+        code = futures_code.strip().upper()
+        df = _df_from_sql(
+            """
+            SELECT trade_date AS Date, futures_price, index_price, basis, basis_pct
+            FROM index_futures_basis
+            WHERE futures_code = ?
+            ORDER BY trade_date DESC
+            LIMIT ?
+            """,
+            (code, limit),
+        )
+
+        if df is None:
+            raise NoMarketDataError(
+                futures_code, code,
+                "index_futures_basis query failed in quant_core.db (table missing or schema mismatch).",
+            )
+
+        if df.empty:
+            raise NoMarketDataError(
+                futures_code, code,
+                f"no index-futures basis data in quant_core.db for {code!r}. "
+                f"Available futures codes: {_available_column_values('index_futures_basis', 'futures_code')}.",
+            )
+
+        df = df.iloc[::-1].reset_index(drop=True)
+
+        def _fmt(value, digits: int = 2) -> str:
+            return f"{value:,.{digits}f}" if pd.notna(value) else "N/A"
+
+        lines = [
+            f"## Index Futures Basis — {code} (期指基差) "
+            "(source: quant_core.db / local SQLite)",
+            f"Total records: {len(df)} trading days",
+            "",
+            "| Date | Futures | Index | Basis | Basis % |",
+            "| --- | ---: | ---: | ---: | ---: |",
+        ]
+        for _, row in df.iterrows():
+            lines.append(
+                f"| {row['Date']} | {_fmt(row['futures_price'])} | {_fmt(row['index_price'])} "
+                f"| {_fmt(row['basis'])} | {_fmt(row['basis_pct'])} |"
+            )
+        return "\n".join(lines)
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, futures_code, basis_pct
+        FROM index_futures_basis
+        ORDER BY trade_date DESC
+        LIMIT ?
+        """,
+        (limit * 10,),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            "index_futures_basis",
+            detail="index_futures_basis query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            "index_futures_basis",
+            detail="no index-futures basis data in quant_core.db.",
+        )
+
+    pivot = df.pivot_table(index="Date", columns="futures_code", values="basis_pct", aggfunc="last")
+    pivot = pivot.sort_index(ascending=False).head(limit).iloc[::-1]
+
+    lines = [
+        "## Index Futures Basis % (期指基差) (source: quant_core.db / local SQLite)",
+        f"Total records: {len(pivot)} days x {len(pivot.columns)} contracts",
+        "Negative = futures discount (bearish sentiment); call with a futures_code for absolute basis.",
+        "",
+        "| Date | " + " | ".join(pivot.columns) + " |",
+        "| --- |" + " ---: |" * len(pivot.columns),
+    ]
+    for date, row in pivot.iterrows():
+        cells = " | ".join(f"{row[col]:,.2f}" if pd.notna(row[col]) else "N/A" for col in pivot.columns)
+        lines.append(f"| {date} | {cells} |")
+    return "\n".join(lines)
+
+
+def get_sector_daily(sector_name: str, periods: int = 120) -> str:
+    """Fetch sector daily bars (板块日线) from quant_core.db."""
+    name = sector_name.strip()
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, open AS Open, high AS High, low AS Low,
+               close AS Close, volume AS Volume, amount AS Amount, pct_change AS ChangePct
+        FROM sector_daily
+        WHERE sector_name = ?
+        ORDER BY trade_date DESC
+        LIMIT ?
+        """,
+        (name, max(int(periods), 1)),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            sector_name, name,
+            "sector_daily query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            sector_name, name,
+            f"no sector_daily data in quant_core.db for sector {name!r}. "
+            f"Available sectors include: {_available_column_values('sector_daily', 'sector_name')[:300]}.",
+        )
+
+    df = df.iloc[::-1].set_index("Date")
+    for col in ("Open", "High", "Low", "Close", "Volume", "Amount", "ChangePct"):
+        df[col] = pd.to_numeric(df[col], errors="coerce").round(4)
+
+    header = (
+        f"## Sector {name} Daily (板块日线) (source: quant_core.db / local SQLite)\n"
+        f"# Total records: {len(df)} trading days\n\n"
+    )
+    return header + df.to_csv()
+
+
+def get_sector_valuation(sector_name: str, periods: int = 120) -> str:
+    """Fetch sector valuation (板块估值: PE/PB/总市值) from quant_core.db."""
+    name = sector_name.strip()
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, pe, pb, total_mv
+        FROM sector_valuation
+        WHERE sector_name = ?
+        ORDER BY trade_date DESC
+        LIMIT ?
+        """,
+        (name, max(int(periods), 1)),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            sector_name, name,
+            "sector_valuation query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            sector_name, name,
+            f"no sector_valuation data in quant_core.db for sector {name!r}. "
+            f"Available sectors include: {_available_column_values('sector_valuation', 'sector_name')[:300]}.",
+        )
+
+    df = df.iloc[::-1].reset_index(drop=True)
+
+    def _fmt(value) -> str:
+        return f"{value:,.2f}" if pd.notna(value) else "N/A"
+
+    lines = [
+        f"## Sector {name} Valuation (板块估值) (source: quant_core.db / local SQLite)",
+        f"Total records: {len(df)} days",
+        "",
+        "| Date | PE | PB | Total MV |",
+        "| --- | ---: | ---: | ---: |",
+    ]
+    for _, row in df.iterrows():
+        lines.append(f"| {row['Date']} | {_fmt(row['pe'])} | {_fmt(row['pb'])} | {_fmt(row['total_mv'])} |")
+    return "\n".join(lines)
+
+
+_CBB_COLUMN_LEGEND = (
+    "Column legend: total_assets=总资产, reserve_money=储备货币, currency_issue=货币发行, "
+    "claims_on_other_deposit=对其他存款性公司债权, claims_on_gov=对政府债权, "
+    "gov_deposits=政府存款, foreign_assets=国外资产, fx_reserve=外汇储备(亿美元)"
+)
+
+
+def get_central_bank_balance(periods: int = 36) -> str:
+    """Fetch the PBOC balance sheet (央行资产负债表, 月频) from quant_core.db."""
+    df = _df_from_sql(
+        """
+        SELECT date AS Date, total_assets, reserve_money, currency_issue,
+               claims_on_other_deposit, claims_on_gov, gov_deposits,
+               foreign_assets, fx_reserve
+        FROM central_bank_balance
+        ORDER BY date DESC
+        LIMIT ?
+        """,
+        (max(int(periods), 1),),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            "central_bank_balance",
+            detail="central_bank_balance query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            "central_bank_balance",
+            detail="no central bank balance sheet data in quant_core.db.",
+        )
+
+    df = df.iloc[::-1].set_index("Date")
+    for col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors="coerce").round(2)
+
+    header = (
+        "## PBOC Balance Sheet (央行资产负债表, 月频)\n"
+        f"# Total records: {len(df)} months\n"
+        "# Source: quant_core.db / central_bank_balance (local SQLite)\n"
+        f"# {_CBB_COLUMN_LEGEND}\n\n"
+    )
+    return header + df.to_csv()

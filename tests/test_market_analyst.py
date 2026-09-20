@@ -410,3 +410,51 @@ class TestMarketAnalystGlobalMacroGuidance:
         full_text = self._system_message()
         assert "XLE" in full_text
         assert "^SOX" in full_text
+
+
+# ===================================================================
+# Full-table coverage tools
+# ===================================================================
+
+
+_ASHARE_STATE = {**_BASE_STATE, "company_of_interest": "600519.SS", "company_name": "贵州茅台"}
+
+
+@pytest.mark.unit
+class TestMarketFullCoverageTools:
+    def test_market_tools_bound(self):
+        llm = _make_llm()
+        create_market_analyst(llm)(dict(_ASHARE_STATE))
+        bound = llm.bind_tools.call_args[0][0]
+        names = [tool.name for tool in bound]
+        for expected in (
+            "get_option_sentiment",
+            "get_ah_premium",
+            "get_etf_daily",
+            "get_cb_quotation",
+            "get_cb_redeem",
+            "get_cb_index",
+        ):
+            assert expected in names, expected
+
+    def test_tool_guidance_mentions_new_tools(self):
+        llm = MagicMock()
+        captured = {}
+
+        def capture_invoke(messages):
+            captured["full"] = str(messages)
+            result = MagicMock()
+            result.content = "Analysis"
+            result.tool_calls = []
+            result.additional_kwargs = {}
+            return result
+
+        bound_llm = MagicMock()
+        bound_llm.side_effect = capture_invoke
+        llm.bind_tools.return_value = bound_llm
+
+        create_market_analyst(llm)(dict(_ASHARE_STATE))
+
+        full_text = captured.get("full", "")
+        for expected in ("get_option_sentiment", "get_ah_premium", "get_cb_redeem"):
+            assert expected in full_text, expected

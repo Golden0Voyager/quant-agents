@@ -151,6 +151,130 @@ _POLICIES: dict[str, ToolPolicy] = {
         impact="medium",
         allowed_vendors=("smartmoney_db",),
     ),
+    # Full-table coverage — per-stock A-share archive tables (governance /
+    # shareholder-return events): applicable to A-shares only, local vendor
+    # only, and latest_snapshot keeps symbol/periods out of date rewriting.
+    "get_placement_announcements": ToolPolicy(
+        applicable_markets=frozenset({"XSHG"}),
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
+    "get_stock_repurchase": ToolPolicy(
+        applicable_markets=frozenset({"XSHG"}),
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
+    "get_dividend_summary": ToolPolicy(
+        applicable_markets=frozenset({"XSHG"}),
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
+    "get_ah_premium": ToolPolicy(
+        applicable_markets=frozenset({"XSHG"}),
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
+    "get_etf_daily": ToolPolicy(
+        applicable_markets=frozenset({"XSHG"}),
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
+    # Full-table coverage — market-level archive tables: market-agnostic
+    # context, applicable wherever the analysts run (macro convention).
+    "get_gold_price": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
+    "get_hk_tech_index": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
+    "get_fx_rate": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
+    "get_cb_quotation": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
+    "get_cb_redeem": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
+    "get_cb_index": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
+    "get_option_sentiment": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
+    "get_south_flow": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
+    "get_index_futures_basis": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
+    "get_sector_daily": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
+    "get_sector_valuation": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
+    "get_central_bank_balance": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
     # Commodity spot/futures are market-agnostic industry context archived
     # only in quant_core.db (no akshare/hithink equivalent); the variety code
     # is not a ticker, so latest_snapshot keeps it out of date rewriting.

@@ -159,3 +159,20 @@ def get_earnings_forecast(
     Provides YoY net profit change expectations and performance pre-announcements.
     """
     return route_to_vendor("get_earnings_forecast", ticker)
+
+
+@tool
+def get_dividend_summary(
+    symbol: Annotated[str, "A-share ticker e.g. 600519.SS"],
+) -> str:
+    """
+    Retrieve the dividend & fundraising overview (分红募资总览) for a ticker:
+    cumulative dividends, average annual dividend, dividend count, total
+    raised amount and raise count since listing.
+    Uses the configured shareholder_return vendor (smartmoney_db local archive only).
+    Args:
+        symbol (str): A-share ticker e.g. 600519.SS
+    Returns:
+        str: A formatted overview of dividends and fundraising
+    """
+    return route_to_vendor("get_dividend_summary", symbol)

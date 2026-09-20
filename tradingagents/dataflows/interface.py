@@ -99,24 +99,35 @@ from .runtime_context import (
 # Polymarket removed — prediction markets are US-only and inapplicable to A-shares.
 # The get_prediction_markets method degraded via OPTIONAL_CATEGORIES → DATA_UNAVAILABLE sentinel.
 from .smartmoney_vendor import (
+    get_ah_premium as get_smartmoney_ah_premium,
     get_balance_sheet as get_smartmoney_balance_sheet,
     get_block_trade as get_smartmoney_block_trade,
     get_cashflow as get_smartmoney_cashflow,
+    get_cb_index as get_smartmoney_cb_index,
+    get_cb_quotation as get_smartmoney_cb_quotation,
+    get_cb_redeem as get_smartmoney_cb_redeem,
+    get_central_bank_balance as get_smartmoney_central_bank_balance,
     get_cftc_cot as get_smartmoney_cftc_cot,
     get_chip_distribution as get_smartmoney_chip_distribution,
     get_commodity_futures as get_smartmoney_commodity_futures,
     get_company_announcements as get_smartmoney_company_announcements,
     get_concept_board as get_smartmoney_concept_board,
+    get_dividend_summary as get_smartmoney_dividend_summary,
     get_dragon_tiger as get_smartmoney_dragon_tiger,
     get_earnings_estimates as get_smartmoney_earnings_estimates,
     get_earnings_forecast as get_smartmoney_earnings_forecast,
     get_eia_petroleum as get_smartmoney_eia_petroleum,
+    get_etf_daily as get_smartmoney_etf_daily,
     get_fund_flow as get_smartmoney_fund_flow,
     get_fundamentals as get_smartmoney_fundamentals,
+    get_fx_rate as get_smartmoney_fx_rate,
     get_global_asset_data as get_smartmoney_global_asset_data,
+    get_gold_price as get_smartmoney_gold_price,
     get_historical_valuation as get_smartmoney_historical_valuation,
+    get_hk_tech_index as get_smartmoney_hk_tech_index,
     get_income_statement as get_smartmoney_income_statement,
     get_index_daily as get_smartmoney_index_daily,
+    get_index_futures_basis as get_smartmoney_index_futures_basis,
     get_indicators as get_smartmoney_indicators,
     get_industry_valuation as get_smartmoney_industry_valuation,
     get_insider_transactions as get_smartmoney_insider_transactions,
@@ -128,11 +139,17 @@ from .smartmoney_vendor import (
     get_margin_trading as get_smartmoney_margin_trading,
     get_news as get_smartmoney_news,
     get_northbound_hold as get_smartmoney_northbound_hold,
+    get_option_sentiment as get_smartmoney_option_sentiment,
+    get_placement_announcements as get_smartmoney_placement_announcements,
     get_pledge_ratio as get_smartmoney_pledge_ratio,
     get_research_reports as get_smartmoney_research_reports,
+    get_sector_daily as get_smartmoney_sector_daily,
     get_sector_fund_flow as get_smartmoney_sector_fund_flow,
+    get_sector_valuation as get_smartmoney_sector_valuation,
     get_shareholder_count as get_smartmoney_shareholder_count,
+    get_south_flow as get_smartmoney_south_flow,
     get_stock_data as get_smartmoney_stock_data,
+    get_stock_repurchase as get_smartmoney_stock_repurchase,
     get_us_macro as get_smartmoney_us_macro,
 )
 from .tushare_vendor import (
@@ -199,6 +216,11 @@ TOOLS_CATEGORIES = {
         "tools": [
             "get_stock_data",
             "get_index_daily",
+            "get_ah_premium",
+            "get_etf_daily",
+            "get_cb_quotation",
+            "get_cb_redeem",
+            "get_cb_index",
         ]
     },
     "technical_indicators": {
@@ -208,6 +230,10 @@ TOOLS_CATEGORIES = {
             "get_fund_flow",
             "get_sector_fund_flow",
             "get_limit_up_down",
+            "get_option_sentiment",
+            "get_index_futures_basis",
+            "get_sector_daily",
+            "get_sector_valuation",
         ]
     },
     "fundamental_data": {
@@ -231,6 +257,7 @@ TOOLS_CATEGORIES = {
             "get_restricted_release",
             "get_institutional_holdings",
             "get_northbound_hold",
+            "get_south_flow",
         ]
     },
     "governance_risk": {
@@ -241,12 +268,15 @@ TOOLS_CATEGORIES = {
             "get_margin_trading",
             "get_dragon_tiger",
             "get_block_trade",
+            "get_placement_announcements",
+            "get_stock_repurchase",
         ]
     },
     "shareholder_return": {
         "description": "Dividend and shareholder return data",
         "tools": [
             "get_dividend_history",
+            "get_dividend_summary",
         ]
     },
     "research_opinion": {
@@ -262,6 +292,9 @@ TOOLS_CATEGORIES = {
             "get_us_macro",
             "get_cftc_cot",
             "get_eia_petroleum",
+            "get_hk_tech_index",
+            "get_fx_rate",
+            "get_central_bank_balance",
         ]
     },
     "commodity_data": {
@@ -269,6 +302,7 @@ TOOLS_CATEGORIES = {
         "tools": [
             "get_lithium_spot",
             "get_commodity_futures",
+            "get_gold_price",
         ]
     },
     "prediction_markets": {
@@ -801,6 +835,53 @@ _METHOD_PARAMETER_SCHEMAS: dict[str, tuple[tuple[str, Any], ...]] = {
         ("series_id", None),
         ("periods", 156),
     ),
+    "get_placement_announcements": (
+        ("symbol", _REQUIRED_PARAMETER),
+        ("periods", 10),
+    ),
+    "get_stock_repurchase": (
+        ("symbol", _REQUIRED_PARAMETER),
+        ("periods", 10),
+    ),
+    "get_dividend_summary": (("symbol", _REQUIRED_PARAMETER),),
+    "get_ah_premium": (
+        ("symbol", _REQUIRED_PARAMETER),
+        ("periods", 60),
+    ),
+    "get_gold_price": (("periods", 60),),
+    "get_hk_tech_index": (("periods", 120),),
+    "get_fx_rate": (
+        ("currency", "美元"),
+        ("periods", 60),
+    ),
+    "get_cb_quotation": (),
+    "get_cb_redeem": (),
+    "get_cb_index": (
+        ("index_code", None),
+        ("periods", 120),
+    ),
+    "get_etf_daily": (
+        ("ts_code", _REQUIRED_PARAMETER),
+        ("periods", 120),
+    ),
+    "get_option_sentiment": (("periods", 60),),
+    "get_south_flow": (
+        ("market", None),
+        ("periods", 60),
+    ),
+    "get_index_futures_basis": (
+        ("futures_code", None),
+        ("periods", 60),
+    ),
+    "get_sector_daily": (
+        ("sector_name", _REQUIRED_PARAMETER),
+        ("periods", 120),
+    ),
+    "get_sector_valuation": (
+        ("sector_name", _REQUIRED_PARAMETER),
+        ("periods", 120),
+    ),
+    "get_central_bank_balance": (("periods", 36),),
     "get_lithium_spot": (("periods", 60),),
     "get_commodity_futures": (
         ("variety", _REQUIRED_PARAMETER),
@@ -1128,6 +1209,59 @@ VENDOR_METHODS: dict[str, dict[str, Any]] = {
     "get_eia_petroleum": {
         "smartmoney_db": get_smartmoney_eia_petroleum,
     },
+    # full-table coverage — local archive only; no online vendor implements
+    # these tables, so each method registers smartmoney_db alone.
+    "get_placement_announcements": {
+        "smartmoney_db": get_smartmoney_placement_announcements,
+    },
+    "get_stock_repurchase": {
+        "smartmoney_db": get_smartmoney_stock_repurchase,
+    },
+    "get_dividend_summary": {
+        "smartmoney_db": get_smartmoney_dividend_summary,
+    },
+    "get_ah_premium": {
+        "smartmoney_db": get_smartmoney_ah_premium,
+    },
+    "get_gold_price": {
+        "smartmoney_db": get_smartmoney_gold_price,
+    },
+    "get_hk_tech_index": {
+        "smartmoney_db": get_smartmoney_hk_tech_index,
+    },
+    "get_fx_rate": {
+        "smartmoney_db": get_smartmoney_fx_rate,
+    },
+    "get_cb_quotation": {
+        "smartmoney_db": get_smartmoney_cb_quotation,
+    },
+    "get_cb_redeem": {
+        "smartmoney_db": get_smartmoney_cb_redeem,
+    },
+    "get_cb_index": {
+        "smartmoney_db": get_smartmoney_cb_index,
+    },
+    "get_etf_daily": {
+        "smartmoney_db": get_smartmoney_etf_daily,
+    },
+    "get_option_sentiment": {
+        "smartmoney_db": get_smartmoney_option_sentiment,
+    },
+    "get_south_flow": {
+        "smartmoney_db": get_smartmoney_south_flow,
+    },
+    "get_index_futures_basis": {
+        "smartmoney_db": get_smartmoney_index_futures_basis,
+    },
+    "get_sector_daily": {
+        "smartmoney_db": get_smartmoney_sector_daily,
+    },
+    "get_sector_valuation": {
+        "smartmoney_db": get_smartmoney_sector_valuation,
+    },
+    "get_central_bank_balance": {
+        "smartmoney_db": get_smartmoney_central_bank_balance,
+    },
     # commodity_data — local archive only; akshare/hithink have no matching
     # interface for these tables, so there is deliberately no online fallback.
     "get_lithium_spot": {
@@ -1282,6 +1416,19 @@ def _should_skip_ashare_filter(category: str, method: str) -> bool:
         "get_limit_up_down",
         "get_sector_fund_flow",
         "get_global_news",
+        # full-table coverage: first arg is not a ticker (or there is none)
+        "get_gold_price",
+        "get_hk_tech_index",
+        "get_fx_rate",
+        "get_cb_quotation",
+        "get_cb_redeem",
+        "get_cb_index",
+        "get_option_sentiment",
+        "get_south_flow",
+        "get_index_futures_basis",
+        "get_sector_daily",
+        "get_sector_valuation",
+        "get_central_bank_balance",
     }
 
 
