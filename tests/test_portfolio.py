@@ -381,6 +381,42 @@ class TestBackwardCompatibility:
         assert h.shares == 4500.0
         assert h.pnl_pct == -0.107
 
+    def test_holding_lookup_flexible_matching(self):
+        holdings = {
+            "000603.SZ": Holding(ticker="000603.SZ", name="盛达资源", shares=600.0, avg_cost=19.081),
+            "HK1810": Holding(ticker="HK1810", name="小米集团", shares=1600.0, avg_cost=29.135),
+            "603893.SS": Holding(ticker="603893.SS", name="瑞芯微", shares=400.0, avg_cost=95.845),
+        }
+        p = Portfolio(holdings=holdings)
+
+        # Bare A-share code matches suffixed key
+        assert p.has_holding("000603") is True
+        h_bare = p.get_holding("000603")
+        assert h_bare is not None
+        assert h_bare.name == "盛达资源"
+        assert h_bare.shares == 600.0
+
+        # Suffixed A-share code matches suffixed key
+        assert p.has_holding("000603.SZ") is True
+        assert p.get_holding("000603.SZ") is not None
+
+        # HK ticker variants: 1810.HK matches HK1810
+        assert p.has_holding("1810.HK") is True
+        h_hk = p.get_holding("1810.HK")
+        assert h_hk is not None
+        assert h_hk.name == "小米集团"
+        assert h_hk.shares == 1600.0
+
+        # HK ticker variants: 01810.HK matches HK1810
+        assert p.has_holding("01810.HK") is True
+        assert p.get_holding("01810.HK") is not None
+
+        # Non-existent tickers
+        assert p.has_holding("000604") is False
+        assert p.get_holding("000604") is None
+        assert p.has_holding("") is False
+        assert p.get_holding("") is None
+
 
 # ---------------------------------------------------------------------------
 # Sync integration (requires gws auth — marked as integration)
