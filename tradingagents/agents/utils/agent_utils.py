@@ -37,7 +37,12 @@ from tradingagents.agents.utils.industry_data_tools import (  # noqa: F401
     get_concept_board,
     get_industry_valuation,
 )
-from tradingagents.agents.utils.macro_data_tools import get_macro_indicators  # noqa: F401
+from tradingagents.agents.utils.macro_data_tools import (  # noqa: F401
+    get_cftc_cot,
+    get_eia_petroleum,
+    get_macro_indicators,
+    get_us_macro,
+)
 from tradingagents.agents.utils.market_breadth_tools import (  # noqa: F401
     get_auction_snapshot,
     get_limit_up_down,
