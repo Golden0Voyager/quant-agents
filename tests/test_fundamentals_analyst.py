@@ -128,3 +128,41 @@ class TestFundamentalsAnalystPrompt:
         }
         create_fundamentals_analyst(llm)(a_share_state)
         assert "get_earnings_estimates" in captured["full"]
+
+
+# ===================================================================
+# Full-table coverage tools
+# ===================================================================
+
+
+_ASHARE_STATE = {**_BASE_STATE, "company_of_interest": "600519.SS", "company_name": "贵州茅台"}
+
+
+@pytest.mark.unit
+class TestFundamentalsFullCoverageTools:
+    def test_dividend_summary_bound(self):
+        llm = _make_llm()
+        create_fundamentals_analyst(llm)(dict(_ASHARE_STATE))
+        bound = llm.bind_tools.call_args[0][0]
+        names = [tool.name for tool in bound]
+        assert "get_dividend_summary" in names
+
+    def test_tool_guidance_mentions_dividend_summary(self):
+        llm = MagicMock()
+        captured = {}
+
+        def capture_invoke(prompt_val):
+            captured["full"] = str(prompt_val)
+            result = MagicMock()
+            result.content = "Analysis"
+            result.tool_calls = []
+            result.additional_kwargs = {}
+            return result
+
+        bound_llm = MagicMock()
+        bound_llm.side_effect = capture_invoke
+        llm.bind_tools.return_value = bound_llm
+
+        create_fundamentals_analyst(llm)(dict(_ASHARE_STATE))
+
+        assert "get_dividend_summary" in captured.get("full", "")
