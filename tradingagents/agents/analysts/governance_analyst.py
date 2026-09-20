@@ -11,8 +11,11 @@ from tradingagents.agents.utils.agent_utils import (
     get_margin_trading,
     get_news,
     get_northbound_hold,
+    get_placement_announcements,
     get_pledge_ratio,
     get_restricted_release,
+    get_south_flow,
+    get_stock_repurchase,
     sanitize_company_name_in_report,
 )
 from tradingagents.agents.utils.tool_capabilities import (
@@ -34,6 +37,9 @@ def create_governance_analyst(llm):
         get_pledge_ratio,
         get_dragon_tiger,
         get_block_trade,
+        get_placement_announcements,
+        get_stock_repurchase,
+        get_south_flow,
     ]
     bound_tools = BoundToolsByMarket(llm, tools)
     tool_guidance = {
@@ -47,6 +53,9 @@ def create_governance_analyst(llm):
         "get_pledge_ratio": "Use get_pledge_ratio to evaluate equity-pledge and liquidation risk.",
         "get_dragon_tiger": "Use get_dragon_tiger to track hot-money and institutional trading activity.",
         "get_block_trade": "Use get_block_trade to monitor large-block transactions and premium/discount signals.",
+        "get_placement_announcements": "Use get_placement_announcements for the placement (定增) history — repeated rounds signal dilution and financing dependence.",
+        "get_stock_repurchase": "Use get_stock_repurchase for buyback announcements (amount, price range, progress) — management-confidence and shareholder-return signals.",
+        "get_south_flow": "Use get_south_flow for the daily mainland-to-HK southbound flow; pair with get_northbound_hold for the full cross-border picture.",
     }
 
     def governance_analyst_node(state):
