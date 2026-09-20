@@ -366,3 +366,45 @@ class TestIndustryAnalystEdgeCases:
         del state["company_name"]
         result = node(state)
         assert result["industry_report"] == "Analysis without company name key"
+
+
+# ===================================================================
+# Commodity tools (lithium spot / commodity futures)
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestIndustryAnalystCommodityTools:
+    """The Industry analyst carries the commodity data tools and their guidance."""
+
+    def test_commodity_tools_bound(self):
+        llm = _make_llm()
+        node = create_industry_analyst(llm)
+        node(dict(_BASE_STATE))
+        bound = llm.bind_tools.call_args[0][0]
+        names = [tool.name for tool in bound]
+        assert "get_lithium_spot" in names
+        assert "get_commodity_futures" in names
+
+    def test_tool_guidance_mentions_commodity_tools(self):
+        llm = MagicMock()
+        captured = {}
+
+        def capture_invoke(prompt_val):
+            captured["full"] = str(prompt_val)
+            result = MagicMock()
+            result.content = "Analysis"
+            result.tool_calls = []
+            result.additional_kwargs = {}
+            return result
+
+        bound_llm = MagicMock()
+        bound_llm.side_effect = capture_invoke
+        llm.bind_tools.return_value = bound_llm
+
+        node = create_industry_analyst(llm)
+        node(dict(_BASE_STATE))
+
+        full_text = captured.get("full", "")
+        assert "get_lithium_spot" in full_text
+        assert "get_commodity_futures" in full_text
