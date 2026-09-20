@@ -126,6 +126,31 @@ _POLICIES: dict[str, ToolPolicy] = {
         impact="medium",
         allowed_vendors=("smartmoney_db", "akshare", "fred"),
     ),
+    # US macro daily / CFTC COT / EIA petroleum are market-agnostic macro
+    # context archived only in quant_core.db (no online vendor); the
+    # instrument/series_id/periods arguments are not tickers or dates, so
+    # latest_snapshot keeps them out of date rewriting.
+    "get_us_macro": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
+    "get_cftc_cot": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
+    "get_eia_petroleum": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=("smartmoney_db",),
+    ),
     # Commodity spot/futures are market-agnostic industry context archived
     # only in quant_core.db (no akshare/hithink equivalent); the variety code
     # is not a ticker, so latest_snapshot keeps it out of date rewriting.
