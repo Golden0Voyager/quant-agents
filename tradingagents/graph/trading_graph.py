@@ -766,22 +766,54 @@ class TradingAgentsGraph:
                     with open(log_path, encoding="utf-8") as f:
                         cached_state = json.load(f)
                     if cached_state.get("final_trade_decision"):
-                        logger.info(
-                            "Found completed state log for %s on %s, skipping graph run.",
-                            ticker, trade_date,
-                        )
-                        self.curr_state = cached_state
-                        cached_state.setdefault("data_coverage", [])
-                        cached_context = runtime_data_context_for(ticker, str(trade_date))
-                        cached_state.setdefault("market", cached_context.market)
-                        cached_state.setdefault("analysis_dates", asdict(cached_context.dates))
-                        # Clear any stale checkpoint so the next run starts fresh.
-                        clear_checkpoint(
-                            self.config["data_cache_dir"], ticker, str(trade_date)
-                        )
-                        return cached_state, self.process_signal(
-                            cached_state["final_trade_decision"]
-                        )
+                        can_reuse = True
+                        if holdings_context is not None:
+                            holdings_expected = (
+                                {
+                                    t: h.to_dict() if hasattr(h, "to_dict") else h
+                                    for t, h in holdings_context.items()
+                                }
+                                if isinstance(holdings_context, dict)
+                                else {}
+                            )
+                            if cached_state.get("holdings_context") != holdings_expected:
+                                logger.info(
+                                    "Holdings context changed for %s on %s; invalidating cached state log.",
+                                    ticker,
+                                    trade_date,
+                                )
+                                can_reuse = False
+                        if can_reuse and transactions_context is not None:
+                            tx_expected = [
+                                t.to_dict() if hasattr(t, "to_dict") else t
+                                for t in transactions_context
+                            ]
+                            if cached_state.get("transactions_context") != tx_expected:
+                                logger.info(
+                                    "Transactions context changed for %s on %s; invalidating cached state log.",
+                                    ticker,
+                                    trade_date,
+                                )
+                                can_reuse = False
+
+                        if can_reuse:
+                            logger.info(
+                                "Found completed state log for %s on %s, skipping graph run.",
+                                ticker,
+                                trade_date,
+                            )
+                            self.curr_state = cached_state
+                            cached_state.setdefault("data_coverage", [])
+                            cached_context = runtime_data_context_for(ticker, str(trade_date))
+                            cached_state.setdefault("market", cached_context.market)
+                            cached_state.setdefault("analysis_dates", asdict(cached_context.dates))
+                            # Clear any stale checkpoint so the next run starts fresh.
+                            clear_checkpoint(
+                                self.config["data_cache_dir"], ticker, str(trade_date)
+                            )
+                            return cached_state, self.process_signal(
+                                cached_state["final_trade_decision"]
+                            )
                 except Exception:
                     pass
 
@@ -1044,6 +1076,23 @@ class TradingAgentsGraph:
 
     def _log_state(self, trade_date, final_state):
         """Log the final state to a JSON file."""
+        holdings_ctx = final_state.get("holdings_context")
+        if isinstance(holdings_ctx, dict):
+            holdings_serializable = {
+                t: h.to_dict() if hasattr(h, "to_dict") else h
+                for t, h in holdings_ctx.items()
+            }
+        else:
+            holdings_serializable = {}
+
+        tx_ctx = final_state.get("transactions_context")
+        if isinstance(tx_ctx, list):
+            tx_serializable = [
+                t.to_dict() if hasattr(t, "to_dict") else t for t in tx_ctx
+            ]
+        else:
+            tx_serializable = []
+
         self.log_states_dict[str(trade_date)] = {
             "company_of_interest": final_state["company_of_interest"],
             "trade_date": final_state["trade_date"],
@@ -1075,6 +1124,8 @@ class TradingAgentsGraph:
             "investment_plan": final_state["investment_plan"],
             "final_trade_decision": final_state["final_trade_decision"],
             "data_coverage": final_state.get("data_coverage", []),
+            "holdings_context": holdings_serializable,
+            "transactions_context": tx_serializable,
         }
 
         # Save to file. Reject ticker values that would escape the
