@@ -35,7 +35,7 @@ def create_market_analyst(llm):
     ]
     bound_tools = BoundToolsByMarket(llm, tools)
     tool_guidance = {
-        "get_stock_data": "Call get_stock_data first to retrieve the CSV needed to generate indicators.",
+        "get_stock_data": "Call get_stock_data first to retrieve the CSV needed to generate indicators. For global macro cross-asset context it also reads locally archived macro symbols: ^VIX, ^VIX9D, ^VIX3M (volatility term structure — VIX3M trading below VIX, i.e. an inverted term structure, signals near-term stress), ^MOVE (bond-market volatility), DX-Y.NYB (US dollar index), USDCNY=X (renminbi exchange rate), ^HSI (Hang Seng), and sector benchmarks such as XLE/OIH (energy), ^SOX (semiconductors) and SLV (silver).",
         "get_indicators": "Then call get_indicators with exact indicator names from the list above.",
         "get_chip_distribution": "Call get_chip_distribution to assess profit ratios, average holder costs, chip concentration, and price-to-cost bias at key support/resistance levels.",
         "get_fund_flow": "Call the standalone get_fund_flow tool directly (do not pass it to get_indicators) to analyze capital-flow trends.",
