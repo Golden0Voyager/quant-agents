@@ -103,6 +103,7 @@ from .smartmoney_vendor import (
     get_block_trade as get_smartmoney_block_trade,
     get_cashflow as get_smartmoney_cashflow,
     get_chip_distribution as get_smartmoney_chip_distribution,
+    get_commodity_futures as get_smartmoney_commodity_futures,
     get_company_announcements as get_smartmoney_company_announcements,
     get_concept_board as get_smartmoney_concept_board,
     get_dragon_tiger as get_smartmoney_dragon_tiger,
@@ -120,6 +121,7 @@ from .smartmoney_vendor import (
     get_institutional_holdings as get_smartmoney_institutional_holdings,
     get_institutional_intelligence as get_smartmoney_institutional_intelligence,
     get_limit_up_down as get_smartmoney_limit_up_down,
+    get_lithium_spot as get_smartmoney_lithium_spot,
     get_macro_indicators as get_smartmoney_macro_indicators,
     get_margin_trading as get_smartmoney_margin_trading,
     get_news as get_smartmoney_news,
@@ -254,6 +256,13 @@ TOOLS_CATEGORIES = {
         "description": "Macroeconomic indicators (rates, inflation, labor, growth)",
         "tools": [
             "get_macro_indicators",
+        ]
+    },
+    "commodity_data": {
+        "description": "Commodity spot and futures prices (lithium, silver, base metals)",
+        "tools": [
+            "get_lithium_spot",
+            "get_commodity_futures",
         ]
     },
     "prediction_markets": {
@@ -777,6 +786,11 @@ _METHOD_PARAMETER_SCHEMAS: dict[str, tuple[tuple[str, Any], ...]] = {
         ("curr_date", None),
         ("look_back_days", None),
     ),
+    "get_lithium_spot": (("periods", 60),),
+    "get_commodity_futures": (
+        ("variety", _REQUIRED_PARAMETER),
+        ("periods", 60),
+    ),
     "get_pledge_ratio": (("ticker", _REQUIRED_PARAMETER),),
     "get_margin_trading": (
         ("ticker", _REQUIRED_PARAMETER),
@@ -1088,6 +1102,14 @@ VENDOR_METHODS: dict[str, dict[str, Any]] = {
         "akshare": get_akshare_macro_indicators,
         "fred": get_fred_macro_data,
     },
+    # commodity_data — local archive only; akshare/hithink have no matching
+    # interface for these tables, so there is deliberately no online fallback.
+    "get_lithium_spot": {
+        "smartmoney_db": get_smartmoney_lithium_spot,
+    },
+    "get_commodity_futures": {
+        "smartmoney_db": get_smartmoney_commodity_futures,
+    },
     # governance_risk (v2.2)
     "get_pledge_ratio": {
         "smartmoney_db": get_smartmoney_pledge_ratio,
@@ -1230,7 +1252,7 @@ def _should_skip_ashare_filter(category: str, method: str) -> bool:
     These methods take sector names, dates, or indicator names as their first
     argument, so the non-A-share vendor filter must not strip akshare/smartmoney_db.
     """
-    return category in ("macro_data", "prediction_markets") or method in {
+    return category in ("macro_data", "commodity_data", "prediction_markets") or method in {
         "get_limit_up_down",
         "get_sector_fund_flow",
         "get_global_news",
