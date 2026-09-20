@@ -145,10 +145,7 @@ def ticker_matches(a: str, b: str) -> bool:
     b_hk = b_clean[2:].lstrip("0") if (b_clean.startswith("HK") and b_clean[2:].isdigit()) else None
     if a_hk and b_clean.endswith(".HK") and b_clean[:-3].lstrip("0") == a_hk:
         return True
-    if b_hk and a_clean.endswith(".HK") and a_clean[:-3].lstrip("0") == b_hk:
-        return True
-
-    return False
+    return bool(b_hk and a_clean.endswith(".HK") and a_clean[:-3].lstrip("0") == b_hk)
 
 
 def validate_holding(holding: Holding) -> Holding | None:
