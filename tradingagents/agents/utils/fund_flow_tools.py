@@ -104,3 +104,26 @@ def get_sector_fund_flow(
     if ticker:
         return route_to_vendor("get_sector_fund_flow", sector_name, ticker=ticker)
     return route_to_vendor("get_sector_fund_flow", sector_name)
+
+
+@tool
+def get_south_flow(
+    market: Annotated[
+        str | None,
+        "Southbound market channel name in Chinese (e.g. '南向'). Omit to get "
+        "all channels as a wide table. This is NOT a stock ticker.",
+    ] = None,
+    periods: Annotated[int, "Number of recent trading days to return (default 60)"] = 60,
+) -> str:
+    """
+    Retrieve southbound (港股通) daily fund flow: net buy, buy/sell amounts and
+    cumulative net buy. Mainland money flowing into HK stocks — pair it with
+    get_northbound_hold for the full cross-border flow picture.
+    Uses the configured news_data vendor (smartmoney_db local archive only).
+    Args:
+        market (str | None): Market channel name; omit for all channels
+        periods (int): Number of recent trading days to return (default 60)
+    Returns:
+        str: A formatted report of southbound fund flow
+    """
+    return route_to_vendor("get_south_flow", market, periods)
