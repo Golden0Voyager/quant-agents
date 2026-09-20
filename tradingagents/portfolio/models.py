@@ -102,12 +102,31 @@ class Portfolio:
     transactions: list[Transaction] = field(default_factory=list)
 
     def get_holding(self, ticker: str) -> Holding | None:
-        """Get a specific holding by ticker."""
-        return self.holdings.get(ticker)
+        """Get a specific holding by ticker.
+
+        Supports exact key match as well as normalized / canonical matching:
+        e.g. '000603' matches '000603.SZ', '1810.HK' matches 'HK1810'.
+        """
+        if not ticker:
+            return None
+        # 1. Exact match
+        if ticker in self.holdings:
+            return self.holdings[ticker]
+        # 2. Case-insensitive exact match
+        for key, holding in self.holdings.items():
+            if key.upper() == ticker.upper():
+                return holding
+        # 3. Canonical / flexible ticker match
+        from tradingagents.portfolio.validators import ticker_matches
+
+        for key, holding in self.holdings.items():
+            if ticker_matches(key, ticker):
+                return holding
+        return None
 
     def has_holding(self, ticker: str) -> bool:
         """Check if portfolio contains a specific ticker."""
-        return ticker in self.holdings
+        return self.get_holding(ticker) is not None
 
     def total_invested(self) -> float:
         """Sum of all invested amounts."""
