@@ -102,6 +102,7 @@ from .smartmoney_vendor import (
     get_balance_sheet as get_smartmoney_balance_sheet,
     get_block_trade as get_smartmoney_block_trade,
     get_cashflow as get_smartmoney_cashflow,
+    get_cftc_cot as get_smartmoney_cftc_cot,
     get_chip_distribution as get_smartmoney_chip_distribution,
     get_commodity_futures as get_smartmoney_commodity_futures,
     get_company_announcements as get_smartmoney_company_announcements,
@@ -109,6 +110,7 @@ from .smartmoney_vendor import (
     get_dragon_tiger as get_smartmoney_dragon_tiger,
     get_earnings_estimates as get_smartmoney_earnings_estimates,
     get_earnings_forecast as get_smartmoney_earnings_forecast,
+    get_eia_petroleum as get_smartmoney_eia_petroleum,
     get_fund_flow as get_smartmoney_fund_flow,
     get_fundamentals as get_smartmoney_fundamentals,
     get_global_asset_data as get_smartmoney_global_asset_data,
@@ -131,6 +133,7 @@ from .smartmoney_vendor import (
     get_sector_fund_flow as get_smartmoney_sector_fund_flow,
     get_shareholder_count as get_smartmoney_shareholder_count,
     get_stock_data as get_smartmoney_stock_data,
+    get_us_macro as get_smartmoney_us_macro,
 )
 from .tushare_vendor import (
     get_company_announcements as get_tushare_company_announcements,
@@ -256,6 +259,9 @@ TOOLS_CATEGORIES = {
         "description": "Macroeconomic indicators (rates, inflation, labor, growth)",
         "tools": [
             "get_macro_indicators",
+            "get_us_macro",
+            "get_cftc_cot",
+            "get_eia_petroleum",
         ]
     },
     "commodity_data": {
@@ -786,6 +792,15 @@ _METHOD_PARAMETER_SCHEMAS: dict[str, tuple[tuple[str, Any], ...]] = {
         ("curr_date", None),
         ("look_back_days", None),
     ),
+    "get_us_macro": (("periods", 120),),
+    "get_cftc_cot": (
+        ("instrument", None),
+        ("periods", 52),
+    ),
+    "get_eia_petroleum": (
+        ("series_id", None),
+        ("periods", 156),
+    ),
     "get_lithium_spot": (("periods", 60),),
     "get_commodity_futures": (
         ("variety", _REQUIRED_PARAMETER),
@@ -1101,6 +1116,17 @@ VENDOR_METHODS: dict[str, dict[str, Any]] = {
         "smartmoney_db": get_smartmoney_macro_indicators,
         "akshare": get_akshare_macro_indicators,
         "fred": get_fred_macro_data,
+    },
+    # macro_data — local archive only; akshare/hithink have no matching
+    # interface for these tables, so there is deliberately no online fallback.
+    "get_us_macro": {
+        "smartmoney_db": get_smartmoney_us_macro,
+    },
+    "get_cftc_cot": {
+        "smartmoney_db": get_smartmoney_cftc_cot,
+    },
+    "get_eia_petroleum": {
+        "smartmoney_db": get_smartmoney_eia_petroleum,
     },
     # commodity_data — local archive only; akshare/hithink have no matching
     # interface for these tables, so there is deliberately no online fallback.
