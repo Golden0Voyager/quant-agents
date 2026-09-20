@@ -34,3 +34,73 @@ def get_macro_indicators(
         str: A formatted markdown report of the macro series
     """
     return route_to_vendor("get_macro_indicators", indicator, curr_date, look_back_days)
+
+
+@tool
+def get_us_macro(
+    periods: Annotated[int, "Number of recent trading days to return (default 120)"] = 120,
+) -> str:
+    """
+    Retrieve US daily macro indicators from the local archive: Fed funds rate
+    (effr), 3M/2Y/10Y Treasury yields, 10Y-3M term spread, 10Y real rate,
+    5Y/10Y breakeven inflation expectations, initial claims (icsa),
+    HY/IG credit spreads (OAS) and the STLFSI financial stress index.
+    Credit spreads and STLFSI are high-value inputs for risk assessment.
+    Uses the configured macro_data vendor (smartmoney_db local archive only).
+    Args:
+        periods (int): Number of recent trading days to return (default 120)
+    Returns:
+        str: A CSV-formatted table of US macro daily indicators
+    """
+    return route_to_vendor("get_us_macro", periods)
+
+
+@tool
+def get_cftc_cot(
+    instrument: Annotated[
+        str | None,
+        "Commodity instrument Chinese name, e.g. '白银', '黄金', '纽约原油', "
+        "'大豆', '玉米', '棉花', '原糖', '豆油', '豆粕', '铂金', '钯金', "
+        "'纽约天然气'. Omit to get the whole goods complex (12 commodities) "
+        "as a wide net-position table. This is NOT a stock ticker.",
+    ] = None,
+    periods: Annotated[int, "Number of recent weeks to return (default 52)"] = 52,
+) -> str:
+    """
+    Retrieve CFTC Commitments of Traders (每周持仓报告) positioning: weekly
+    long/short/net positions. Use it for commodity-sensitive names to gauge
+    speculative positioning extremes and crowded trades in the underlying.
+    Uses the configured macro_data vendor (smartmoney_db local archive only).
+    Args:
+        instrument (str | None): Commodity instrument Chinese name; omit for all goods
+        periods (int): Number of recent weeks to return (default 52)
+    Returns:
+        str: A formatted report of CFTC positioning
+    """
+    return route_to_vendor("get_cftc_cot", instrument, periods)
+
+
+@tool
+def get_eia_petroleum(
+    series_id: Annotated[
+        str | None,
+        "EIA series ID, e.g. 'PET.WCESTUS1.W' (commercial crude ex-SPR), "
+        "'PET.WCSSTUS1.W' (SPR), 'PET.WGTSTUS1.W' (gasoline), "
+        "'PET.WCRFPUS2.W' (US production), 'PET.WPULEUS3.W' (refinery "
+        "utilization). Omit to get all five series.",
+    ] = None,
+    periods: Annotated[int, "Number of recent weeks to return (default 156)"] = 156,
+) -> str:
+    """
+    Retrieve EIA weekly petroleum statistics: crude/gasoline/SPR inventories,
+    US crude production and refinery utilization. Use it when analyzing the
+    energy chain (oil & gas, oilfield services, petrochemicals).
+    Uses the configured macro_data vendor (smartmoney_db local archive only).
+    Args:
+        series_id (str | None): Exact EIA series ID; omit for all series
+        periods (int): Number of recent weeks to return (default 156)
+    Returns:
+        str: A formatted report of EIA weekly petroleum data
+    """
+    return route_to_vendor("get_eia_petroleum", series_id, periods)
+
