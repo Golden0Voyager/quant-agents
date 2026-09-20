@@ -278,3 +278,41 @@ def get_cailianpress_telegrams(
         return route_to_vendor("get_cailianpress_telegrams", limit)
     return route_to_vendor("get_cailianpress_telegrams", limit, look_back_days)
 
+
+
+@tool
+def get_placement_announcements(
+    symbol: Annotated[str, "A-share ticker e.g. 600519.SS"],
+    periods: Annotated[int, "Number of recent announcements to return (default 10)"] = 10,
+) -> str:
+    """
+    Retrieve private-placement (定增) announcement history for a ticker.
+    Shows issue method and dates of past placement rounds — dilution and
+    capital-raising context for governance analysis.
+    Uses the configured governance_risk vendor (smartmoney_db local archive only).
+    Args:
+        symbol (str): A-share ticker e.g. 600519.SS
+        periods (int): Number of recent announcements to return (default 10)
+    Returns:
+        str: A formatted report of placement announcements
+    """
+    return route_to_vendor("get_placement_announcements", symbol, periods)
+
+
+@tool
+def get_stock_repurchase(
+    symbol: Annotated[str, "A-share ticker e.g. 600519.SS"],
+    periods: Annotated[int, "Number of recent announcements to return (default 10)"] = 10,
+) -> str:
+    """
+    Retrieve share-repurchase (回购) announcements for a ticker.
+    Shows repurchase amount, price range, quantity and progress status —
+    management-confidence and shareholder-return signals.
+    Uses the configured governance_risk vendor (smartmoney_db local archive only).
+    Args:
+        symbol (str): A-share ticker e.g. 600519.SS
+        periods (int): Number of recent announcements to return (default 10)
+    Returns:
+        str: A formatted report of repurchase announcements
+    """
+    return route_to_vendor("get_stock_repurchase", symbol, periods)
