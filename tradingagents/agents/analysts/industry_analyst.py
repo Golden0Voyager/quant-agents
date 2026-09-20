@@ -2,13 +2,16 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
+    get_cftc_cot,
     get_commodity_futures,
     get_concept_board,
+    get_eia_petroleum,
     get_industry_valuation,
     get_language_instruction,
     get_lithium_spot,
     get_macro_indicators,
     get_sector_fund_flow,
+    get_us_macro,
     sanitize_company_name_in_report,
 )
 from tradingagents.agents.utils.tool_capabilities import (
@@ -23,6 +26,9 @@ def create_industry_analyst(llm):
         get_industry_valuation,
         get_concept_board,
         get_macro_indicators,
+        get_us_macro,
+        get_cftc_cot,
+        get_eia_petroleum,
         get_sector_fund_flow,
         get_lithium_spot,
         get_commodity_futures,
@@ -32,6 +38,9 @@ def create_industry_analyst(llm):
         "get_industry_valuation": "Use get_industry_valuation for peer and historical valuation comparisons.",
         "get_concept_board": "Use get_concept_board to identify concept themes, hot-sector topics, and theme momentum.",
         "get_macro_indicators": "Use get_macro_indicators to assess the macro backdrop influencing sector valuation.",
+        "get_us_macro": "Use get_us_macro to read the US daily macro tape — Treasury yields, 10Y-3M spread, real rates, breakeven inflation expectations, initial claims, HY/IG credit spreads and the STLFSI financial stress index. Credit spreads and STLFSI are high-value inputs for risk assessment of rate-sensitive and risk assets.",
+        "get_cftc_cot": "Use get_cftc_cot to read CFTC weekly positioning for a commodity instrument (e.g. 白银/黄金/纽约原油, pass the Chinese name) or the whole goods complex; net-positioning extremes flag crowded trades in commodity-sensitive names.",
+        "get_eia_petroleum": "Use get_eia_petroleum to read EIA weekly petroleum stats (crude/gasoline/SPR inventories, US production, refinery utilization) when analyzing the energy chain.",
         "get_sector_fund_flow": "Use get_sector_fund_flow to track sector capital flows and rotation patterns. Always pass the target stock's ticker so the sector can be resolved from its registered industry when the name misses.",
         "get_lithium_spot": "Use get_lithium_spot when analyzing lithium mining, lithium battery, or new-energy supply-chain names to track lithium carbonate spot prices and futures basis.",
         "get_commodity_futures": "Use get_commodity_futures when the target is sensitive to a commodity price (e.g. silver/precious metals, copper/aluminium, lithium, chemicals) to track the underlying futures trend, volume, and open interest.",
