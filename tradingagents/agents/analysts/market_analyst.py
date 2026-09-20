@@ -1,13 +1,19 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
+    get_ah_premium,
+    get_cb_index,
+    get_cb_quotation,
+    get_cb_redeem,
     get_chip_distribution,
+    get_etf_daily,
     get_fund_flow,
     get_index_daily,
     get_indicators,
     get_instrument_context_from_state,
     get_language_instruction,
     get_limit_up_down,
+    get_option_sentiment,
     get_sector_fund_flow,
     get_stock_data,
     get_verified_market_snapshot,
@@ -32,6 +38,12 @@ def create_market_analyst(llm):
         get_limit_up_down,
         get_index_daily,
         get_verified_market_snapshot,
+        get_option_sentiment,
+        get_ah_premium,
+        get_etf_daily,
+        get_cb_quotation,
+        get_cb_redeem,
+        get_cb_index,
     ]
     bound_tools = BoundToolsByMarket(llm, tools)
     tool_guidance = {
@@ -43,6 +55,12 @@ def create_market_analyst(llm):
         "get_limit_up_down": "Call get_limit_up_down with the current date to gauge daily limit-up/limit-down market breadth.",
         "get_index_daily": "Call get_index_daily for relevant major indices to compare the stock with its home market or board.",
         "get_verified_market_snapshot": "Before the final report, call get_verified_market_snapshot for this ticker and date; use it as the source of truth for exact OHLCV, price-level, and indicator claims.",
+        "get_option_sentiment": "Use get_option_sentiment for the 50ETF option tape (QVIX, PCR, put/call volumes and open interest) — fear/hedging extremes in the A-share market.",
+        "get_ah_premium": "For A+H dual-listed companies, use get_ah_premium to see whether the A-share trades rich versus its H-share.",
+        "get_etf_daily": "Use get_etf_daily for major-ETF bars (510300 沪深300ETF, 510050 上证50ETF, 518880 黄金ETF, 588000 科创50ETF) to benchmark the stock against its index or track sector ETFs.",
+        "get_cb_quotation": "When the target has convertible bonds, use get_cb_quotation for the cheapest CBs by double-low value and get_cb_redeem for forced-redemption flags (已公告强赎 is an urgent exit signal).",
+        "get_cb_redeem": "Use get_cb_redeem for convertible bonds with an active redemption flag; 已公告强赎 forces conversion/selling and pressures the underlying stock.",
+        "get_cb_index": "Use get_cb_index for the convertible-bond market trend (集思录可转债等权指数) when analyzing CB-linked names.",
     }
 
     def market_analyst_node(state):
