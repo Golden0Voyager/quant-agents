@@ -22,7 +22,9 @@ def _format_money(value: float | None) -> str:
 
 def _build_transactions_text(ticker: str, transactions: list[Transaction]) -> str:
     """Format transaction history for a specific ticker into markdown."""
-    txs = [t for t in transactions if t.ticker == ticker]
+    from tradingagents.portfolio.validators import ticker_matches
+
+    txs = [t for t in transactions if ticker_matches(t.ticker, ticker)]
     if not txs:
         return ""
 
@@ -61,8 +63,22 @@ def build_pm_prompt(
     PM needs the full picture: shares, cost, current P&L, and weight
     to make position-aware decisions (e.g. don't add to a heavy loser).
     """
-    if not portfolio or not portfolio.has_holding(ticker):
+    if not portfolio or not portfolio.holdings:
         return ""
+
+    tx_list = transactions if transactions is not None else portfolio.transactions
+
+    if not portfolio.has_holding(ticker):
+        lines = [
+            "## 当前持仓信息",
+            "",
+            "- 当前实际持仓: 无持仓（空仓，0 股）。",
+            "⚠️ 注意：请勿将历史记忆（Past Lessons / Decisions）中的历史仓位或成本当成当前现有底仓。",
+        ]
+        tx_text = _build_transactions_text(ticker, tx_list)
+        if tx_text:
+            lines.append(tx_text)
+        return "\n".join(lines)
 
     h = portfolio.get_holding(ticker)
     if h is None:
@@ -94,8 +110,9 @@ def build_pm_prompt(
         "- 若有网格策略，请结合网格区间评估操作空间。",
     ])
 
-    tx_list = transactions if transactions is not None else portfolio.transactions
-    lines.append(_build_transactions_text(ticker, tx_list))
+    tx_text = _build_transactions_text(ticker, tx_list)
+    if tx_text:
+        lines.append(tx_text)
 
     return "\n".join(lines)
 
@@ -107,8 +124,21 @@ def build_risk_prompt(
 
     Risk analysts care about concentration risk and drawdown.
     """
-    if not portfolio or not portfolio.has_holding(ticker):
+    if not portfolio or not portfolio.holdings:
         return ""
+
+    tx_list = transactions if transactions is not None else portfolio.transactions
+
+    if not portfolio.has_holding(ticker):
+        lines = [
+            "## 当前风险相关信息",
+            "",
+            "- 该股票当前仓位占比: 0.00%（无持仓/空仓）。",
+        ]
+        tx_text = _build_transactions_text(ticker, tx_list)
+        if tx_text:
+            lines.append(tx_text)
+        return "\n".join(lines)
 
     h = portfolio.get_holding(ticker)
     if h is None:
@@ -125,8 +155,9 @@ def build_risk_prompt(
         if h.pnl_pct < -0.20:
             lines.append("  ⚠️ 该票已亏损超过 20%，若信号继续看空建议严格止损。")
 
-    tx_list = transactions if transactions is not None else portfolio.transactions
-    lines.append(_build_transactions_text(ticker, tx_list))
+    tx_text = _build_transactions_text(ticker, tx_list)
+    if tx_text:
+        lines.append(tx_text)
 
     lines.append("\n请在风控评估中考虑上述持仓风险。")
     return "\n".join(lines)
@@ -139,8 +170,22 @@ def build_trader_prompt(
 
     Trader cares about grid strategies and position sizing.
     """
-    if not portfolio or not portfolio.has_holding(ticker):
+    if not portfolio or not portfolio.holdings:
         return ""
+
+    tx_list = transactions if transactions is not None else portfolio.transactions
+
+    if not portfolio.has_holding(ticker):
+        lines = [
+            "## 交易执行参考",
+            "",
+            "- 当前持仓: 0 股（当前无底仓/空仓）。",
+            "⚠️ 注意：请勿将历史记录中的历史持仓当成当前底仓；若给出买入建议，请按全新开仓/首笔建仓规则设定 Position Sizing。",
+        ]
+        tx_text = _build_transactions_text(ticker, tx_list)
+        if tx_text:
+            lines.append(tx_text)
+        return "\n".join(lines)
 
     h = portfolio.get_holding(ticker)
     if h is None:
@@ -158,8 +203,9 @@ def build_trader_prompt(
         sign = "+" if gap >= 0 else ""
         lines.append(f"- 现价与成本价差: {sign}{gap * 100:.2f}%")
 
-    tx_list = transactions if transactions is not None else portfolio.transactions
-    lines.append(_build_transactions_text(ticker, tx_list))
+    tx_text = _build_transactions_text(ticker, tx_list)
+    if tx_text:
+        lines.append(tx_text)
 
     lines.append("\n请结合当前持仓成本和网格策略（如有）给出具体的交易方案。")
     return "\n".join(lines)
