@@ -130,6 +130,7 @@ class BatchRunner:
                 portfolio = repo.load()
                 return {
                     ticker: {
+                        "ticker": ticker,
                         "shares": h.shares,
                         "avg_cost": h.avg_cost,
                         "market_price": h.market_price,

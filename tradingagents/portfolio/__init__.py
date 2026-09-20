@@ -28,7 +28,12 @@ from tradingagents.portfolio.prompts import (
 from tradingagents.portfolio.repository import PortfolioRepository
 from tradingagents.portfolio.sync import PortfolioSyncService
 from tradingagents.portfolio.transaction_sync import TransactionSyncService
-from tradingagents.portfolio.validators import normalize_ticker, validate_holding
+from tradingagents.portfolio.validators import (
+    canonical_ticker,
+    normalize_ticker,
+    ticker_matches,
+    validate_holding,
+)
 
 __all__ = [
     "Holding",
@@ -42,6 +47,8 @@ __all__ = [
     "build_risk_prompt",
     "build_trader_prompt",
     "build_market_prompt",
+    "canonical_ticker",
     "normalize_ticker",
+    "ticker_matches",
     "validate_holding",
 ]

@@ -71,6 +71,15 @@ class BuildTransactionsTextTests(unittest.TestCase):
         self.assertIn("买入 1 次，卖出 1 次", result)
         self.assertIn("分红 1 次", result)
 
+    def test_flexible_ticker_matching(self):
+        txs = [
+            Transaction(date="2026-09-17", ticker="000603", action="买入", shares=300, price=32.8),
+        ]
+        result = _build_transactions_text("000603.SZ", txs)
+        self.assertIn("买入", result)
+        self.assertIn("300", result)
+        self.assertIn("32.800", result)
+
 
 @pytest.mark.unit
 class BuildMpPrompt(unittest.TestCase):
@@ -103,6 +112,23 @@ class BuildMpPrompt(unittest.TestCase):
         result = build_pm_prompt("AAPL", p)
         self.assertIn("网格宽度", result)
 
+    def test_explicit_zero_holding_when_portfolio_present_but_unheld(self):
+        p = Portfolio(holdings={
+            "AAPL": Holding(ticker="AAPL", shares=100, avg_cost=150.0),
+        })
+        result = build_pm_prompt("000603.SZ", p)
+        self.assertIn("无持仓（空仓，0 股）", result)
+        self.assertIn("请勿将历史记忆", result)
+
+    def test_bare_code_matches_suffixed_holding(self):
+        p = Portfolio(holdings={
+            "000603.SZ": Holding(ticker="000603.SZ", name="盛达资源", shares=600, avg_cost=19.081),
+        })
+        result = build_pm_prompt("000603", p)
+        self.assertIn("盛达资源", result)
+        self.assertIn("600 股", result)
+        self.assertIn("19.081", result)
+
 
 @pytest.mark.unit
 class BuildRiskPromptExtended(unittest.TestCase):
@@ -130,11 +156,25 @@ class BuildRiskPromptExtended(unittest.TestCase):
         result = build_risk_prompt("AAPL", p)
         self.assertIn("+5.00%", result)
 
+    def test_explicit_zero_holding_when_portfolio_present_but_unheld(self):
+        p = Portfolio(holdings={
+            "AAPL": Holding(ticker="AAPL", shares=100, avg_cost=150.0),
+        })
+        result = build_risk_prompt("000603.SZ", p)
+        self.assertIn("0.00%", result)
+
 
 @pytest.mark.unit
 class BuildTraderPromptExtended(unittest.TestCase):
     def test_empty_when_no_holding(self):
         assert build_trader_prompt("UNKNOWN", None) == ""
+
+    def test_explicit_zero_holding_when_portfolio_present_but_unheld(self):
+        p = Portfolio(holdings={
+            "AAPL": Holding(ticker="AAPL", shares=100, avg_cost=150.0),
+        })
+        result = build_trader_prompt("000603.SZ", p)
+        self.assertIn("0 股（当前无底仓/空仓）", result)
 
     def test_no_grid_no_price_gap(self):
         p = Portfolio(holdings={

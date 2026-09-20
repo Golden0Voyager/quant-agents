@@ -10,8 +10,10 @@ import pytest
 from tradingagents.portfolio.models import Holding
 from tradingagents.portfolio.validators import (
     _parse_number,
+    canonical_ticker,
     deduplicate_holdings,
     normalize_ticker,
+    ticker_matches,
     validate_holding,
 )
 
@@ -71,6 +73,13 @@ class TestNormalizeTicker:
     def test_us_ticker_passed_through(self):
         assert normalize_ticker("AAPL") == "AAPL"
 
+    def test_beijing_exchange_ticker(self):
+        assert normalize_ticker("830946") == "830946.BJ"
+
+    def test_etf_tickers(self):
+        assert normalize_ticker("159888") == "159888.SZ"
+        assert normalize_ticker("510300") == "510300.SS"
+
     def test_hk_ticker_passed_through(self):
         assert normalize_ticker("HK1810") == "HK1810"
 
@@ -94,6 +103,63 @@ class TestNormalizeTicker:
 
     def test_lowercase_na_returns_none(self):
         assert normalize_ticker("n/a") is None
+
+
+# ===================================================================
+# canonical_ticker & ticker_matches
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestCanonicalTicker:
+    def test_bare_ashare_code(self):
+        assert canonical_ticker("000603") == "000603.SZ"
+        assert canonical_ticker("603893") == "603893.SS"
+        assert canonical_ticker("301031") == "301031.SZ"
+
+    def test_hk_formats(self):
+        assert canonical_ticker("HK1810") == "1810.HK"
+        assert canonical_ticker("1810.HK") == "1810.HK"
+        assert canonical_ticker("01810.HK") == "1810.HK"
+
+    def test_already_qualified_ashare(self):
+        assert canonical_ticker("000603.SZ") == "000603.SZ"
+        assert canonical_ticker("603893.SS") == "603893.SS"
+
+    def test_us_and_other_tickers(self):
+        assert canonical_ticker("AAPL") == "AAPL"
+        assert canonical_ticker("TSLA") == "TSLA"
+
+
+@pytest.mark.unit
+class TestTickerMatches:
+    def test_exact_matches(self):
+        assert ticker_matches("AAPL", "AAPL") is True
+        assert ticker_matches("000603.SZ", "000603.SZ") is True
+        assert ticker_matches("1810.HK", "1810.HK") is True
+
+    def test_case_insensitive(self):
+        assert ticker_matches("aapl", "AAPL") is True
+        assert ticker_matches("000603.sz", "000603.SZ") is True
+
+    def test_bare_vs_suffixed_ashare(self):
+        assert ticker_matches("000603", "000603.SZ") is True
+        assert ticker_matches("000603.SZ", "000603") is True
+        assert ticker_matches("603893", "603893.SS") is True
+        assert ticker_matches("301031", "301031.SZ") is True
+
+    def test_hk_cross_matching(self):
+        assert ticker_matches("1810.HK", "HK1810") is True
+        assert ticker_matches("HK1810", "1810.HK") is True
+        assert ticker_matches("01810.HK", "HK1810") is True
+
+    def test_mismatched_tickers(self):
+        assert ticker_matches("000603", "000604") is False
+        assert ticker_matches("000603.SZ", "603893.SS") is False
+        assert ticker_matches("AAPL", "MSFT") is False
+        assert ticker_matches("000603.SZ", "000603.SS") is False
+        assert ticker_matches("", "000603.SZ") is False
+        assert ticker_matches("000603.SZ", "") is False
 
 
 # ===================================================================

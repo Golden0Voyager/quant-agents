@@ -1703,6 +1703,21 @@ class LogStateTests(unittest.TestCase):
         log_dir = Path(g.config["results_dir"]) / "..__..__evil" / "TradingAgentsStrategy_logs"
         self.assertTrue((log_dir / "full_states_log_2026-06-15.json").exists())
 
+    def test_log_state_saves_holdings_and_transactions_context(self):
+        g = self._make_graph()
+        final_state = dict(g.propagator.create_initial_state.return_value)
+        final_state["holdings_context"] = {"000603.SZ": {"shares": 600, "avg_cost": 19.081}}
+        final_state["transactions_context"] = [{"ticker": "000603", "type": "BUY", "shares": 600}]
+        g._log_state("2026-06-15", final_state)
+
+        safe_ticker = "AAPL"
+        log_dir = Path(g.config["results_dir"]) / safe_ticker / "TradingAgentsStrategy_logs"
+        log_path = log_dir / "full_states_log_2026-06-15.json"
+        with open(log_path, encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(data["holdings_context"], {"000603.SZ": {"shares": 600, "avg_cost": 19.081}})
+        self.assertEqual(data["transactions_context"], [{"ticker": "000603", "type": "BUY", "shares": 600}])
+
 
 # ---------------------------------------------------------------------------
 # _run_graph
@@ -2026,6 +2041,111 @@ class PropagateTests(unittest.TestCase):
                     "evidence_window_end": "2026-06-15",
                 },
             )
+            mock_clear.assert_called_once()
+
+    def test_cached_state_log_invalidated_when_holdings_context_differs(self):
+        self.g.config["checkpoint_enabled"] = True
+        cached_state = {
+            "final_trade_decision": "Buy",
+            "company_of_interest": "AAPL",
+            "trade_date": "2026-06-15",
+            "market_report": "",
+            "sentiment_report": "",
+            "news_report": "",
+            "fundamentals_report": "",
+            "governance_report": "",
+            "industry_report": "",
+            "investment_debate_state": {
+                "bull_history": [], "bear_history": [],
+                "history": [], "current_response": "",
+                "judge_decision": "",
+            },
+            "trader_investment_plan": {},
+            "risk_debate_state": {
+                "aggressive_history": [], "conservative_history": [],
+                "neutral_history": [], "history": [],
+                "judge_decision": "",
+            },
+            "investment_plan": {},
+            "holdings_context": {"AAPL": {"shares": 100}},
+        }
+        log_dir = Path(self.tmp_results) / "AAPL" / "TradingAgentsStrategy_logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "full_states_log_2026-06-15.json"
+        with open(log_path, "w", encoding="utf-8") as f:
+            json.dump(cached_state, f)
+
+        with (
+            patch("tradingagents.ticker_resolver.resolve_ticker") as mock_resolve,
+            patch("tradingagents.dataflows.utils.safe_ticker_component", return_value="AAPL"),
+            patch.object(self.g, "_resolve_pending_entries"),
+            patch.object(self.g, "_run_graph", return_value=({"final_trade_decision": "Hold"}, "Hold")) as mock_run,
+            patch("tradingagents.graph.trading_graph.get_checkpointer") as mock_get_cp,
+            patch("tradingagents.graph.trading_graph.checkpoint_step", return_value=None),
+        ):
+            mock_resolve.return_value = {"ticker": "AAPL", "company_name": "Apple Inc."}
+            mock_cm = MagicMock()
+            mock_cm.__enter__.return_value = MagicMock()
+            mock_get_cp.return_value = mock_cm
+
+            state, signal = self.g.propagate(
+                "AAPL",
+                "2026-06-15",
+                holdings_context={"AAPL": {"shares": 200}},
+            )
+            self.assertEqual(state["final_trade_decision"], "Hold")
+            self.assertEqual(signal, "Hold")
+            mock_run.assert_called_once()
+
+    def test_cached_state_log_reused_when_holdings_context_matches(self):
+        self.g.config["checkpoint_enabled"] = True
+        cached_state = {
+            "final_trade_decision": "Buy",
+            "company_of_interest": "AAPL",
+            "trade_date": "2026-06-15",
+            "market_report": "",
+            "sentiment_report": "",
+            "news_report": "",
+            "fundamentals_report": "",
+            "governance_report": "",
+            "industry_report": "",
+            "investment_debate_state": {
+                "bull_history": [], "bear_history": [],
+                "history": [], "current_response": "",
+                "judge_decision": "",
+            },
+            "trader_investment_plan": {},
+            "risk_debate_state": {
+                "aggressive_history": [], "conservative_history": [],
+                "neutral_history": [], "history": [],
+                "judge_decision": "",
+            },
+            "investment_plan": {},
+            "holdings_context": {"AAPL": {"shares": 200}},
+        }
+        log_dir = Path(self.tmp_results) / "AAPL" / "TradingAgentsStrategy_logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "full_states_log_2026-06-15.json"
+        with open(log_path, "w", encoding="utf-8") as f:
+            json.dump(cached_state, f)
+
+        with (
+            patch("tradingagents.ticker_resolver.resolve_ticker") as mock_resolve,
+            patch("tradingagents.dataflows.utils.safe_ticker_component", return_value="AAPL"),
+            patch.object(self.g, "_resolve_pending_entries"),
+            patch.object(self.g, "_run_graph") as mock_run,
+            patch("tradingagents.graph.trading_graph.clear_checkpoint") as mock_clear,
+        ):
+            mock_resolve.return_value = {"ticker": "AAPL", "company_name": "Apple Inc."}
+
+            state, signal = self.g.propagate(
+                "AAPL",
+                "2026-06-15",
+                holdings_context={"AAPL": {"shares": 200}},
+            )
+            self.assertEqual(state["final_trade_decision"], "Buy")
+            self.assertEqual(signal, "Buy")
+            mock_run.assert_not_called()
             mock_clear.assert_called_once()
 
     def test_with_checkpoint_enabled_resumes_from_step(self):

@@ -145,6 +145,23 @@ class PortfolioSyncIntegration(unittest.TestCase):
         self.assertIsNotNone(portfolio.metadata.updated_at)
         self.assertEqual(portfolio.metadata.source_type, "google_sheet")
 
+    @patch.object(PortfolioSyncService, "_fetch_from_gsheet")
+    def test_sync_with_hk_and_etf_holdings(self, mock_fetch):
+        mock_fetch.return_value = [
+            ["代码", "资产名称", "持仓成本", "持仓数量", "现价", "投入本金 (元)", "盈亏率", "仓位占比", "网格策略"],
+            ["HK1810", "小米集团", "29.135", "1600", "30.00", "46616.00", "2.97%", "5.00%", ""],
+            ["159888", "芯片ETF", "1.050", "10000", "1.10", "10500.00", "4.76%", "3.00%", ""],
+        ]
+        svc = PortfolioSyncService(sheet_id="test123")
+        portfolio = svc.sync()
+        self.assertTrue(portfolio.has_holding("HK1810"))
+        self.assertTrue(portfolio.has_holding("1810.HK"))
+        self.assertTrue(portfolio.has_holding("159888"))
+        self.assertTrue(portfolio.has_holding("159888.SZ"))
+        h_hk = portfolio.get_holding("1810.HK")
+        self.assertIsNotNone(h_hk)
+        self.assertEqual(h_hk.shares, 1600)
+
 
 # =========================================================================
 # Edge-case tests merged from test_remaining_coverage.py
