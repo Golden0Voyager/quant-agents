@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -320,8 +321,6 @@ class TestIsMyWatchlist:
         self, mock_batch_runner_cls, mock_sync
     ):
         from cli.main import run_batch_analysis
-
-        from pathlib import Path
 
         mock_runner = MagicMock()
         mock_runner.generate_summary.return_value = Path("batch_summary.md")
