@@ -452,3 +452,49 @@ class TestIndustryAnalystMacroTools:
         assert "get_us_macro" in full_text
         assert "get_cftc_cot" in full_text
         assert "get_eia_petroleum" in full_text
+
+
+# ===================================================================
+# Full-table coverage tools
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestIndustryFullCoverageTools:
+    def test_sector_and_macro_tools_bound(self):
+        llm = _make_llm()
+        create_industry_analyst(llm)(dict(_BASE_STATE))
+        bound = llm.bind_tools.call_args[0][0]
+        names = [tool.name for tool in bound]
+        for expected in (
+            "get_sector_daily",
+            "get_sector_valuation",
+            "get_index_futures_basis",
+            "get_gold_price",
+            "get_hk_tech_index",
+            "get_fx_rate",
+            "get_central_bank_balance",
+        ):
+            assert expected in names, expected
+
+    def test_tool_guidance_mentions_new_tools(self):
+        llm = MagicMock()
+        captured = {}
+
+        def capture_invoke(prompt_val):
+            captured["full"] = str(prompt_val)
+            result = MagicMock()
+            result.content = "Analysis"
+            result.tool_calls = []
+            result.additional_kwargs = {}
+            return result
+
+        bound_llm = MagicMock()
+        bound_llm.side_effect = capture_invoke
+        llm.bind_tools.return_value = bound_llm
+
+        create_industry_analyst(llm)(dict(_BASE_STATE))
+
+        full_text = captured.get("full", "")
+        for expected in ("get_sector_daily", "get_index_futures_basis", "get_fx_rate"):
+            assert expected in full_text, expected
