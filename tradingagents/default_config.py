@@ -230,6 +230,12 @@ _BASE_CONFIG = {
         "get_block_trade": "smartmoney_db,akshare",
         "get_institutional_holdings": "smartmoney_db,akshare",
         "get_northbound_hold": "smartmoney_db,akshare",
+        # Macro archive tables exist only in the local quant_core.db
+        # (akshare/hithink have no matching interface), so the macro_data
+        # category-level chain (akshare,fred) must be overridden per tool.
+        "get_us_macro": "smartmoney_db",
+        "get_cftc_cot": "smartmoney_db",
+        "get_eia_petroleum": "smartmoney_db",
         # CNINFO is available through the existing AkShare dependency and
         # provides a second announcement index after the local archive.
         "get_company_announcements": "smartmoney_db,cninfo,akshare",

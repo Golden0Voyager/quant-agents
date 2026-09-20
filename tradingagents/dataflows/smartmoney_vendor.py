@@ -2420,3 +2420,269 @@ def get_commodity_futures(variety: str, periods: int = 60) -> str:
         lines.append(f"- Volume: {_fmt_num(row['Volume'])} | Open Interest: {_fmt_num(row['Hold'])}")
         lines.append("")
     return "\n".join(lines)
+
+
+# ===========================================================================
+# Macro data (宏观数据) — US daily macro, CFTC COT, EIA petroleum
+# ===========================================================================
+
+# Column legend for us_macro_daily, injected into the get_us_macro header so
+# the LLM can interpret raw FRED-style column names.
+_US_MACRO_COLUMN_LEGEND = (
+    "Column legend: effr=有效联邦基金利率, dgs3mo/dgs2/dgs10=美债3月/2年/10年收益率, "
+    "t10yie/t5yie=10年/5年盈亏平衡通胀预期, spread_10y_3m=10Y-3M利差, "
+    "real_rate_10y=10年实际利率, icsa=初请失业金人数, "
+    "hy_oas/ig_oas=高收益/投资级债信用利差(OAS), stlfi=STLFSI金融压力指数"
+)
+
+
+def get_us_macro(periods: int = 120) -> str:
+    """Fetch US daily macro indicators from quant_core.db.
+
+    Reads the ``us_macro_daily`` table (FRED-sourced, T+1): policy rate,
+    Treasury yields, term spread, real rates, inflation expectations,
+    initial claims, credit spreads (HY/IG OAS) and the STLFSI financial
+    stress index. Returns a CSV-formatted table, oldest-first.
+    """
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, effr, dgs3mo, dgs2, dgs10,
+               t10yie, t5yie, spread_10y_3m, real_rate_10y,
+               icsa, hy_oas, ig_oas, stlfi
+        FROM us_macro_daily
+        ORDER BY trade_date DESC
+        LIMIT ?
+        """,
+        (max(int(periods), 1),),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            "us_macro",
+            detail="us_macro_daily query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            "us_macro",
+            detail="no US macro daily data in quant_core.db.",
+        )
+
+    df = df.iloc[::-1].set_index("Date")
+    for col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors="coerce").round(4)
+
+    header = (
+        "## US Macro Daily (美国宏观日频指标)\n"
+        f"# Total records: {len(df)} days\n"
+        "# Source: quant_core.db / us_macro_daily (FRED, T+1)\n"
+        f"# {_US_MACRO_COLUMN_LEGEND}\n\n"
+    )
+    return header + df.to_csv()
+
+
+def _cot_available_instruments() -> str:
+    """Comma-separated instrument list for CFTC COT error messages."""
+    available = _df_from_sql(
+        """
+        SELECT DISTINCT instrument FROM cftc_cot_weekly
+        WHERE market = 'goods' ORDER BY instrument
+        """,
+    )
+    if available is None or available.empty:
+        return "N/A"
+    return ", ".join(available["instrument"].tolist())
+
+
+def get_cftc_cot(instrument: str | None = None, periods: int = 52) -> str:
+    """Fetch CFTC Commitments of Traders (持仓报告) from quant_core.db.
+
+    With *instrument* (Chinese name, e.g. 白银/黄金/纽约原油) returns that
+    instrument's weekly long/short/net series. Without *instrument* returns
+    the whole ``goods`` complex (12 commodities) as a wide net-position table
+    for the latest *periods* weeks.
+    """
+    limit = max(int(periods), 1)
+
+    if instrument:
+        name = instrument.strip()
+        df = _df_from_sql(
+            """
+            SELECT trade_date AS Date, long_positions AS Long,
+                   short_positions AS Short, net_positions AS Net
+            FROM cftc_cot_weekly
+            WHERE instrument = ?
+            ORDER BY trade_date DESC
+            LIMIT ?
+            """,
+            (name, limit),
+        )
+
+        if df is None:
+            raise NoMarketDataError(
+                instrument, name,
+                "cftc_cot_weekly query failed in quant_core.db (table missing or schema mismatch).",
+            )
+
+        if df.empty:
+            raise NoMarketDataError(
+                instrument, name,
+                f"no CFTC COT data in quant_core.db for instrument {name!r}. "
+                f"Available goods instruments: {_cot_available_instruments()}.",
+            )
+
+        df = df.iloc[::-1].reset_index(drop=True)
+        lines = [
+            f"## CFTC COT — {name} (每周持仓)",
+            "(source: quant_core.db / local SQLite)",
+            f"Total records: {len(df)} weeks",
+            "",
+            "| Date | Long | Short | Net |",
+            "| --- | ---: | ---: | ---: |",
+        ]
+        for _, row in df.iterrows():
+            lines.append(
+                f"| {row['Date']} | {_fmt_cot(row['Long'])} | {_fmt_cot(row['Short'])} | {_fmt_cot(row['Net'])} |"
+            )
+        return "\n".join(lines)
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, instrument, net_positions AS Net
+        FROM cftc_cot_weekly
+        WHERE market = 'goods'
+        ORDER BY trade_date DESC
+        LIMIT ?
+        """,
+        (limit * 12,),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            "cftc_cot",
+            detail="cftc_cot_weekly query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            "cftc_cot",
+            detail="no CFTC COT goods data in quant_core.db.",
+        )
+
+    # Wide table: one row per week, one column per goods instrument.
+    pivot = df.pivot_table(index="Date", columns="instrument", values="Net", aggfunc="last")
+    pivot = pivot.sort_index(ascending=False).head(limit).iloc[::-1]
+
+    lines = [
+        "## CFTC COT — Goods complex net positions (商品板块净持仓)",
+        "(source: quant_core.db / local SQLite, weekly)",
+        f"Total records: {len(pivot)} weeks x {len(pivot.columns)} instruments",
+        "Net = long - short positions; call get_cftc_cot with an instrument for the full long/short breakdown.",
+        "",
+        "| Date | " + " | ".join(pivot.columns) + " |",
+        "| --- |" + " ---: |" * len(pivot.columns),
+    ]
+    for date, row in pivot.iterrows():
+        cells = " | ".join(_fmt_cot(row[col]) for col in pivot.columns)
+        lines.append(f"| {date} | {cells} |")
+    return "\n".join(lines)
+
+
+def _fmt_cot(value) -> str:
+    return f"{value:,.0f}" if pd.notna(value) else "N/A"
+
+
+def get_eia_petroleum(series_id: str | None = None, periods: int = 156) -> str:
+    """Fetch EIA weekly petroleum statistics from quant_core.db.
+
+    With *series_id* (exact, e.g. PET.WCESTUS1.W) returns that series;
+    without it returns all five archived series (crude/gasoline/SPR
+    inventories, US production, refinery utilization) as a wide table.
+    """
+    limit = max(int(periods), 1)
+
+    if series_id:
+        sid = series_id.strip()
+        df = _df_from_sql(
+            """
+            SELECT week_date AS Date, value AS Value
+            FROM eia_petroleum_weekly
+            WHERE series_id = ?
+            ORDER BY week_date DESC
+            LIMIT ?
+            """,
+            (sid, limit),
+        )
+
+        if df is None:
+            raise NoMarketDataError(
+                series_id, sid,
+                "eia_petroleum_weekly query failed in quant_core.db (table missing or schema mismatch).",
+            )
+
+        if df.empty:
+            available = _df_from_sql(
+                "SELECT DISTINCT series_id FROM eia_petroleum_weekly ORDER BY series_id"
+            )
+            known = ", ".join(available["series_id"].tolist()) if available is not None and not available.empty else "N/A"
+            raise NoMarketDataError(
+                series_id, sid,
+                f"no EIA petroleum data in quant_core.db for series {sid!r}. "
+                f"Available series: {known}.",
+            )
+
+        df = df.iloc[::-1].reset_index(drop=True)
+        lines = [
+            f"## EIA Petroleum Weekly — {sid}",
+            "(source: quant_core.db / local SQLite)",
+            f"Total records: {len(df)} weeks",
+            "",
+            "| Date | Value |",
+            "| --- | ---: |",
+        ]
+        for _, row in df.iterrows():
+            value = f"{row['Value']:,.2f}" if pd.notna(row["Value"]) else "N/A"
+            lines.append(f"| {row['Date']} | {value} |")
+        return "\n".join(lines)
+
+    df = _df_from_sql(
+        """
+        SELECT week_date AS Date, series_id, series_name, value AS Value
+        FROM eia_petroleum_weekly
+        ORDER BY week_date DESC
+        LIMIT ?
+        """,
+        (limit * 5,),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            "eia_petroleum",
+            detail="eia_petroleum_weekly query failed in quant_core.db (table missing or schema mismatch).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            "eia_petroleum",
+            detail="no EIA petroleum data in quant_core.db.",
+        )
+
+    # Wide table: one row per week, one column per series.
+    df["Label"] = df["series_id"] + " " + df["series_name"].fillna("")
+    pivot = df.pivot_table(index="Date", columns="Label", values="Value", aggfunc="last")
+    pivot = pivot.sort_index(ascending=False).head(limit).iloc[::-1]
+
+    lines = [
+        "## EIA Petroleum Weekly (EIA 周度石油数据)",
+        "(source: quant_core.db / local SQLite)",
+        f"Total records: {len(pivot)} weeks x {len(pivot.columns)} series",
+        "",
+        "| Date | " + " | ".join(pivot.columns) + " |",
+        "| --- |" + " ---: |" * len(pivot.columns),
+    ]
+    for date, row in pivot.iterrows():
+        cells = " | ".join(
+            f"{row[col]:,.2f}" if pd.notna(row[col]) else "N/A" for col in pivot.columns
+        )
+        lines.append(f"| {date} | {cells} |")
+    return "\n".join(lines)

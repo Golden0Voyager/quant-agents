@@ -364,3 +364,49 @@ class TestMarketAnalystEdgeCases:
         del state["company_name"]
         result = node(state)
         assert result["market_report"] == "Analysis without company name key"
+
+
+# ===================================================================
+# Global macro symbols guidance
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestMarketAnalystGlobalMacroGuidance:
+    """get_stock_data guidance documents locally archived macro symbols."""
+
+    def _system_message(self):
+        llm = MagicMock()
+        captured = {}
+
+        def capture_invoke(messages):
+            captured["full"] = str(messages)
+            result = MagicMock()
+            result.content = "Analysis"
+            result.tool_calls = []
+            result.additional_kwargs = {}
+            return result
+
+        bound_llm = MagicMock()
+        bound_llm.side_effect = capture_invoke
+        llm.bind_tools.return_value = bound_llm
+
+        node = create_market_analyst(llm)
+        node(dict(_BASE_STATE))
+        return captured.get("full", "")
+
+    def test_guidance_mentions_vix_term_structure(self):
+        full_text = self._system_message()
+        assert "^VIX" in full_text
+        assert "^VIX3M" in full_text
+        assert "inverted" in full_text
+
+    def test_guidance_mentions_dollar_and_fx(self):
+        full_text = self._system_message()
+        assert "DX-Y.NYB" in full_text
+        assert "USDCNY=X" in full_text
+
+    def test_guidance_mentions_sector_benchmarks(self):
+        full_text = self._system_message()
+        assert "XLE" in full_text
+        assert "^SOX" in full_text
