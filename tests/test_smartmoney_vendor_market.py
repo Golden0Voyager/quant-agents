@@ -387,6 +387,13 @@ class TestGetCbIndex:
         with _PatchedVendor(empty_db), pytest.raises(NoMarketDataError):
             get_cb_index()
 
+    def test_raises_when_table_missing_single(self, empty_db):
+        from tradingagents.dataflows.smartmoney_vendor import get_cb_index
+
+        _drop(empty_db, "cb_index")
+        with _PatchedVendor(empty_db), pytest.raises(NoMarketDataError):
+            get_cb_index("JSL_EW")
+
 
 @pytest.mark.unit
 class TestGetEtfDaily:
@@ -481,6 +488,13 @@ class TestGetSouthFlow:
         with _PatchedVendor(empty_db), pytest.raises(NoMarketDataError):
             get_south_flow()
 
+    def test_raises_when_table_missing_single(self, empty_db):
+        from tradingagents.dataflows.smartmoney_vendor import get_south_flow
+
+        _drop(empty_db, "south_flow")
+        with _PatchedVendor(empty_db), pytest.raises(NoMarketDataError):
+            get_south_flow("南向")
+
 
 @pytest.mark.unit
 class TestGetIndexFuturesBasis:
@@ -519,6 +533,13 @@ class TestGetIndexFuturesBasis:
         _drop(empty_db, "index_futures_basis")
         with _PatchedVendor(empty_db), pytest.raises(NoMarketDataError):
             get_index_futures_basis()
+
+    def test_raises_when_table_missing_single(self, empty_db):
+        from tradingagents.dataflows.smartmoney_vendor import get_index_futures_basis
+
+        _drop(empty_db, "index_futures_basis")
+        with _PatchedVendor(empty_db), pytest.raises(NoMarketDataError):
+            get_index_futures_basis("IF0")
 
 
 @pytest.mark.unit
