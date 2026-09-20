@@ -869,6 +869,14 @@ def display_complete_report(final_state):
             )
 
 
+def _is_my_watchlist(name: str | None) -> bool:
+    """Return True if the watchlist name or path corresponds to the user's 'my' watchlist."""
+    if not name:
+        return False
+    clean = Path(name).stem.lower().replace("_", "-")
+    return clean in ("my", "my-list")
+
+
 def _sync_portfolio_for_my_list() -> None:
     """Sync holdings and transactions from Google Sheet for the 'my' watchlist.
 
@@ -1320,7 +1328,7 @@ def run_batch_analysis(
     # This intentionally overrides any holdings dict already resolved from the
     # stale local cache; callers that need a custom holdings sheet should use
     # another watchlist.
-    if watchlist_name == "my":
+    if _is_my_watchlist(watchlist_name):
         console.print(
             "[bold cyan]\u68c0\u6d4b\u5230 'my' watchlist\uff0c\u6b63\u5728\u4ece Google Sheet "
             "\u540c\u6b65\u6700\u65b0\u6301\u4ed3\u548c\u4ea4\u6613\u8bb0\u5f55...[/bold cyan]"
