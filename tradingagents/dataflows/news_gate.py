@@ -24,26 +24,37 @@ def apply_news_gate(
     symbol: str,
     company_name: str,
     date_range: str = "",
+    *,
+    config_prefix: str = "jev_news_gate",
+    question: str | None = None,
+    criteria: dict[str, str] | None = None,
+    body_trunc: int | None = None,
 ) -> tuple[list[int], list[int]] | None:
     config = get_config()
-    if not config.get("jev_news_gate_enabled") or not articles:
+    if not config.get(f"{config_prefix}_enabled") or not articles:
         return None
 
-    shadow = config.get("jev_news_gate_shadow", True)
+    shadow = config.get(f"{config_prefix}_shadow", True)
     # 正式模式下 keep_floor 用来省 API 调用；shadow 模式下它必须让路——
     # shadow 的目的正是收集小样本的分数分布来校准这个阈值，跳过就没有数据。
-    if not shadow and len(articles) <= config.get("jev_news_gate_keep_floor", 5):
+    if not shadow and len(articles) <= config.get(f"{config_prefix}_keep_floor", 5):
         return None
 
-    gate = TypeSafeNewsGate(config)
+    gate = TypeSafeNewsGate(config, config_prefix=config_prefix)
+    criteria_tuple: tuple[str, str] | None = None
+    if criteria is not None:
+        criteria_tuple = (criteria["true"], criteria["false"])
     scores = gate.score_articles(
         articles,
         {"ticker": symbol, "company_name": company_name, "date_range": date_range},
+        question=question,
+        criteria=criteria_tuple,
+        body_trunc=body_trunc,
     )
     if scores is None:
         return None
 
-    threshold = config.get("jev_news_gate_threshold", 0.5)
+    threshold = config.get(f"{config_prefix}_threshold", 0.5)
     kept = [i for i, s in enumerate(scores) if s >= threshold]
     demoted = [i for i, s in enumerate(scores) if s < threshold]
     _log_decision(config, symbol, articles, scores, kept, demoted, shadow=shadow)
