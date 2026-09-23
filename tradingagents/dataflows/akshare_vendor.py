@@ -678,12 +678,117 @@ def get_company_announcements(
             detail=f"no company announcements found for {symbol} between {start_date} and {end_date} via akshare",
         )
 
+    from tradingagents.dataflows.config import get_config
+
+    cfg = get_config()
+    ann_enabled = bool(cfg.get("jev_ann_gate_enabled"))
+    shadow = bool(cfg.get("jev_ann_gate_shadow", True))
+
+    # Row dicts preserve the same field lookups as the legacy df.iterrows() loop,
+    # so with the gate disabled ``kept_rows is rows`` and the output is
+    # byte-identical to the pre-gate rendering.
+    rows = [dict(r) for _, r in df.iterrows()]
+    kept_rows: list[dict] = rows
+    display_rows: list[dict] = rows
+    demoted_articles: list[dict] = []
+    bodies: dict[str, str] = {}
+    render_bodies = False
+
+    if ann_enabled:
+        try:
+            # Lazy imports: gate/fetch/dedup deps are optional — a missing or
+            # broken dependency must never break the announcement tool.
+            from tradingagents.dataflows import announcement_bodies, announcement_dedup, news_gate
+            from tradingagents.llm_clients.typesafe_client import (
+                _ANN_CRITERIA_FALSE,
+                _ANN_CRITERIA_TRUE,
+                _ANN_QUESTION,
+            )
+
+            # MINOR-7: extract the art_code once per row; fetch + article build
+            # below read the same ``_art_code`` key.
+            for r in rows:
+                r["_art_code"] = announcement_bodies.extract_art_code(r.get("网址", ""))
+
+            # BLOCKER-3: dedup runs only while enabled; BLOCKER-2: identity keys
+            # are available before any body fetch. Rendering keeps the full list
+            # unless we are in the formal (non-shadow) mode (MINOR-10).
+            dedup_kept, _dedup_dropped = announcement_dedup.dedup_announcements(
+                rows,
+                max_per_type=cfg.get("jev_ann_gate_max_per_type", 3),
+                series_types=("调研活动",),
+            )
+            if not shadow:
+                kept_rows = dedup_kept
+
+            # MAJOR-6: body fetching depends only on enabled AND fetch_bodies —
+            # never on the presence of a Jev API key.
+            if cfg.get("jev_ann_gate_fetch_bodies", True):
+                codes = [r["_art_code"] for r in kept_rows if r.get("_art_code")]
+                bodies = announcement_bodies.fetch_bodies(
+                    codes,
+                    cfg.get("data_cache_dir", "."),
+                    timeout=cfg.get("jev_ann_gate_fetch_timeout", 15),
+                    max_workers=cfg.get("jev_ann_gate_max_workers", 5),
+                )
+
+            articles = [
+                {
+                    "title": r.get("公告标题", ""),
+                    "body": bodies.get(r.get("_art_code") or "", ""),
+                    "publisher": "公告",
+                    "pub_date": str(r.get("公告日期", "")),
+                    "link": r.get("网址", ""),
+                }
+                for r in kept_rows
+            ]
+
+            # BLOCKER-1: config_prefix routes the gate to its own jev_ann_gate_*
+            # keys instead of silently inheriting the news gate's.
+            company_name = ""
+            try:
+                from tradingagents.ticker_resolver import resolve_ticker
+
+                company_name = (resolve_ticker(symbol).get("company_name") or "").strip()
+            except Exception:  # noqa: BLE001 — name lookup must never break the gate
+                company_name = ""
+
+            gate_result = news_gate.apply_news_gate(
+                articles, symbol, company_name,
+                date_range=f"{start_date} to {end_date}",
+                config_prefix="jev_ann_gate",
+                question=_ANN_QUESTION,
+                criteria={"true": _ANN_CRITERIA_TRUE, "false": _ANN_CRITERIA_FALSE},
+                body_trunc=cfg.get("jev_ann_gate_body_trunc", 800),
+            )
+            # gate_result is None for every fail-open reason (disabled / no API
+            # key / scoring failure / keep_floor / shadow) → everything kept.
+            kept_idx, demoted_idx = gate_result if gate_result else (list(range(len(articles))), [])
+            demoted_articles = [articles[i] for i in demoted_idx]
+            display_rows = [kept_rows[i] for i in kept_idx]
+
+            # Body rendering is decoupled from the gate result: shadow never
+            # renders bodies ("shadow only records"), formal mode renders them
+            # even when the gate fails open (MAJOR-6).
+            render_bodies = cfg.get("jev_ann_gate_fetch_bodies", True) and not shadow
+        except Exception as exc:  # noqa: BLE001 — 门控/抓取/去重任何异常都退回现状
+            logger.warning(
+                "Jev announcement gate failed for %s, falling back to title-only rendering: %s",
+                symbol,
+                exc,
+            )
+            kept_rows = rows
+            display_rows = rows
+            demoted_articles = []
+            bodies = {}
+            render_bodies = False
+
     lines = [
         f"## {symbol.upper()} Company Announcements from {start_date} to {end_date} "
         f"(source: akshare / Eastmoney)\n",
-        f"Total notices: {len(df)}\n",
+        f"Total notices: {len(kept_rows)}\n",
     ]
-    for _, row in df.iterrows():
+    for row in display_rows:
         lines.append(f"### {row.get('公告标题', 'N/A')}")
         if row.get("公告类型"):
             lines.append(f"**Type**: {row['公告类型']}")
@@ -691,6 +796,19 @@ def get_company_announcements(
             lines.append(f"**Date**: {row['公告日期']}")
         if row.get("网址"):
             lines.append(f"**Link**: {row['网址']}")
+        if render_bodies:
+            body = bodies.get(row.get("_art_code") or "", "")
+            if body:
+                lines.append(body)
+        lines.append("")
+
+    if demoted_articles:
+        lines.append(
+            f"### 🤖 以下 {len(demoted_articles)} 条公告经 Jev 门控判定为例行程序性通知"
+            "（股东会召集/过户登记/IR记录等，无新增决策相关信息），仅列标题供参考："
+        )
+        for a in demoted_articles:
+            lines.append(f"- {a['title']} ({a['pub_date']})")
         lines.append("")
 
     return "\n".join(lines)

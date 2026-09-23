@@ -365,5 +365,171 @@ class DecisionLogErrorTests(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class ConfigPrefixTests(unittest.TestCase):
+    def _client(self, cfg, prefix="jev_news_gate"):
+        with patch.dict(os.environ, {"TYPESAFE_API_KEY": "test-key"}, clear=False):
+            return TypeSafeNewsGate(cfg, config_prefix=prefix)
+
+    def test_default_prefix_reads_news_keys(self):
+        cfg = {
+            "jev_api_key_env": "TYPESAFE_API_KEY",
+            "jev_model": "jev-latest",
+            "jev_news_gate_timeout": 13,
+            "jev_news_gate_max_articles": 1,
+        }
+        gate = self._client(cfg)
+        with patch(
+            "tradingagents.llm_clients.typesafe_client.requests.post",
+            return_value=_ok_response({"article_0": {"noul": 0.9}}),
+        ) as mock_post:
+            scores = gate.score_articles(_articles(3), {})
+        self.assertEqual(scores, [0.9, 1.0, 1.0])
+        posted = mock_post.call_args
+        self.assertEqual(posted.kwargs["timeout"], 13)
+        self.assertEqual(len(posted.kwargs["json"]["questions"]), 1)
+
+    def test_ann_prefix_reads_only_ann_keys(self):
+        cfg = {
+            "jev_api_key_env": "TYPESAFE_API_KEY",
+            "jev_model": "jev-latest",
+            "jev_ann_gate_timeout": 7,
+            "jev_ann_gate_max_articles": 2,
+            "jev_news_gate_timeout": 99,
+            "jev_news_gate_max_articles": 30,
+        }
+        gate = self._client(cfg, prefix="jev_ann_gate")
+        with patch(
+            "tradingagents.llm_clients.typesafe_client.requests.post",
+            return_value=_ok_response(
+                {"article_0": {"noul": 0.8}, "article_1": {"noul": 0.4}}
+            ),
+        ) as mock_post:
+            scores = gate.score_articles(_articles(3), {})
+        self.assertEqual(scores, [0.8, 0.4, 1.0])
+        posted = mock_post.call_args
+        self.assertEqual(posted.kwargs["timeout"], 7)
+        self.assertEqual(len(posted.kwargs["json"]["questions"]), 2)
+
+    def test_ann_prefix_client_ignores_news_keys(self):
+        # only jev_news_gate_* present: ann-prefixed client falls back to defaults
+        cfg = {
+            "jev_api_key_env": "TYPESAFE_API_KEY",
+            "jev_model": "jev-latest",
+            "jev_news_gate_timeout": 99,
+            "jev_news_gate_max_articles": 1,
+        }
+        gate = self._client(cfg, prefix="jev_ann_gate")
+        with patch(
+            "tradingagents.llm_clients.typesafe_client.requests.post",
+            return_value=_ok_response(
+                {
+                    "article_0": {"noul": 0.5},
+                    "article_1": {"noul": 0.5},
+                    "article_2": {"noul": 0.5},
+                }
+            ),
+        ) as mock_post:
+            scores = gate.score_articles(_articles(3), {})
+        self.assertEqual(scores, [0.5, 0.5, 0.5])
+        posted = mock_post.call_args
+        self.assertEqual(posted.kwargs["timeout"], 10)
+        self.assertEqual(len(posted.kwargs["json"]["questions"]), 3)
+
+    def test_news_keys_do_not_fire_under_ann_prefix(self):
+        # config carries only jev_news_gate_enabled: ann-prefixed gate must not run
+        cfg = _gate_config()
+        with _patch_gate_config(cfg), patch.object(
+            news_gate.TypeSafeNewsGate, "score_articles"
+        ) as mock_score:
+            result = news_gate.apply_news_gate(
+                _articles(10), "300454.SZ", "测试公司", config_prefix="jev_ann_gate"
+            )
+        self.assertIsNone(result)
+        mock_score.assert_not_called()
+
+    def test_apply_news_gate_forwards_overrides_with_ann_prefix(self):
+        cfg = {
+            "jev_api_key_env": "TYPESAFE_API_KEY",
+            "jev_model": "jev-latest",
+            "jev_ann_gate_enabled": True,
+            "jev_ann_gate_shadow": True,
+            "jev_ann_gate_threshold": 0.5,
+            "jev_ann_gate_keep_floor": 5,
+            "jev_ann_gate_max_articles": 30,
+            "jev_ann_gate_timeout": 7,
+            "data_cache_dir": tempfile.mkdtemp(),
+        }
+        with _patch_gate_config(cfg), patch.object(
+            news_gate.TypeSafeNewsGate, "score_articles", return_value=[0.9, 0.1]
+        ) as mock_score:
+            result = news_gate.apply_news_gate(
+                _articles(2),
+                "002594.SZ",
+                "比亚迪",
+                date_range="2026-09-01 to 2026-09-22",
+                config_prefix="jev_ann_gate",
+                question="ANN_Q",
+                criteria={"true": "ANN_T", "false": "ANN_F"},
+                body_trunc=800,
+            )
+        self.assertIsNone(result)  # shadow mode
+        call = mock_score.call_args
+        self.assertEqual(call.args[0], _articles(2))
+        self.assertEqual(call.args[1], {
+            "ticker": "002594.SZ",
+            "company_name": "比亚迪",
+            "date_range": "2026-09-01 to 2026-09-22",
+        })
+        self.assertEqual(call.kwargs["question"], "ANN_Q")
+        self.assertEqual(call.kwargs["criteria"], ("ANN_T", "ANN_F"))
+        self.assertEqual(call.kwargs["body_trunc"], 800)
+
+
+class ScoreOverridesTests(unittest.TestCase):
+    def test_overrides_appear_in_payload(self):
+        cfg = _gate_config()
+        with patch.dict(os.environ, {"TYPESAFE_API_KEY": "test-key"}, clear=False):
+            gate = TypeSafeNewsGate(cfg)
+        articles = _articles(1)
+        articles[0]["body"] = "x" * 900
+        with patch(
+            "tradingagents.llm_clients.typesafe_client.requests.post",
+            return_value=_ok_response({"article_0": {"noul": 0.5}}),
+        ) as mock_post:
+            gate.score_articles(
+                articles,
+                {"ticker": "002594.SZ", "company_name": "比亚迪"},
+                question="ANN_Q",
+                criteria=("ANN_T", "ANN_F"),
+                body_trunc=800,
+            )
+        q = mock_post.call_args.kwargs["json"]["questions"]["article_0"]
+        self.assertEqual(q["instructions"]["question"], "ANN_Q")
+        self.assertEqual(q["criteria"], {"true": "ANN_T", "false": "ANN_F"})
+        self.assertEqual(len(q["instructions"]["article"]["body"]), 800)
+        self.assertEqual(len(articles[0]["body"]), 900)  # caller dict not mutated
+
+    def test_payload_identical_to_current_behavior_when_unset(self):
+        from tradingagents.llm_clients import typesafe_client
+
+        cfg = _gate_config()
+        with patch.dict(os.environ, {"TYPESAFE_API_KEY": "test-key"}, clear=False):
+            gate = TypeSafeNewsGate(cfg)
+        articles = _articles(1)
+        articles[0]["body"] = "x" * 900
+        with patch(
+            "tradingagents.llm_clients.typesafe_client.requests.post",
+            return_value=_ok_response({"article_0": {"noul": 0.5}}),
+        ) as mock_post:
+            gate.score_articles(articles, {})
+        q = mock_post.call_args.kwargs["json"]["questions"]["article_0"]
+        self.assertEqual(q["instructions"]["question"], typesafe_client._QUESTION)
+        self.assertEqual(q["criteria"]["true"], typesafe_client._CRITERIA_TRUE)
+        self.assertEqual(q["criteria"]["false"], typesafe_client._CRITERIA_FALSE)
+        self.assertEqual(
+            len(q["instructions"]["article"]["body"]), typesafe_client._BODY_TRUNC
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

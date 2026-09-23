@@ -28,10 +28,21 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_MEMORY_LOG_PATH":      "memory_log_path",
     "TRADINGAGENTS_TUSHARE_ENABLED":     "tushare_enabled",
     "DISABLE_YFINANCE_FALLBACK":          "disable_yfinance_fallback",
-    "TRADINGAGENTS_JEV_NEWS_GATE_ENABLED":   "jev_news_gate_enabled",
-    "TRADINGAGENTS_JEV_NEWS_GATE_SHADOW":    "jev_news_gate_shadow",
-    "TRADINGAGENTS_JEV_NEWS_GATE_THRESHOLD": "jev_news_gate_threshold",
-    "TRADINGAGENTS_JEV_MODEL":               "jev_model",
+    "TRADINGAGENTS_JEV_NEWS_GATE_ENABLED":       "jev_news_gate_enabled",
+    "TRADINGAGENTS_JEV_NEWS_GATE_SHADOW":        "jev_news_gate_shadow",
+    "TRADINGAGENTS_JEV_NEWS_GATE_THRESHOLD":     "jev_news_gate_threshold",
+    "TRADINGAGENTS_JEV_ANN_GATE_ENABLED":        "jev_ann_gate_enabled",
+    "TRADINGAGENTS_JEV_ANN_GATE_SHADOW":         "jev_ann_gate_shadow",
+    "TRADINGAGENTS_JEV_ANN_GATE_FETCH_BODIES":   "jev_ann_gate_fetch_bodies",
+    "TRADINGAGENTS_JEV_ANN_GATE_THRESHOLD":      "jev_ann_gate_threshold",
+    "TRADINGAGENTS_JEV_ANN_GATE_KEEP_FLOOR":     "jev_ann_gate_keep_floor",
+    "TRADINGAGENTS_JEV_ANN_GATE_MAX_ARTICLES":   "jev_ann_gate_max_articles",
+    "TRADINGAGENTS_JEV_ANN_GATE_MAX_PER_TYPE":   "jev_ann_gate_max_per_type",
+    "TRADINGAGENTS_JEV_ANN_GATE_BODY_TRUNC":     "jev_ann_gate_body_trunc",
+    "TRADINGAGENTS_JEV_ANN_GATE_TIMEOUT":        "jev_ann_gate_timeout",
+    "TRADINGAGENTS_JEV_ANN_GATE_FETCH_TIMEOUT":  "jev_ann_gate_fetch_timeout",
+    "TRADINGAGENTS_JEV_ANN_GATE_MAX_WORKERS":    "jev_ann_gate_max_workers",
+    "TRADINGAGENTS_JEV_MODEL":                   "jev_model",
     "INPUT_TOKEN_PRICE_PER_1M":           "input_token_price_per_1m",
     "OUTPUT_TOKEN_PRICE_PER_1M":          "output_token_price_per_1m",
 }
@@ -265,6 +276,21 @@ _BASE_CONFIG = {
     "jev_news_gate_keep_floor": 2,         # 相关文章 ≤ 此数不过滤
     "jev_news_gate_max_articles": 30,      # 单次最多送判条数，超出部分直接保留
     "jev_news_gate_timeout": 10,           # HTTP 超时（秒）
+    # ── Jev 公告正文增强 + 门控（独立于新闻门控，config_prefix="jev_ann_gate"）──
+    # 用 TypeSafe Jev 对公告做语义重要性判断：抓取正文（可选）、去重、低价值公告
+    # 降级为仅列标题。默认关闭 → 渲染与现状逐字一致；默认 shadow → 只记录不改变
+    # 渲染。详见 docs/jev_announcement_gate_design.md
+    "jev_ann_gate_enabled": False,        # 总开关（默认关闭）
+    "jev_ann_gate_shadow": True,          # shadow：抓取+打分+日志，渲染与现状逐字一致
+    "jev_ann_gate_fetch_bodies": True,    # false = 只对标题打分，省 45s 抓取延迟
+    "jev_ann_gate_threshold": 0.5,        # noul ≥ 此值保留正文
+    "jev_ann_gate_keep_floor": 3,         # 正式模式下公告数 ≤ 此值不送判
+    "jev_ann_gate_max_articles": 30,      # 送判上限，超出部分按 kept 处理
+    "jev_ann_gate_max_per_type": 3,       # 同类公告（如「调研活动」）最多保留条数
+    "jev_ann_gate_body_trunc": 800,       # 送判正文截断字符数
+    "jev_ann_gate_timeout": 15,           # Jev 评分 HTTP 超时（秒）
+    "jev_ann_gate_fetch_timeout": 15,     # 正文抓取 HTTP 超时（秒）
+    "jev_ann_gate_max_workers": 5,        # 并发抓取数
     # Portfolio / holdings configuration
     "portfolio": {
         "data_path": os.path.expanduser("~/Code/quant_data/tradingagents_portfolio.json"),

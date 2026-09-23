@@ -32,13 +32,34 @@ _CRITERIA_FALSE = (
     "position, or business developments"
 )
 
+_ANN_QUESTION = (
+    "Does this announcement contain material, decision-relevant information "
+    "about `state.company_name` that an investor should not miss?"
+)
+
+_ANN_CRITERIA_TRUE = (
+    "Financial results or guidance, major contracts or orders, M&A or "
+    "restructuring, equity events (placement, buyback, share incentive, "
+    "shareholder increase/decrease), regulatory or litigation outcomes, "
+    "production or capacity changes, or substantive management commentary "
+    "on business segments"
+)
+
+_ANN_CRITERIA_FALSE = (
+    "Routine procedural notices: meeting convocation or resolutions with no "
+    "new financial substance, record-date or transfer-suspension notices, "
+    "investor-relations activity logs that only restate previously disclosed "
+    "figures, standard bylaw or board-committee formalities, and other "
+    "announcements carrying no new decision-relevant information"
+)
+
 
 class TypeSafeNewsGate:
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, *, config_prefix: str = "jev_news_gate"):
         self._api_key = os.getenv(config.get("jev_api_key_env", "TYPESAFE_API_KEY"), "")
         self._model = config.get("jev_model", "jev-latest")
-        self._timeout = config.get("jev_news_gate_timeout", 10)
-        self._max_articles = config.get("jev_news_gate_max_articles", 30)
+        self._timeout = config.get(f"{config_prefix}_timeout", 10)
+        self._max_articles = config.get(f"{config_prefix}_max_articles", 30)
 
     @property
     def available(self) -> bool:
@@ -48,23 +69,29 @@ class TypeSafeNewsGate:
         self,
         articles: list[dict],
         context: dict,
+        *,
+        question: str | None = None,
+        criteria: tuple[str, str] | None = None,
+        body_trunc: int | None = None,
     ) -> list[float] | None:
         if not self.available or not articles:
             return None
         judged = articles[: self._max_articles]
+        criteria_true, criteria_false = criteria or (_CRITERIA_TRUE, _CRITERIA_FALSE)
+        trunc = _BODY_TRUNC if body_trunc is None else body_trunc
         questions = {
             f"article_{i}": {
                 "type": "noul",
                 "instructions": {
                     "article": {
                         "title": a["title"],
-                        "body": a["body"][:_BODY_TRUNC],
+                        "body": a["body"][:trunc],
                         "publisher": a["publisher"],
                         "pub_date": a["pub_date"],
                     },
-                    "question": _QUESTION,
+                    "question": _QUESTION if question is None else question,
                 },
-                "criteria": {"true": _CRITERIA_TRUE, "false": _CRITERIA_FALSE},
+                "criteria": {"true": criteria_true, "false": criteria_false},
             }
             for i, a in enumerate(judged)
         }
