@@ -9,6 +9,8 @@ LLM 客户端层：多提供商接入、能力探测、定价与限流。
   Ollama、SenseNova、Agnes AI、ModelScope、NVIDIA NIM、MiniMax）
 - 专属客户端：`anthropic_client.py`、`google_client.py`、`azure_client.py`
 - `capabilities.py` / `pricing.py`（对应根目录 `pricing.yaml`）/ `rate_limit.py` / `retry_utils.py`
+- `typesafe_client.py` — TypeSafe Jev 判断客户端（不是 LLM 聊天客户端：requests 直连
+  System One API，只做 Noul 语义评分；不要往 `factory.py` 里注册，不走 fallback 链）
 
 ## 已知坑（改动前必读）
 

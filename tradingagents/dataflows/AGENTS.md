@@ -15,6 +15,7 @@
 - `hithink_common.py` / `hithink_vendor.py` — 同花顺 HiThink Financial-API 客户端与 vendor
   （env `HITHINK_FINANCE_API_KEY`；三表/财务指标/热榜/龙虎榜/涨停池，链位在 smartmoney_db 之后、akshare 之前；异动原因 hithink 独占，预取注入 Sentiment prompt；估值快照为 market_data_validator 的 PE/PB/PS/PCF 交叉校验锚；集合竞价/短线风向标 hithink 独占，预取注入 Market Analyst prompt）
 - `market_data_validator.py` — 数值声明的验证锚定（grounding）
+- `news_gate.py` — Jev 新闻质量门控（env `TYPESAFE_API_KEY`，默认关闭；开启后对个股新闻做语义重要性判断，低分文章降级为仅列标题；全路径 fail-open，shadow 模式默认只记录不降级；详见 `docs/jev_news_gate_design.md`）
 
 ## 已知坑
 
