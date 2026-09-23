@@ -106,26 +106,55 @@ def get_news_yfinance(
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
 
-        news_str = ""
-        filtered_count = 0
-
+        filtered: list[dict] = []
         for article in news:
             data = _extract_article_data(article)
 
             # Keep only articles within the requested window (look-ahead safe).
             if not _in_news_window(data["pub_date"], start_dt, end_dt):
                 continue
+            filtered.append(data)
 
+        if not filtered:
+            return f"No news found for {ticker}{resolved} between {start_date} and {end_date}"
+
+        from tradingagents.dataflows import news_gate
+        gate_result = news_gate.apply_news_gate(
+            [
+                {
+                    "title": d["title"],
+                    "body": d["summary"],
+                    "publisher": d["publisher"],
+                    "pub_date": str(d["pub_date"]),
+                    "link": d["link"],
+                }
+                for d in filtered
+            ],
+            ticker,
+            company_name="",
+            date_range=f"{start_date} to {end_date}",
+        )
+        kept_data, demoted_data = filtered, []
+        if gate_result:
+            kept_idx, demoted_idx = gate_result
+            kept_data = [filtered[i] for i in kept_idx]
+            demoted_data = [filtered[i] for i in demoted_idx]
+
+        news_str = ""
+        for data in kept_data:
             news_str += f"### {data['title']} (source: {data['publisher']})\n"
             if data["summary"]:
                 news_str += f"{data['summary']}\n"
             if data["link"]:
                 news_str += f"Link: {data['link']}\n"
             news_str += "\n"
-            filtered_count += 1
-
-        if filtered_count == 0:
-            return f"No news found for {ticker}{resolved} between {start_date} and {end_date}"
+        if demoted_data:
+            news_str += (
+                f"### 🤖 {len(demoted_data)} articles demoted by Jev gate "
+                "(low information density), titles only:\n"
+            )
+            for data in demoted_data:
+                news_str += f"- {data['title']} ({data['pub_date']})\n"
 
         return f"## {ticker}{resolved} News, from {start_date} to {end_date}:\n\n{news_str}"
 

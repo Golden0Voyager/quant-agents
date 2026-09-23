@@ -495,6 +495,20 @@ def get_news(
         unrelated_rows = list(df[~related_mask].iterrows())
         df = df[related_mask]
 
+    from tradingagents.dataflows import news_gate
+
+    gate_articles = [news_gate.akshare_row_to_article(row) for _, row in df.iterrows()]
+    gate_result = news_gate.apply_news_gate(
+        gate_articles, symbol, company_name,
+        date_range=f"{start_date} to {end_date}",
+    )
+    demoted_rows = []
+    if gate_result:
+        kept_idx, demoted_idx = gate_result
+        rows = list(df.iterrows())
+        demoted_rows = [rows[i] for i in demoted_idx]
+        df = df.iloc[kept_idx]
+
     # Zero name-matching articles no longer aborts: keyword hits are mostly
     # listicles (资金流/股东户数/两融榜) where the stock appears in a data
     # table, not in the article text. Render them title-only with a caveat
@@ -530,6 +544,15 @@ def get_news(
                 "疑为代码碰撞（如同号基金）或无关快讯，仅列标题供参考，不应作为本公司新闻引用："
             )
         for _, row in unrelated_rows:
+            lines.append(f"- {row.get('新闻标题', 'N/A')} ({row.get('发布时间', 'N/A')})")
+        lines.append("")
+
+    if demoted_rows:
+        lines.append(
+            f"### 🤖 以下 {len(demoted_rows)} 条新闻经 Jev 门控判定信息密度较低"
+            "（例行数据回顾/股东户数更新/泛泛行业点评等），仅列标题供参考："
+        )
+        for _, row in demoted_rows:
             lines.append(f"- {row.get('新闻标题', 'N/A')} ({row.get('发布时间', 'N/A')})")
         lines.append("")
 

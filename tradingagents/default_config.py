@@ -28,6 +28,10 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_MEMORY_LOG_PATH":      "memory_log_path",
     "TRADINGAGENTS_TUSHARE_ENABLED":     "tushare_enabled",
     "DISABLE_YFINANCE_FALLBACK":          "disable_yfinance_fallback",
+    "TRADINGAGENTS_JEV_NEWS_GATE_ENABLED":   "jev_news_gate_enabled",
+    "TRADINGAGENTS_JEV_NEWS_GATE_SHADOW":    "jev_news_gate_shadow",
+    "TRADINGAGENTS_JEV_NEWS_GATE_THRESHOLD": "jev_news_gate_threshold",
+    "TRADINGAGENTS_JEV_MODEL":               "jev_model",
     "INPUT_TOKEN_PRICE_PER_1M":           "input_token_price_per_1m",
     "OUTPUT_TOKEN_PRICE_PER_1M":          "output_token_price_per_1m",
 }
@@ -249,6 +253,18 @@ _BASE_CONFIG = {
     },
     # When True, A-share vendor chains never fall back to yfinance.
     "disable_yfinance_fallback": False,
+    # ── Jev 新闻质量门控 ─────────────────────────────────
+    # 用 TypeSafe Jev（System One）对个股新闻做语义重要性判断，
+    # 低信息密度文章降级为仅列标题。默认关闭；开启后默认 shadow
+    # 模式（只记录不降级）。详见 docs/jev_news_gate_design.md
+    "jev_news_gate_enabled": False,        # 总开关
+    "jev_news_gate_shadow": True,          # shadow 模式：只记录不降级
+    "jev_api_key_env": "TYPESAFE_API_KEY",  # API Key 环境变量名
+    "jev_model": "jev-latest",             # Jev 模型版本
+    "jev_news_gate_threshold": 0.5,        # noul ≥ 此值保留全文，否则降级
+    "jev_news_gate_keep_floor": 2,         # 相关文章 ≤ 此数不过滤
+    "jev_news_gate_max_articles": 30,      # 单次最多送判条数，超出部分直接保留
+    "jev_news_gate_timeout": 10,           # HTTP 超时（秒）
     # Portfolio / holdings configuration
     "portfolio": {
         "data_path": os.path.expanduser("~/Code/quant_data/tradingagents_portfolio.json"),
