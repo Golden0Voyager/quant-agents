@@ -3588,3 +3588,121 @@ def get_central_bank_balance(periods: int = 36) -> str:
         f"# {_CBB_COLUMN_LEGEND}\n\n"
     )
     return header + df.to_csv()
+
+
+# ===========================================================================
+# Eastmoney 千股千评 snapshot (stock_comment)
+# ===========================================================================
+
+
+def get_stock_comment(symbol: Annotated[str, "A-share ticker e.g. 002241.SZ"]) -> dict[str, Any]:
+    """Fetch the latest 千股千评 (composite stock comment) snapshot from quant_core.db.
+
+    The ``stock_comment`` table is a full-market daily snapshot maintained by
+    quant_pipeline (migration 024, task ``update_stock_comment``), sparing
+    every TradingAgents run the slow ``ak.stock_comment_em()`` whole-table
+    fetch. Returns the most recent row for *symbol* keyed by the snapshot's
+    own ``trade_date``.
+
+    Raises:
+        NoMarketDataError: table missing, query failed, or no row for symbol.
+    """
+    code = _to_smartmoney_symbol(symbol)
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date, name, close_price, change_pct, turnover,
+               pe_dynamic, prime_cost, org_participation, composite_score,
+               rank_up, rank, focus_index
+        FROM stock_comment
+        WHERE code = ?
+        ORDER BY trade_date DESC
+        LIMIT 1
+        """,
+        (code,),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            "stock_comment",
+            detail="stock_comment query failed in quant_core.db (table missing — run quant_pipeline migration 024 / task update_stock_comment).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            "stock_comment",
+            detail=f"no 千股千评 snapshot in quant_core.db for {symbol}.",
+        )
+
+    row = df.iloc[0].to_dict()
+    logger.debug(
+        "stock_comment local hit for %s: trade_date=%s score=%s",
+        symbol, row.get("trade_date"), row.get("composite_score"),
+    )
+    return row
+
+
+# ===========================================================================
+# Eastmoney 人气榜 snapshot (stock_hot_rank)
+# ===========================================================================
+
+
+def get_stock_hot_rank(symbol: Annotated[str, "A-share ticker e.g. 002241.SZ"]) -> dict[str, Any]:
+    """Fetch the latest Eastmoney hot-rank snapshot entry for *symbol* from quant_core.db.
+
+    The ``stock_hot_rank`` table is a Top-100 popularity-rank snapshot
+    maintained by quant_pipeline (migration 025, task ``update_hot_rank``).
+    Returns the most recent row for *symbol* keyed by snapshot date.
+
+    Raises:
+        NoMarketDataError: table missing, query failed, or no row for symbol
+            (which includes "not in the latest top-100" — callers that need
+            to distinguish should use ``get_stock_hot_rank_snapshot_date``).
+    """
+    code = _to_smartmoney_symbol(symbol)
+
+    df = _df_from_sql(
+        """
+        SELECT trade_date, code, name, rank, rank_change, prev_rank,
+               close_price, change_pct
+        FROM stock_hot_rank
+        WHERE code = ?
+        ORDER BY trade_date DESC, rank ASC
+        LIMIT 1
+        """,
+        (code,),
+    )
+
+    if df is None:
+        raise NoMarketDataError(
+            "stock_hot_rank",
+            detail="stock_hot_rank query failed in quant_core.db (table missing — run quant_pipeline migration 025 / task update_hot_rank).",
+        )
+
+    if df.empty:
+        raise NoMarketDataError(
+            "stock_hot_rank",
+            detail=f"{symbol} not in the latest Eastmoney top-100 hot-rank snapshot.",
+        )
+
+    row = df.iloc[0].to_dict()
+    logger.debug(
+        "stock_hot_rank local hit for %s: trade_date=%s rank=%s",
+        symbol, row.get("trade_date"), row.get("rank"),
+    )
+    return row
+
+
+def get_stock_hot_rank_snapshot_date() -> str | None:
+    """Return the snapshot date of the latest stock_hot_rank row, or None.
+
+    Lets callers distinguish "snapshot missing entirely" (fall back to the
+    online fetch) from "snapshot exists but symbol not in top-100" (a real
+    negative signal, not data degradation).
+    """
+    df = _df_from_sql(
+        "SELECT MAX(trade_date) AS d FROM stock_hot_rank",
+    )
+    if df is None or df.empty or df.iloc[0]["d"] is None:
+        return None
+    return str(df.iloc[0]["d"])
