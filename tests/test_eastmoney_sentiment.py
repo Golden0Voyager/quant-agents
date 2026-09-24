@@ -67,6 +67,17 @@ _FAKE_DESIRE_DF = pd.DataFrame([
 class TestFetchEastmoneyHotRank:
     """Tests for fetch_eastmoney_hot_rank()."""
 
+    @pytest.fixture(autouse=True)
+    def _no_local_snapshot(self):
+        """Force the online fallback path: real quant_core.db may hold a
+        stock_hot_rank snapshot for the test tickers, which would otherwise
+        short-circuit these akshare-mock tests."""
+        with patch(
+            "tradingagents.dataflows.eastmoney_sentiment._hot_rank_table_from_local",
+            return_value=None,
+        ):
+            yield
+
     def test_non_a_share_returns_placeholder(self):
         """Non-A-share tickers should get a graceful placeholder."""
         result = fetch_eastmoney_hot_rank("AAPL")
@@ -77,6 +88,25 @@ class TestFetchEastmoneyHotRank:
         """Empty string is not an A-share ticker."""
         result = fetch_eastmoney_hot_rank("")
         assert "non-A-share" in result.lower() or "unavailable" in result.lower()
+
+    def test_local_snapshot_preferred_over_online_fetch(self):
+        """When quant_core.db has a stock_hot_rank snapshot, the online
+        emappdata fetch (stock_hot_rank_em) must not be called at all."""
+        local_line = "整体人气排名: #5  |  贵州茅台(600519)  (快照日测试)"
+        with (
+            patch(
+                "tradingagents.dataflows.eastmoney_sentiment._hot_rank_table_from_local",
+                return_value=local_line,
+            ) as mock_local,
+            patch("tradingagents.dataflows.eastmoney_sentiment.ak") as mock_ak,
+        ):
+            mock_ak.stock_hot_rank_detail_em.return_value = _FAKE_HOT_RANK_DETAIL_DF
+
+            result = fetch_eastmoney_hot_rank("600519.SS")
+
+        mock_local.assert_called_once_with("600519.SS", "600519")
+        mock_ak.stock_hot_rank_em.assert_not_called()
+        assert local_line in result
 
     def test_happy_path(self):
         """Both rank table and detail should appear in the result."""
@@ -205,12 +235,85 @@ class TestFetchEastmoneyHotRank:
 
 
 # ===================================================================
+# _hot_rank_table_from_local helper tests
+# ===================================================================
+
+
+class TestHotRankTableFromLocal:
+    """Unit tests for the local-snapshot helper (smartmoney_vendor mocked)."""
+
+    _VENDOR = "tradingagents.dataflows.smartmoney_vendor"
+    _P_SNAPSHOT = _VENDOR + ".get_stock_hot_rank_snapshot_date"
+    _P_GET = _VENDOR + ".get_stock_hot_rank"
+
+    def test_no_snapshot_returns_none(self):
+        from tradingagents.dataflows.eastmoney_sentiment import (
+            _hot_rank_table_from_local,
+        )
+
+        with patch(self._P_SNAPSHOT, return_value=None) as mock_snap:
+            assert _hot_rank_table_from_local("600519.SS", "600519") is None
+        mock_snap.assert_called_once_with()
+
+    def test_symbol_in_snapshot_returns_rank_line(self):
+        from tradingagents.dataflows.eastmoney_sentiment import (
+            _hot_rank_table_from_local,
+        )
+        from tradingagents.dataflows.errors import NoMarketDataError
+
+        with (
+            patch(self._P_SNAPSHOT, return_value="2026-09-23"),
+            patch(
+                self._P_GET,
+                side_effect=NoMarketDataError(
+                    "stock_hot_rank", detail="not in top-100"
+                ),
+            ),
+        ):
+            line = _hot_rank_table_from_local("600519.SS", "600519")
+        assert line is not None
+        assert "未进入 top-100" in line
+        assert "2026-09-23" in line
+
+    def test_symbol_not_in_snapshot_is_negative_signal(self):
+        from tradingagents.dataflows.eastmoney_sentiment import (
+            _hot_rank_table_from_local,
+        )
+
+        row = {
+            "trade_date": "2026-09-23", "code": "600519", "name": "贵州茅台",
+            "rank": 5, "rank_change": -1.0, "prev_rank": 4,
+            "close_price": 1500.0, "change_pct": 0.5,
+        }
+        with (
+            patch(self._P_SNAPSHOT, return_value="2026-09-23"),
+            patch(self._P_GET, return_value=row),
+        ):
+            line = _hot_rank_table_from_local("600519.SS", "600519")
+        assert line is not None
+        assert "#5" in line
+        assert "贵州茅台" in line
+        assert "quant_core.db" in line
+
+
+# ===================================================================
 # Guba sentiment tests
 # ===================================================================
 
 
 class TestFetchEastmoneyGubaSentiment:
     """Tests for fetch_eastmoney_guba_sentiment()."""
+
+    @pytest.fixture(autouse=True)
+    def _no_local_snapshot(self):
+        """Force the online fallback path: real quant_core.db may hold a
+        stock_comment snapshot for the test tickers, which would otherwise
+        short-circuit these akshare-mock tests."""
+        with patch(
+            "tradingagents.dataflows.eastmoney_sentiment._stock_comment_from_local",
+            return_value=None,
+        ):
+            yield
 
     def test_non_a_share_returns_placeholder(self):
         """Non-A-share tickers should get a graceful placeholder."""
@@ -283,6 +386,26 @@ class TestFetchEastmoneyGubaSentiment:
                 assert call.kwargs.get("max_retries") == 3, (
                     f"Expected max_retries=3, got {call.kwargs.get('max_retries')}"
                 )
+
+    def test_local_snapshot_preferred_over_online_fetch(self):
+        """When quant_core.db has a stock_comment snapshot, the online
+        whole-table fetch (stock_comment_em) must not be called at all."""
+        local_block = "综合评分 — 贵州茅台(600519)\n  综合得分: 68.19/100 (快照)"
+        with (
+            patch(
+                "tradingagents.dataflows.eastmoney_sentiment._stock_comment_from_local",
+                return_value=local_block,
+            ) as mock_local,
+            patch("tradingagents.dataflows.eastmoney_sentiment.ak") as mock_ak,
+        ):
+            mock_ak.stock_comment_detail_scrd_focus_em.return_value = _FAKE_FOCUS_DF
+            mock_ak.stock_comment_detail_scrd_desire_em.return_value = _FAKE_DESIRE_DF
+
+            result = fetch_eastmoney_guba_sentiment("600519.SS")
+
+        mock_local.assert_called_once_with("600519")
+        mock_ak.stock_comment_em.assert_not_called()
+        assert local_block in result
 
     def test_bj_stock_works(self):
         """北交所 stocks should also work."""
