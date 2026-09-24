@@ -22,6 +22,7 @@ and return an appropriate placeholder with minimal overhead.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any
 
@@ -91,10 +92,8 @@ def _hot_rank_table_from_local(ticker: str, bare_code: str) -> str | None:
     )
     prev = row.get("prev_rank")
     if prev is not None:
-        try:
+        with contextlib.suppress(TypeError, ValueError):
             line += f"  |  昨日排名: #{int(prev)}"
-        except (TypeError, ValueError):
-            pass
     line += f"  (快照日: {row.get('trade_date')}, source: quant_core.db)"
     return line
 
