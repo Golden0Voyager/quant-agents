@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import Any
 
 import requests
 
@@ -79,7 +80,7 @@ class TypeSafeNewsGate:
         judged = articles[: self._max_articles]
         criteria_true, criteria_false = criteria or (_CRITERIA_TRUE, _CRITERIA_FALSE)
         trunc = _BODY_TRUNC if body_trunc is None else body_trunc
-        questions = {
+        questions: dict[str, dict[str, Any]] = {
             f"article_{i}": {
                 "type": "noul",
                 "instructions": {
