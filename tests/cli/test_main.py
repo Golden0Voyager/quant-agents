@@ -65,8 +65,13 @@ class TestRunAnalysis:
     @patch("cli.main.StatsCallbackHandler")
     @patch("cli.main.TradingAgentsGraph")
     @patch("cli.main.process_stream_chunk")
+    # runtime_data_context_for hits exchange_calendars, which loads tz data
+    # via zoneinfo -> builtins.open; the open() mock below would feed garbage
+    # to the TZif parser, so isolate the runtime context as well.
+    @patch("cli.main.runtime_data_context_for")
     def test_run_analysis_processes_stream_with_dashboard(
         self,
+        mock_runtime_ctx,
         mock_process_stream_chunk,
         mock_trading_graph,
         mock_stats_handler_cls,
