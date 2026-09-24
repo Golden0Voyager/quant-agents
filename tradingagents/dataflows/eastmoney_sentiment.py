@@ -22,6 +22,7 @@ and return an appropriate placeholder with minimal overhead.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any
 
@@ -34,6 +35,7 @@ from tradingagents.dataflows.akshare_common import (
     safe_float,
     to_akshare_symbol,
 )
+from tradingagents.dataflows.errors import NoMarketDataError
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +43,60 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Function A — Hot rank (人气排名)
 # ---------------------------------------------------------------------------
+
+
+def _hot_rank_table_from_local(ticker: str, bare_code: str) -> str | None:
+    """Read the Eastmoney top-100 hot-rank entry from quant_core.db.
+
+    Returns ``None`` only when no local snapshot exists at all (caller then
+    falls back to the online fetch / HiThink substitute). When a snapshot
+    exists, returns either the rank line or the explicit 未进入 top-100
+    negative line — both carry the snapshot date so analysts can weigh
+    freshness. The endpoint is intermittently WAF-blocked, so a snapshot
+    is used regardless of age (same policy as 千股千评).
+    """
+    try:
+        from tradingagents.dataflows import smartmoney_vendor
+
+        snapshot_date = smartmoney_vendor.get_stock_hot_rank_snapshot_date()
+        if snapshot_date is None:
+            return None
+        row = smartmoney_vendor.get_stock_hot_rank(ticker)
+    except NoMarketDataError:
+        # Snapshot exists but the ticker is not in the top-100 — a real
+        # negative signal, not data degradation (mirrors the online path).
+        return (
+            f"整体人气排名: 未进入 top-100（{bare_code} 不在 {snapshot_date} "
+            "东财人气榜快照内，属明确的阴性结果：关注度一般，非数据缺失）"
+        )
+    except Exception as exc:  # noqa: BLE001 — degrade to online fetch
+        logger.debug("local stock_hot_rank unavailable for %s: %s", ticker, exc)
+        return None
+
+    def _num(value: Any, digits: int = 2) -> str:
+        try:
+            if value is None:
+                return "N/A"
+            return f"{float(value):.{digits}f}"
+        except (TypeError, ValueError):
+            return str(value)
+
+    rank = row.get("rank")
+    rank = int(rank) if rank is not None else "N/A"
+    name = row.get("name") or bare_code
+    code = row.get("code") or bare_code
+    line = (
+        f"整体人气排名: #{rank}  |  {name}({code})  |  "
+        f"最新价: {_num(row.get('close_price'))}  |  "
+        f"涨跌幅: {_num(row.get('change_pct'))}%"
+    )
+    prev = row.get("prev_rank")
+    if prev is not None:
+        with contextlib.suppress(TypeError, ValueError):
+            line += f"  |  昨日排名: #{int(prev)}"
+    line += f"  (快照日: {row.get('trade_date')}, source: quant_core.db)"
+    return line
+
 
 def _hithink_hot_rank_line(ticker: str) -> str | None:
     """Best-effort HiThink substitute for the Eastmoney hot-rank table.
@@ -83,42 +139,51 @@ def fetch_eastmoney_hot_rank(ticker: str, limit: int = 20) -> str:
     prefixed_code = to_akshare_symbol(ticker, "upper_prefix")
 
     # --- Source 1: overall hot-rank table ---
+    # Local-first: quant_pipeline maintains a daily top-100 snapshot in
+    # quant_core.db (stock_hot_rank table), avoiding the intermittently
+    # WAF-blocked emappdata endpoint that raised JSONDecodeError in the
+    # akshare path. Falls back to the online table (then HiThink Top30)
+    # only when no local snapshot exists at all.
     hot_rank_lines: list[str] = []
-    try:
-        with no_proxy():
-            rank_df = _akshare_retry(lambda: ak.stock_hot_rank_em(), max_retries=3)
-        mask = rank_df.iloc[:, 0].astype(str).str.contains(
-            bare_code, na=False
-        ) | rank_df.iloc[:, 1].astype(str).str.contains(bare_code, na=False)
-        match = rank_df[mask]
-        if not match.empty:
-            row = match.iloc[0]
-            cols = rank_df.columns.tolist()
-            rank_val = _safe_col(row, cols, "当前排名")
-            price = _safe_col(row, cols, "最新价")
-            change_pct = _safe_col(row, cols, "涨跌幅")
-            change_amt = _safe_col(row, cols, "涨跌额")
-            name = _safe_col(row, cols, "股票名称")
-            code = _safe_col(row, cols, "代码")
-            hot_rank_lines.append(
-                f"整体人气排名: #{rank_val}  |  {name}({code})  |  "
-                f"最新价: {price}  |  涨跌幅: {change_pct}%  |  涨跌额: {change_amt}"
-            )
-        else:
-            # 未进 top-100 是明确的阴性信号（今日不热门），不是数据缺失——
-            # 不用尖括号占位符，避免被路由层误判为 partial 降级
-            # (20260826 批次 22/23 票因此被打上 partial=1，稀释了降级信号)
-            hot_rank_lines.append(
-                f"整体人气排名: 未进入 top-100（{bare_code} 今日不在东财人气榜内，"
-                "属明确的阴性结果：关注度一般，非数据缺失）"
-            )
-    except Exception as exc:
-        logger.warning("Eastmoney hot-rank table fetch failed for %s: %s", ticker, exc)
-        hithink_line = _hithink_hot_rank_line(ticker)
-        if hithink_line:
-            hot_rank_lines.append(hithink_line)
-        else:
-            hot_rank_lines.append(f"<hot-rank table unavailable: {type(exc).__name__}>")
+    _local = _hot_rank_table_from_local(ticker, bare_code)
+    if _local is not None:
+        hot_rank_lines.append(_local)
+    else:
+        try:
+            with no_proxy():
+                rank_df = _akshare_retry(lambda: ak.stock_hot_rank_em(), max_retries=3)
+            mask = rank_df.iloc[:, 0].astype(str).str.contains(
+                bare_code, na=False
+            ) | rank_df.iloc[:, 1].astype(str).str.contains(bare_code, na=False)
+            match = rank_df[mask]
+            if not match.empty:
+                row = match.iloc[0]
+                cols = rank_df.columns.tolist()
+                rank_val = _safe_col(row, cols, "当前排名")
+                price = _safe_col(row, cols, "最新价")
+                change_pct = _safe_col(row, cols, "涨跌幅")
+                change_amt = _safe_col(row, cols, "涨跌额")
+                name = _safe_col(row, cols, "股票名称")
+                code = _safe_col(row, cols, "代码")
+                hot_rank_lines.append(
+                    f"整体人气排名: #{rank_val}  |  {name}({code})  |  "
+                    f"最新价: {price}  |  涨跌幅: {change_pct}%  |  涨跌额: {change_amt}"
+                )
+            else:
+                # 未进 top-100 是明确的阴性信号（今日不热门），不是数据缺失——
+                # 不用尖括号占位符，避免被路由层误判为 partial 降级
+                # (20260826 批次 22/23 票因此被打上 partial=1，稀释了降级信号)
+                hot_rank_lines.append(
+                    f"整体人气排名: 未进入 top-100（{bare_code} 今日不在东财人气榜内，"
+                    "属明确的阴性结果：关注度一般，非数据缺失）"
+                )
+        except Exception as exc:
+            logger.warning("Eastmoney hot-rank table fetch failed for %s: %s", ticker, exc)
+            hithink_line = _hithink_hot_rank_line(ticker)
+            if hithink_line:
+                hot_rank_lines.append(hithink_line)
+            else:
+                hot_rank_lines.append(f"<hot-rank table unavailable: {type(exc).__name__}>")
 
     # --- Source 2: historical rank detail ---
     detail_lines: list[str] = []
@@ -164,6 +229,60 @@ def fetch_eastmoney_hot_rank(ticker: str, limit: int = 20) -> str:
 # Function B — Guba sentiment (股吧情绪)
 # ---------------------------------------------------------------------------
 
+
+def _stock_comment_from_local(bare_code: str) -> str | None:
+    """Read the 千股千评 comprehensive-score snapshot from quant_core.db.
+
+    Returns the formatted 综合评分 block, or ``None`` when the local
+    snapshot is unavailable (missing table / no row) so the caller falls
+    back to the online ``stock_comment_em()`` table fetch. A snapshot is
+    used regardless of age — during weekends/holidays it is still the
+    latest available data — but ages beyond 7 calendar days are logged.
+    """
+    try:
+        from tradingagents.dataflows.smartmoney_vendor import get_stock_comment
+
+        row = get_stock_comment(bare_code)
+    except Exception as exc:  # noqa: BLE001 — degrade to online fetch
+        logger.debug("local stock_comment unavailable for %s: %s", bare_code, exc)
+        return None
+
+    trade_date = str(row.get("trade_date") or "?")
+    try:
+        from datetime import date
+
+        age_days = (date.today() - date.fromisoformat(trade_date[:10])).days
+        if age_days > 7:
+            logger.warning(
+                "stock_comment snapshot for %s is %d days old (%s)",
+                bare_code, age_days, trade_date,
+            )
+    except ValueError:
+        pass
+
+    def _num(value: Any, digits: int = 2) -> str:
+        try:
+            if value is None:
+                return "N/A"
+            return f"{float(value):.{digits}f}"
+        except (TypeError, ValueError):
+            return str(value)
+
+    score = _num(row.get("composite_score"))
+    rank = row.get("rank")
+    rank = int(rank) if rank is not None else "N/A"
+    return (
+        f"综合评分 — {row.get('name')}({bare_code})\n"
+        f"  综合得分: {score}/100  |  关注指数: {_num(row.get('focus_index'))}/100  |  "
+        f"目前排名: #{rank}\n"
+        f"  最新价: {_num(row.get('close_price'))}  |  涨跌幅: {_num(row.get('change_pct'))}%  |  "
+        f"换手率: {_num(row.get('turnover'))}%\n"
+        f"  市盈率: {_num(row.get('pe_dynamic'))}  |  机构参与度: {_num(row.get('org_participation'))}  |  "
+        f"上升: {_num(row.get('rank_up'), 0)}\n"
+        f"  (快照交易日: {trade_date}, source: quant_core.db)"
+    )
+
+
 def fetch_eastmoney_guba_sentiment(ticker: str, limit: int = 10) -> str:
     """Fetch Eastmoney Guba (股吧) sentiment indicators for *ticker*.
 
@@ -190,45 +309,53 @@ def fetch_eastmoney_guba_sentiment(ticker: str, limit: int = 10) -> str:
     bare_code = to_akshare_symbol(ticker, "bare")
 
     # --- Source 1: comprehensive score (千股千评) ---
+    # Local-first: quant_pipeline maintains a daily full-market snapshot in
+    # quant_core.db (stock_comment table), avoiding the slow whole-table
+    # ak.stock_comment_em() fetch that timed out in ~46% of runs. Falls back
+    # to the online table when the local snapshot is unavailable.
     comment_lines: list[str] = []
-    try:
-        with no_proxy():
-            comment_df = _akshare_retry(lambda: ak.stock_comment_em(), max_retries=3)
-        mask = comment_df.iloc[:, 1].astype(str).str.contains(bare_code, na=False)
-        match = comment_df[mask]
-        if not match.empty:
-            row = match.iloc[0]
-            cols = comment_df.columns.tolist()
-            name = _safe_col(row, cols, "名称", 2)
-            score = _safe_col(row, cols, "综合得分", 9)
-            rank = _safe_col(row, cols, "目前排名", 11)
-            attention = _safe_col(row, cols, "关注指数", 12)
-            price = _safe_col(row, cols, "最新价", 3)
-            change_pct = _safe_col(row, cols, "涨跌幅", 4)
-            turnover = _safe_col(row, cols, "换手率", 5)
-            pe = _safe_col(row, cols, "市盈率", 6)
-            inst_participation = _safe_col(row, cols, "机构参与度", 8)
-            trend_up = _safe_col(row, cols, "上升", 10)
-            comment_lines.append(
-                f"综合评分 — {name}({bare_code})\n"
-                f"  综合得分: {score}/100  |  关注指数: {attention}/100  |  "
-                f"目前排名: #{rank}\n"
-                f"  最新价: {price}  |  涨跌幅: {change_pct}%  |  "
-                f"换手率: {turnover}%\n"
-                f"  市盈率: {pe}  |  机构参与度: {inst_participation}  |  "
-                f"上升: {trend_up}"
+    _local = _stock_comment_from_local(bare_code)
+    if _local is not None:
+        comment_lines.append(_local)
+    else:
+        try:
+            with no_proxy():
+                comment_df = _akshare_retry(lambda: ak.stock_comment_em(), max_retries=3)
+            mask = comment_df.iloc[:, 1].astype(str).str.contains(bare_code, na=False)
+            match = comment_df[mask]
+            if not match.empty:
+                row = match.iloc[0]
+                cols = comment_df.columns.tolist()
+                name = _safe_col(row, cols, "名称", 2)
+                score = _safe_col(row, cols, "综合得分", 9)
+                rank = _safe_col(row, cols, "目前排名", 11)
+                attention = _safe_col(row, cols, "关注指数", 12)
+                price = _safe_col(row, cols, "最新价", 3)
+                change_pct = _safe_col(row, cols, "涨跌幅", 4)
+                turnover = _safe_col(row, cols, "换手率", 5)
+                pe = _safe_col(row, cols, "市盈率", 6)
+                inst_participation = _safe_col(row, cols, "机构参与度", 8)
+                trend_up = _safe_col(row, cols, "上升", 10)
+                comment_lines.append(
+                    f"综合评分 — {name}({bare_code})\n"
+                    f"  综合得分: {score}/100  |  关注指数: {attention}/100  |  "
+                    f"目前排名: #{rank}\n"
+                    f"  最新价: {price}  |  涨跌幅: {change_pct}%  |  "
+                    f"换手率: {turnover}%\n"
+                    f"  市盈率: {pe}  |  机构参与度: {inst_participation}  |  "
+                    f"上升: {trend_up}"
+                )
+            else:
+                comment_lines.append(
+                    f"<{bare_code} not found in 千股千评 dataset>"
+                )
+        except Exception as exc:
+            logger.warning(
+                "Eastmoney comment table fetch failed for %s: %s", ticker, exc
             )
-        else:
             comment_lines.append(
-                f"<{bare_code} not found in 千股千评 dataset>"
+                f"<comprehensive score unavailable: {type(exc).__name__}>"
             )
-    except Exception as exc:
-        logger.warning(
-            "Eastmoney comment table fetch failed for %s: %s", ticker, exc
-        )
-        comment_lines.append(
-            f"<comprehensive score unavailable: {type(exc).__name__}>"
-        )
 
     # --- Source 2: user-attention index time-series ---
     focus_lines: list[str] = []
