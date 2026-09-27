@@ -640,6 +640,8 @@ def get_fund_flow(
     if df is None or df.empty:
         raise RuntimeError(f"No fund flow data in quant_core.db for {symbol}")
 
+    _assert_local_data_not_stale("fund_flow", symbol, df, "Date", curr_date)
+
     lines = [
         f"## {symbol.upper()} Fund Flow (source: quant_core.db / local SQLite)",
         f"Total records: {len(df)} trading days",
@@ -1579,6 +1581,8 @@ def get_margin_trading(
     if df is None or df.empty:
         raise RuntimeError(f"No margin-trading data in quant_core.db for {symbol}")
 
+    _assert_local_data_not_stale("margin_trading", symbol, df, "Date", curr_date)
+
     lines = [
         f"## {symbol.upper()} Margin Trading (融资融券) "
         f"(source: quant_core.db / local SQLite)",
@@ -1626,6 +1630,8 @@ def get_dragon_tiger(
 
     if df is None or df.empty:
         raise RuntimeError(f"No dragon-tiger data in quant_core.db for {symbol}")
+
+    _assert_local_data_not_stale("dragon_tiger", symbol, df, "Date", curr_date)
 
     lines = [
         f"## {symbol.upper()} Dragon Tiger Board (龙虎榜) "
@@ -1965,6 +1971,59 @@ def _check_stale_warning(latest_date: str | None, curr_date: str | None, max_day
     except Exception:
         pass
     return ""
+
+
+# Calendar-day freshness budgets for high-frequency local tables, judged
+# against the request's own date anchor (curr_date/trade_date as rewritten by
+# the data policy — never against today, so backtests requesting old dates
+# are not penalised). Only tables with a working online fallback belong here:
+# when the newest local row is older than the budget, the getter raises
+# NoMarketDataError and route_to_vendor falls through to the online vendor.
+# Tables intentionally excluded:
+#   - north_hold: quarter-end disclosure since 2024-08, no fresher source exists
+#   - chip_distribution: smartmoney_db is the only configured vendor; a stale
+#     row with the inline _check_stale_warning beats NO_DATA
+#   - stock_comment / stock_hot_rank: snapshot semantics — callers deliberately
+#     use the latest snapshot regardless of age and degrade to online fetches
+_LOCAL_TABLE_STALE_BUDGET_DAYS = {
+    "fund_flow": 7,
+    "margin_trading": 7,
+    "dragon_tiger": 10,
+}
+
+
+def _assert_local_data_not_stale(
+    table: str,
+    symbol: str,
+    df: pd.DataFrame,
+    date_col: str,
+    anchor_date: str | None,
+) -> None:
+    """Raise NoMarketDataError when the newest local row exceeds the budget.
+
+    ``anchor_date=None`` means "as of today". Malformed dates are ignored —
+    a freshness guard must never be the reason data becomes unavailable.
+    """
+    budget = _LOCAL_TABLE_STALE_BUDGET_DAYS.get(table)
+    if not budget or df is None or df.empty or date_col not in df.columns:
+        return
+    latest = df[date_col].max()
+    if latest is None or pd.isna(latest):
+        return
+    anchor = (anchor_date or datetime.now().strftime("%Y-%m-%d"))[:10]
+    try:
+        lag = (
+            pd.to_datetime(anchor) - pd.to_datetime(str(latest)[:10])
+        ).days
+    except (TypeError, ValueError):
+        return
+    if lag > budget:
+        raise NoMarketDataError(
+            symbol, symbol,
+            f"{table} data in quant_core.db is stale: newest row {latest} is "
+            f"{lag} days older than the requested as-of date {anchor} "
+            f"(budget {budget}d); falling through to the online vendor.",
+        )
 
 
 # ===========================================================================
