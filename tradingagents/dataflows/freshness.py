@@ -99,3 +99,20 @@ def expected_report_period(
     if not candidates:
         return None
     return max(candidates).strftime("%Y-%m-%d")
+
+
+def nearest_prior_session(anchor: str, calendar: str = "XSHG") -> str | None:
+    """Most recent trading session on or before ``anchor`` (YYYY-MM-DD).
+
+    Used to snap a non-trading-day analysis anchor (weekend/holiday run)
+    back to the session that actually has data. Returns None when the anchor
+    is unparseable or the calendar is unavailable — callers must fall back
+    to the original anchor rather than block.
+    """
+    try:
+        cal = _calendar(calendar)
+        anchor_ts = pd.Timestamp(str(anchor)[:10])
+        session = cal.date_to_session(anchor_ts, direction="previous")
+        return pd.Timestamp(session).strftime("%Y-%m-%d")
+    except Exception:
+        return None

@@ -209,6 +209,49 @@ class TestCheckSmartmoneyTable:
     @patch("tradingagents.dataflows.smartmoney_vendor._to_smartmoney_symbol")
     @patch("tradingagents.dataflows.smartmoney_vendor._df_from_sql")
     @patch("tradingagents.agents.utils.data_readiness.load_ohlcv")
+    def test_weekend_anchor_snaps_to_prior_session(
+        self, mock_load, mock_df, mock_to_sym, mock_is_a_share
+    ):
+        """A non-trading-day anchor aligns to the nearest prior session and
+        records the originally requested date."""
+        mock_load.return_value = pd.DataFrame({"Date": ["2026-07-03"], "Close": [10.0]})
+        mock_is_a_share.return_value = True
+        mock_to_sym.return_value = "000001"
+        mock_df.return_value = pd.DataFrame({
+            "cnt": [15],
+            "latest": ["2026-07-03"],
+        })
+
+        report = check_data_readiness("000001.SZ", "2026-07-04", ["market"])
+        assert report.anchor_date == "2026-07-03"
+        assert report.anchor_aligned_from == "2026-07-04"
+        # freshness judgements use the aligned anchor: Friday data is fresh
+        ff_items = [i for i in report.items if i.label == "资金流向"]
+        assert ff_items[0].status == "cached"
+
+    @patch("tradingagents.agents.utils.data_readiness.is_a_share_ticker")
+    @patch("tradingagents.dataflows.smartmoney_vendor._to_smartmoney_symbol")
+    @patch("tradingagents.dataflows.smartmoney_vendor._df_from_sql")
+    @patch("tradingagents.agents.utils.data_readiness.load_ohlcv")
+    def test_trading_day_anchor_not_aligned(
+        self, mock_load, mock_df, mock_to_sym, mock_is_a_share
+    ):
+        mock_load.return_value = pd.DataFrame({"Date": ["2026-07-03"], "Close": [10.0]})
+        mock_is_a_share.return_value = True
+        mock_to_sym.return_value = "000001"
+        mock_df.return_value = pd.DataFrame({
+            "cnt": [15],
+            "latest": ["2026-07-03"],
+        })
+
+        report = check_data_readiness("000001.SZ", "2026-07-03", ["market"])
+        assert report.anchor_date == "2026-07-03"
+        assert report.anchor_aligned_from is None
+
+    @patch("tradingagents.agents.utils.data_readiness.is_a_share_ticker")
+    @patch("tradingagents.dataflows.smartmoney_vendor._to_smartmoney_symbol")
+    @patch("tradingagents.dataflows.smartmoney_vendor._df_from_sql")
+    @patch("tradingagents.agents.utils.data_readiness.load_ohlcv")
     def test_ashare_cache_hit_none_latest(
         self, mock_load, mock_df, mock_to_sym, mock_is_a_share
     ):
@@ -711,6 +754,23 @@ class TestDisplayReadinessReport:
         out = capture.get()
         assert "⚠️" in out
         assert "线上刷新" in out
+
+    def test_display_anchor_aligned_note(self):
+        """Weekend/holiday anchor alignment renders an info line."""
+        import re
+
+        console = Console(width=100, force_terminal=True)
+        report = ReadinessReport(
+            items=[], all_ready=True,
+            anchor_date="2026-07-03", anchor_aligned_from="2026-07-04",
+        )
+        with console.capture() as capture:
+            display_readiness_report(console, report)
+        # CI terminals inject ANSI style sequences that split digit runs —
+        # strip them before asserting on content
+        out = re.sub(r"\x1b\[[0-9;]*m", "", capture.get())
+        assert "2026-07-04 非交易日" in out
+        assert "分析锚点已对齐至最近交易日 2026-07-03" in out
 
     def test_display_unknown_status(self):
         """Unknown status defaults to ❓ emoji."""

@@ -214,7 +214,7 @@ def get_user_selections(preselected_tickers: list[str] | None = None, allow_back
 
         # Step 1: Analysis date
         if step == 1:
-            default_date = datetime.datetime.now().strftime("%Y-%m-%d")
+            default_date = _default_analysis_date()
             console.print("\n[bold cyan]Step 2: Analysis Date[/bold cyan]")
             console.print(f"[dim]Enter the analysis date (YYYY-MM-DD), default: {default_date}[/dim]")
             result = get_analysis_date(allow_back=allow_back)  # type: ignore[call-arg]
@@ -426,14 +426,31 @@ def get_user_selections(preselected_tickers: list[str] | None = None, allow_back
 # Intentionally shadows cli.utils.get_analysis_date (pulled in by the star
 # import above): the CLI flow uses this prompt-based variant, and tests patch
 # it by this module-level name.
+def _default_analysis_date() -> str:
+    """Default analysis date: the nearest trading session on or before today.
+
+    On weekends/holidays the default snaps back to the last session that
+    actually has data instead of offering a date with nothing to analyse.
+    Falls back to today when the session calendar is unavailable.
+    """
+    today = datetime.datetime.now().strftime("%Y-%m-%d")
+    try:
+        from tradingagents.dataflows.freshness import nearest_prior_session
+
+        return nearest_prior_session(today) or today
+    except Exception:
+        return today
+
+
 def get_analysis_date(allow_back: bool = False):  # type: ignore[no-redef]
     """Get the analysis date from user input."""
     # When back-navigation is enabled, use questionary so Esc can be mapped
     # to BACK_VALUE instead of killing the process.
     if allow_back:
         import questionary as _q
+        default_date = _default_analysis_date()
         date_str = _q.text(
-            f"Enter the analysis date (YYYY-MM-DD) [default: {datetime.datetime.now().strftime('%Y-%m-%d')}]:",
+            f"Enter the analysis date (YYYY-MM-DD) [default: {default_date}]:",
             validate=lambda x: (
                 not x.strip()
                 or (lambda v: True if _is_valid_date(v) else "Please use YYYY-MM-DD")(x.strip())
@@ -442,7 +459,7 @@ def get_analysis_date(allow_back: bool = False):  # type: ignore[no-redef]
         ).ask()
         if date_str is None:
             return BACK_VALUE  # type: ignore[return-value]
-        date_str = date_str.strip() or datetime.datetime.now().strftime("%Y-%m-%d")
+        date_str = date_str.strip() or default_date
         try:
             parsed = datetime.datetime.strptime(date_str, "%Y-%m-%d")
             if parsed.date() > datetime.datetime.now().date():
@@ -453,7 +470,7 @@ def get_analysis_date(allow_back: bool = False):  # type: ignore[no-redef]
             console.print("[red]Error: Invalid date format. Please use YYYY-MM-DD[/red]")
             return get_analysis_date(allow_back=True)
     while True:
-        date_str = typer.prompt("", default=datetime.datetime.now().strftime("%Y-%m-%d"))
+        date_str = typer.prompt("", default=_default_analysis_date())
         try:
             # Validate date format and ensure it's not in the future
             analysis_date = datetime.datetime.strptime(date_str, "%Y-%m-%d")

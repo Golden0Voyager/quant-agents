@@ -10,6 +10,7 @@ from rich.table import Table
 
 from tradingagents.dataflows.akshare_common import is_a_share_ticker
 from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.dataflows.freshness import nearest_prior_session
 from tradingagents.dataflows.stockstats_utils import load_ohlcv
 from tradingagents.ticker_resolver import resolve_ticker
 
@@ -30,6 +31,12 @@ class ReadinessReport:
     items: list[ReadinessItem] = field(default_factory=list)
     all_ready: bool = True
     warning_count: int = 0
+    # When the requested trade_date is not a trading session (weekend/holiday
+    # run), the anchor snaps back to the nearest prior session;
+    # anchor_aligned_from records the originally requested date and
+    # anchor_date the effective one, so the UI can say what happened.
+    anchor_date: str | None = None
+    anchor_aligned_from: str | None = None
 
 
 _MAJOR_INDEX_CODES = frozenset({
@@ -347,6 +354,15 @@ def check_data_readiness(
         config = DEFAULT_CONFIG.copy()
 
     report = ReadinessReport()
+    # 周末/节假日运行时把锚点对齐到最近交易日：按日查询的表（涨跌停等）
+    # 在非交易日永远查空，对齐后检查结果才有意义；交易日滞后本来就不增长，
+    # 对齐不改变新鲜度判定结果。日历不可用时保持原锚点（永不阻断）。
+    session = nearest_prior_session(trade_date)
+    if session and session != str(trade_date)[:10]:
+        report.anchor_aligned_from = str(trade_date)[:10]
+        trade_date = session
+    report.anchor_date = trade_date
+
     checked_keys: set[str] = set()
     _ohlcv_result: ReadinessItem | None = None
 
@@ -428,6 +444,11 @@ def display_readiness_report(console: Console, report: ReadinessReport) -> None:
         )
 
     console.print()
+    if report.anchor_aligned_from and report.anchor_date:
+        console.print(
+            f"[cyan]📅 {report.anchor_aligned_from} 非交易日，"
+            f"分析锚点已对齐至最近交易日 {report.anchor_date}[/cyan]"
+        )
     console.print(Panel.fit(
         "[bold]数据就绪检查[/bold]",
         border_style="cyan",
