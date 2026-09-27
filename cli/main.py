@@ -39,6 +39,7 @@ from tradingagents.graph.analyst_execution import (
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.llm_clients.pricing import get_usd_to_cny_rate
 from tradingagents.reporting import write_report_tree
+from tradingagents.ticker_resolver import resolve_ticker
 
 console = Console()
 
@@ -114,8 +115,6 @@ def get_user_selections(preselected_tickers: list[str] | None = None, allow_back
         allow_back: When True, Esc / “← 返回上一层” returns BACK_VALUE sentinel so
             the caller can navigate to the previous menu instead of exiting.
     """
-    from tradingagents.ticker_resolver import resolve_ticker
-
     ticker_to_name: dict[str, str] = {}
     selected_tickers: list[str] = []
     selected_ticker: str | list[str] = ""
@@ -200,7 +199,7 @@ def get_user_selections(preselected_tickers: list[str] | None = None, allow_back
                 style=questionary.Style([("question", "fg:green bold")]),
             ).ask()
             if confirmed is None and allow_back:
-                continue  # treat Esc as “re-enter”, stay on same step (or could go back)
+                return BACK_VALUE  # type: ignore[return-value]
             if confirmed:
                 selected_tickers = tmp_tickers
                 ticker_to_name = tmp_map
@@ -472,6 +471,48 @@ def _is_valid_date(s: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+_GATE_READY = "ready"
+_GATE_BACK_TO_DATE = "back_to_date"
+_GATE_BACK_FROM_DATE = "back_from_date"
+_GATE_CANCELLED = "cancelled"
+
+
+def _date_readiness_gate(profile_config: dict, first_ticker: str, *, numbered: bool = True) -> str:
+    """Ask analysis date, then run the data-readiness gate; returns a _GATE_* sentinel.
+
+    Callers map sentinels to their own "one level back" target, because the step
+    preceding the gate differs per entry path (ticker stage vs profile menu).
+    """
+    if numbered:
+        console.print("\n[bold cyan]Step 2: Analysis Date[/bold cyan]")
+    date_res = get_analysis_date(allow_back=True)
+    if date_res == BACK_VALUE:
+        return _GATE_BACK_FROM_DATE
+    profile_config["analysis_date"] = date_res
+    from tradingagents.agents.utils.data_readiness import (
+        check_data_readiness,
+        display_readiness_report,
+    )
+
+    try:
+        check_ticker = resolve_ticker(first_ticker)["ticker"]
+    except Exception:
+        check_ticker = first_ticker
+    report = check_data_readiness(
+        ticker=check_ticker,
+        trade_date=date_res,
+        selected_analysts=[str(a) for a in profile_config.get("analysts", [])],
+    )
+    display_readiness_report(console, report)
+    if report.warning_count > 0:
+        cont = questionary.confirm("部分数据不可用，是否继续分析？", default=True).ask()
+        if cont is None:
+            return _GATE_BACK_TO_DATE
+        if not cont:
+            return _GATE_CANCELLED
+    return _GATE_READY
 
 
 def _parse_tickers_input(raw: str) -> list[str]:
@@ -1720,8 +1761,17 @@ def analyze(
                             prof_name = (prof_name_raw or "default").strip() or "default"
                             save_profile(prof_name, profile_config)
                             console.print(f"[green]✓ Profile saved:[/green] {prof_name}")
+                        profile_config["analysis_date"] = selections["analysis_date"]
                     else:
                         profile_config = prof_result
+                        gate = _GATE_BACK_TO_DATE
+                        while gate == _GATE_BACK_TO_DATE:
+                            gate = _date_readiness_gate(profile_config, ticker_list[0], numbered=False)
+                        if gate == _GATE_BACK_FROM_DATE:
+                            continue  # back to profile menu
+                        if gate == _GATE_CANCELLED:
+                            console.print("[yellow]已取消分析[/yellow]")
+                            return
                     # Ready to run — workers step also supports back
                     if len(ticker_list) == 1:
                         if prof_result is None:
@@ -1779,45 +1829,69 @@ def analyze(
                         continue  # back to use_profile question
                     if prof_result:
                         profile_config = prof_result
-                        from tradingagents.ticker_resolver import resolve_ticker
 
-                        console.print("\n[bold cyan]Step 1: Ticker Symbol[/bold cyan]")
-                        console.print("[dim]Enter ticker symbol(s) to analyze[/dim]")
-                        raw_tickers = get_ticker(allow_back=True)
-                        if raw_tickers == BACK_VALUE:
-                            continue  # back to use_profile question
-                        parsed_tickers = _parse_tickers_input(raw_tickers)
-                        for pt in parsed_tickers:
-                            r = resolve_ticker(pt)
-                            name = r.get("company_name", "")
-                            console.print(f"[green]  ✓ {r['ticker']}[/green] {name}")
-                        default_date = datetime.datetime.now().strftime("%Y-%m-%d")
-                        console.print("\n[bold cyan]Step 2: Analysis Date[/bold cyan]")
-                        console.print(f"[dim]Using default date: {default_date}[/dim]")
-                        tickers_list = parsed_tickers
-                        if len(tickers_list) > 1:
-                            if workers <= 1:
-                                w = ask_workers(allow_back=True)
-                                if w == BACK_VALUE:
+                        ready_to_run = False
+                        while True:
+                            console.print("\n[bold cyan]Step 1: Ticker Symbol[/bold cyan]")
+                            console.print("[dim]Enter ticker symbol(s) to analyze[/dim]")
+                            raw_tickers = get_ticker(allow_back=True)
+                            if raw_tickers == BACK_VALUE:
+                                break
+                            parsed_tickers = _parse_tickers_input(raw_tickers)
+                            resolved_tickers: list[str] = []
+                            ticker_names: list[str] = []
+                            for pt in parsed_tickers:
+                                try:
+                                    r = resolve_ticker(pt)
+                                except Exception as e:
+                                    console.print(f"[yellow]解析提示 {pt}: {e}[/yellow]")
+                                    resolved_tickers.append(pt.upper())
+                                    ticker_names.append(f"[cyan]{pt.upper()}[/cyan] (未知)")
                                     continue
-                                workers = w
-                            run_batch_analysis(
-                                tickers_list,
-                                profile_config,
-                                checkpoint=checkpoint,
-                                output_dir=Path(output_dir) if output_dir else None,
-                                holdings=holdings,
-                                workers=workers,
-                            )
-                        else:
-                            run_batch_analysis(
-                                tickers_list,
-                                profile_config,
-                                checkpoint=checkpoint,
-                                output_dir=Path(output_dir) if output_dir else None,
-                                holdings=holdings,
-                                workers=workers,
-                            )
+                                resolved_tickers.append(r["ticker"])
+                                ticker_names.append(f"[cyan]{r['ticker']}[/cyan] {r.get('company_name', '')}")
+                            console.print("\n[bold]已解析股票:[/bold]")
+                            for line in ticker_names:
+                                console.print(f"  • {line}")
+                            confirmed = questionary.confirm(
+                                "股票信息是否正确？",
+                                default=True,
+                                style=questionary.Style([("question", "fg:green bold")]),
+                            ).ask()
+                            if confirmed is None:
+                                break
+                            if not confirmed:
+                                console.print("[yellow]请重新输入股票代码...[/yellow]\n")
+                                continue
+                            tickers_list = resolved_tickers
+                            while True:
+                                gate = _date_readiness_gate(profile_config, tickers_list[0])
+                                if gate == _GATE_BACK_TO_DATE:
+                                    continue
+                                if gate == _GATE_BACK_FROM_DATE:
+                                    break
+                                if gate == _GATE_CANCELLED:
+                                    console.print("[yellow]已取消分析[/yellow]")
+                                    return None
+                                if len(tickers_list) > 1 and workers <= 1:
+                                    w = ask_workers(allow_back=True)
+                                    if w == BACK_VALUE:
+                                        continue
+                                    workers = w
+                                ready_to_run = True
+                                break
+                            if ready_to_run:
+                                break
+                        if not ready_to_run:
+                            continue
+                        run_batch_analysis(
+                            tickers_list,
+                            profile_config,
+                            checkpoint=checkpoint,
+                            output_dir=Path(output_dir) if output_dir else None,
+                            holdings=holdings,
+                            workers=workers,
+                        )
                         return
                 # Fall back to full wizard
                 selections = get_user_selections(allow_back=True)
@@ -1838,6 +1912,7 @@ def analyze(
                         "openai_reasoning_effort": selections.get("openai_reasoning_effort"),
                         "anthropic_effort": selections.get("anthropic_effort"),
                         "output_language": selections.get("output_language", "English"),
+                        "analysis_date": selections["analysis_date"],
                     }
                     if workers <= 1:
                         w = ask_workers(allow_back=True)
