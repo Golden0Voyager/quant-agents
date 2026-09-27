@@ -11,7 +11,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-from tradingagents.dataflows.freshness import expected_report_period
+from tradingagents.dataflows.freshness import expected_report_period, nearest_prior_session
 
 
 class TestExpectedReportPeriod:
@@ -54,3 +54,21 @@ class TestExpectedReportPeriod:
     def test_anchor_none_means_today(self):
         result = expected_report_period(None)
         assert result is None or isinstance(result, str)
+
+
+class TestNearestPriorSession:
+    def test_saturday_snaps_to_friday(self):
+        assert nearest_prior_session("2026-07-04") == "2026-07-03"
+
+    def test_sunday_snaps_to_friday(self):
+        assert nearest_prior_session("2026-07-05") == "2026-07-03"
+
+    def test_trading_day_unchanged(self):
+        assert nearest_prior_session("2026-07-06") == "2026-07-06"
+
+    def test_holiday_snaps_to_prior_session(self):
+        # 2026 National Day (Oct 1-7) is holiday-aware, not just weekends
+        assert nearest_prior_session("2026-10-05") == "2026-09-30"
+
+    def test_malformed_anchor_returns_none(self):
+        assert nearest_prior_session("not-a-date") is None
