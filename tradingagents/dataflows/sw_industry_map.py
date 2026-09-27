@@ -268,7 +268,7 @@ def build_sw_industry_map(
         # 提前算会让每轮都把 335 个行业重抓一遍，续跑形同虚设。
         already = {row[0] for row in con.execute("SELECT DISTINCT code FROM sw_stock_industry")}
         pending = [ind for ind in industries if ind[0] not in already]
-        stats = {
+        stats: dict[str, int] = {
             "industries": considered,
             "candidates": len(industries),
             "already_covered": len(already),
@@ -277,7 +277,6 @@ def build_sw_industry_map(
             "empty_industries": 0,
             "errors": 0,
             "skipped": 0,
-            "hierarchy_source": hierarchy_source,
         }
         con.executemany(
             "INSERT OR REPLACE INTO sw_industry (code, name, level1, level2, level3)"
@@ -334,4 +333,5 @@ def build_sw_industry_map(
     finally:
         con.close()
     os.replace(tmp, target)
-    return stats
+    result: dict[str, int | str] = {**stats, "hierarchy_source": hierarchy_source}
+    return result

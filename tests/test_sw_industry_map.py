@@ -297,6 +297,7 @@ class TestAuthoritativeSectorResolution:
         assert "注册行业" in note
 
 
+@pytest.mark.unit
 def test_default_path_is_under_cache_dir(monkeypatch):
     monkeypatch.delenv("TRADINGAGENTS_SW_INDUSTRY_MAP", raising=False)
     monkeypatch.setenv("TRADINGAGENTS_HOME", "/tmp/ta-home")
