@@ -1,7 +1,9 @@
 import contextlib
 import datetime
 import os
+import shutil
 import time
+import unicodedata
 from dataclasses import asdict
 from functools import wraps
 from pathlib import Path
@@ -14,7 +16,6 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.rule import Rule
 
-from cli.announcements import display_announcements, fetch_announcements
 from cli.batch_runner import BatchRunner
 from cli.dashboard import (
     AnalysisDashboard,
@@ -25,7 +26,7 @@ from cli.dashboard import (
 from cli.profiles import list_profiles, load_profile, save_profile
 from cli.stats_handler import StatsCallbackHandler
 from cli.utils import *
-from cli.watchlists import list_watchlists, load_watchlist, save_watchlist
+from cli.watchlists import list_watchlists, load_watchlist, load_watchlist_entries, save_watchlist
 from tradingagents.dataflows.interface import collect_route_diagnostics
 from tradingagents.dataflows.runtime_context import runtime_data_context_for, use_runtime_data_context
 from tradingagents.default_config import DEFAULT_CONFIG, default_config
@@ -60,17 +61,21 @@ def create_question_box(title, prompt, default=None):
 
 
 def display_welcome() -> None:
-    """Render the TradingAgents ASCII welcome panel once at CLI entry."""
+    """Render the Quant Alpha ASCII welcome panel once at CLI entry."""
     try:
         welcome_ascii = (Path(__file__).parent / "static" / "welcome.txt").read_text(encoding="utf-8").rstrip("\n")
     except Exception:
-        welcome_ascii = "TradingAgents"
-    # Cyber gradient: even lines cyan, odd lines magenta
+        welcome_ascii = "Quant Alpha"
+    _sky = (56, 189, 248)
+    _emerald = (52, 211, 153)
     _lines = welcome_ascii.splitlines()
+    _n = max(len(_lines) - 1, 1)
     _colored = []
     for _i, _ln in enumerate(_lines):
-        _c = "bright_cyan" if _i % 2 == 0 else "bright_magenta"
-        _colored.append(f"[bold {_c}]{_ln}[/bold {_c}]")
+        _t = _i / _n
+        _r, _g, _b = (round(_a + (_z - _a) * _t) for _a, _z in zip(_sky, _emerald, strict=True))
+        _hex = f"#{_r:02X}{_g:02X}{_b:02X}"
+        _colored.append(f"[bold {_hex}]{_ln}[/bold {_hex}]")
     welcome_ascii_colored = "\n".join(_colored)
     from rich.text import Text
     ascii_text = Text.from_markup(welcome_ascii_colored)
@@ -87,7 +92,7 @@ def display_welcome() -> None:
         Text(""),
         workflow_text,
         Text(""),
-        Text.from_markup("[dim]按 Esc 或选择 “← 返回上一层” 可随时回退  ·  [link=https://github.com/TauricResearch]Tauric Research[/link][/dim]"),
+        Text.from_markup("[dim]按 Esc 或选择 “← 返回上一层” 可随时回退[/dim]"),
     )
     welcome_box = Panel(
         body,
@@ -98,13 +103,6 @@ def display_welcome() -> None:
         expand=False,
     )
     console.print(welcome_box)
-    console.print()
-    # Announcements (silent on failure) — shown once at entry, not per wizard invocation
-    try:
-        announcements = fetch_announcements()
-        display_announcements(console, announcements)
-    except Exception:
-        pass
     console.print()
 
 
@@ -533,15 +531,56 @@ def ask_mode(allow_back: bool = False) -> str:
     return choice
 
 
+def _display_width(text: str) -> int:
+    return sum(
+        2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in text
+    )
+
+
+def _format_watchlist_choice(name: str, entries: list[tuple[str, str]]) -> str:
+    """Build a multi-line select label: header line + names wrapped ~6 per line."""
+    stock_names = [display for _, display in entries]
+    header = f"{name}  (共{len(entries)}只自选股): "
+    if not stock_names:
+        return f"{header}（空）"
+
+    prefix_cols = 3  # pointer row prefix: " » " when pointed, else 3 spaces
+    cols = shutil.get_terminal_size((100, 30)).columns
+    line_budget = max(cols - prefix_cols - 1, 30)
+    first_budget = line_budget - _display_width(header)
+    names_per_line = 6
+
+    rows: list[str] = []
+    current, current_w, count = "", 0, 0
+    limit = first_budget
+    for stock in stock_names:
+        sep = "、" if current else ""
+        need = _display_width(sep + stock)
+        if current and (count >= names_per_line or current_w + need > limit):
+            rows.append(current)
+            current, current_w, count, limit = "", 0, 0, line_budget
+            sep, need = "", _display_width(stock)
+        current += sep + stock
+        current_w += need
+        count += 1
+    rows.append(current)
+
+    return "\n".join([header + rows[0]] + [f"   {row}" for row in rows[1:]])
+
+
 def select_watchlist_interactive(allow_back: bool = False) -> tuple[str, list[str]]:
     """Let user pick a saved watchlist or import from file. Returns (name, tickers)."""
     existing = list_watchlists()
     choices = []
     for name in existing:
         try:
-            tickers = load_watchlist(name)
-            display = f"{name}  ({', '.join(tickers[:5])}{'...' if len(tickers) > 5 else ''})"
-            choices.append(questionary.Choice(display, value=(name, tickers)))
+            entries = load_watchlist_entries(name)
+            tickers = [code for code, _ in entries]
+            choices.append(
+                questionary.Choice(
+                    _format_watchlist_choice(name, entries), value=(name, tickers)
+                )
+            )
         except Exception:
             choices.append(questionary.Choice(name, value=(name, [])))
     choices.append(questionary.Choice("Import from file...", value=("__import__", [])))
@@ -595,7 +634,7 @@ def select_profile_interactive(allow_back: bool = False) -> dict | None:
             try:
                 prof = load_profile(name)
                 cfg = prof.get("config", {})
-                summary = f"({cfg.get('llm_provider', '?')}, {cfg.get('deep_thinker', '?')}, {len(cfg.get('analysts', []))} analysts, {cfg.get('output_language', '?')})"
+                summary = f"({cfg.get('llm_provider', '?')}, {cfg.get('deep_thinker', '?')}, {len(cfg.get('analysts', []))} analysts, research depth {cfg.get('research_depth', '?')}, {cfg.get('output_language', '?')})"
                 choices.append(questionary.Choice(f"{name}  {summary}", value=name))
             except Exception:
                 choices.append(questionary.Choice(name, value=name))

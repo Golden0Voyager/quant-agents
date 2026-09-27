@@ -59,8 +59,6 @@ class TestCliSkipsPromptsFromEnv(unittest.TestCase):
 
         with mock.patch.dict(os.environ, env, clear=False), \
              mock.patch.object(m, "DEFAULT_CONFIG", fake_cfg), \
-             mock.patch.object(m, "fetch_announcements", return_value=None), \
-             mock.patch.object(m, "display_announcements"), \
              mock.patch.object(m, "get_ticker", return_value="AAPL"), \
              mock.patch.object(m, "get_analysis_date", return_value="2026-05-29"), \
              mock.patch.object(m, "select_analysts", return_value=[]), \

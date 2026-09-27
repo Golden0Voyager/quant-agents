@@ -10,16 +10,28 @@ def _ensure_dir() -> Path:
 
 def parse_watchlist_content(content: str) -> list[str]:
     """Parse watchlist text: one ticker per line, ignore comments and blanks."""
-    tickers = []
+    return [code for code, _ in parse_watchlist_entries(content)]
+
+
+def parse_watchlist_entries(content: str) -> list[tuple[str, str]]:
+    """Parse watchlist text into (code, display_name) pairs.
+
+    Inline comments carry the stock name (``002241  # 歌尔股份``); lines
+    without a comment fall back to the bare code as the display name.
+    Blank lines and full-line comments are skipped.
+    """
+    entries: list[tuple[str, str]] = []
     for line in content.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        # Strip inline comments
-        code = stripped.split("#", 1)[0].strip()
-        if code:
-            tickers.append(code)
-    return tickers
+        code, _, comment = stripped.partition("#")
+        code = code.strip()
+        if not code:
+            continue
+        display = comment.strip() or code
+        entries.append((code, display))
+    return entries
 
 
 def save_watchlist(name: str, tickers: list[str]) -> Path:
@@ -33,10 +45,18 @@ def save_watchlist(name: str, tickers: list[str]) -> Path:
 
 def load_watchlist(name: str) -> list[str]:
     """Load a watchlist by name. Raises FileNotFoundError if missing."""
+    return [code for code, _ in load_watchlist_entries(name)]
+
+
+def load_watchlist_entries(name: str) -> list[tuple[str, str]]:
+    """Load a watchlist as (code, display_name) pairs.
+
+    Raises FileNotFoundError if the watchlist file is missing.
+    """
     path = _ensure_dir() / f"{name}.txt"
     if not path.exists():
         raise FileNotFoundError(f"Watchlist '{name}' not found at {path}")
-    return parse_watchlist_content(path.read_text(encoding="utf-8"))
+    return parse_watchlist_entries(path.read_text(encoding="utf-8"))
 
 
 def list_watchlists() -> list[str]:
