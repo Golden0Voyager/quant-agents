@@ -64,9 +64,9 @@ ANALYST_DATA_REQUIREMENTS: dict[str, list[dict]] = {
         {"key": "earnings_forecast", "label": "业绩预告",    "cache": True},
     ],
     "governance": [
-        {"key": "dragon_tiger",      "label": "龙虎榜",      "cache": False},
-        {"key": "margin_trading",    "label": "融资融券",    "cache": False},
-        {"key": "shareholders",      "label": "股东户数",    "cache": False},
+        {"key": "dragon_tiger",      "label": "龙虎榜",      "cache": True},
+        {"key": "margin_trading",    "label": "融资融券",    "cache": True},
+        {"key": "shareholders",      "label": "股东户数",    "cache": True},
         {"key": "pledge",            "label": "股权质押",    "cache": False},
         {"key": "northbound",        "label": "北向资金",    "cache": True},
         {"key": "inst_intel",        "label": "机构综合情报","cache": True},
@@ -106,9 +106,15 @@ def _check_ohlcv(ticker: str, trade_date: str, config: dict) -> ReadinessItem:
 
 def _check_smartmoney_table(
     ticker: str, table: str, label: str, analyst: str,
-    date_col: str = "trade_date"
+    date_col: str = "trade_date",
+    trade_date: str | None = None,
+    stale_days: int | None = None,
 ) -> ReadinessItem | None:
-    """检查 smartmoney_db 中某张表是否有该标的的数据。"""
+    """检查 smartmoney_db 中某张表是否有该标的的数据。
+
+    当给出 ``stale_days`` 且表内最新日期距 ``trade_date`` 超过该阈值时，
+    状态标为 "stale"（面板亮黄灯）——提示 pipeline 回补可能已停摆。
+    """
     if not is_a_share_ticker(ticker):
         return None
     try:
@@ -127,9 +133,28 @@ def _check_smartmoney_table(
             latest = df.iloc[0]["latest"]
             if cnt and cnt > 0:
                 latest_str = str(latest) if latest else "N/A"
+                details = (
+                    f"{cnt} 条记录"
+                    + (f"，最新 {latest_str}" if latest_str != "N/A" else "")
+                )
+                if stale_days and latest and trade_date:
+                    try:
+                        lag = (
+                            pd.to_datetime(str(trade_date)[:10])
+                            - pd.to_datetime(str(latest)[:10])
+                        ).days
+                        if lag > stale_days:
+                            return ReadinessItem(
+                                label, "cacheable", "stale",
+                                details + f" ⚠️ 滞后 {lag} 天（超 {stale_days} 天阈值，"
+                                f"分析时将走线上刷新）",
+                                analyst,
+                            )
+                    except (TypeError, ValueError):
+                        pass
                 return ReadinessItem(
                     label, "cacheable", "cached",
-                    f"{cnt} 条记录" + (f"，最新 {latest_str}" if latest_str != "N/A" else ""),
+                    details,
                     analyst,
                 )
     except Exception as exc:
@@ -137,13 +162,58 @@ def _check_smartmoney_table(
     return None
 
 
-def _check_fund_flow(ticker: str, analyst: str) -> ReadinessItem:
+def _check_fund_flow(ticker: str, analyst: str, trade_date: str | None = None) -> ReadinessItem:
     """检查资金流向缓存。"""
-    result = _check_smartmoney_table(ticker, "fund_flow", "资金流向", analyst)
+    result = _check_smartmoney_table(
+        ticker, "fund_flow", "资金流向", analyst,
+        trade_date=trade_date, stale_days=7,
+    )
     if result:
         return result
     return ReadinessItem(
         "资金流向", "realtime", "available",
+        "无缓存，分析时实时获取", analyst
+    )
+
+
+def _check_margin_trading(ticker: str, analyst: str, trade_date: str | None = None) -> ReadinessItem:
+    """检查融资融券缓存。"""
+    result = _check_smartmoney_table(
+        ticker, "margin_trading", "融资融券", analyst,
+        trade_date=trade_date, stale_days=7,
+    )
+    if result:
+        return result
+    return ReadinessItem(
+        "融资融券", "realtime", "available",
+        "无缓存，分析时实时获取", analyst
+    )
+
+
+def _check_dragon_tiger(ticker: str, analyst: str, trade_date: str | None = None) -> ReadinessItem:
+    """检查龙虎榜缓存（稀疏表：只有上榜记录，滞后阈值放宽到 10 天）。"""
+    result = _check_smartmoney_table(
+        ticker, "dragon_tiger", "龙虎榜", analyst,
+        trade_date=trade_date, stale_days=10,
+    )
+    if result:
+        return result
+    return ReadinessItem(
+        "龙虎榜", "realtime", "available",
+        "无缓存，分析时实时获取", analyst
+    )
+
+
+def _check_shareholders(ticker: str, analyst: str, trade_date: str | None = None) -> ReadinessItem:
+    """检查股东户数缓存（季度披露，滞后阈值放宽到 90 天）。"""
+    result = _check_smartmoney_table(
+        ticker, "shareholder_count", "股东户数", analyst,
+        trade_date=trade_date, stale_days=90,
+    )
+    if result:
+        return result
+    return ReadinessItem(
+        "股东户数", "realtime", "available",
         "无缓存，分析时实时获取", analyst
     )
 
@@ -279,11 +349,17 @@ def check_data_readiness(
                 else:
                     item = _check_derived(req["derived"], req["label"], analyst_key)
             elif req["key"] == "fund_flow":
-                item = _check_fund_flow(ticker, analyst_key)
+                item = _check_fund_flow(ticker, analyst_key, trade_date)
             elif req["key"] == "fin_statements":
                 item = _check_fin_statements(ticker, analyst_key)
             elif req["key"] == "northbound":
                 item = _check_northbound(ticker, analyst_key)
+            elif req["key"] == "margin_trading":
+                item = _check_margin_trading(ticker, analyst_key, trade_date)
+            elif req["key"] == "dragon_tiger":
+                item = _check_dragon_tiger(ticker, analyst_key, trade_date)
+            elif req["key"] == "shareholders":
+                item = _check_shareholders(ticker, analyst_key, trade_date)
             elif req["key"] == "limit_up_down":
                 item = _check_limit_up_down(ticker, trade_date, analyst_key)
             elif req["key"] == "index_daily":
@@ -297,6 +373,8 @@ def check_data_readiness(
             report.items.append(item)
             if item.status == "unavailable":
                 report.all_ready = False
+                report.warning_count += 1
+            elif item.status == "stale":
                 report.warning_count += 1
 
     return report
@@ -317,10 +395,12 @@ def display_readiness_report(console: Console, report: ReadinessReport) -> None:
     for item in report.items:
         status_emoji = {
             "cached": "✅", "preloaded": "✅", "available": "✅",
-            "unavailable": "❌", "skipped": "⏭️",
+            "unavailable": "❌", "skipped": "⏭️", "stale": "⚠️",
         }.get(item.status, "❓")
         table = cacheable if item.category == "cacheable" else realtime
-        style = "red" if item.status == "unavailable" else "green"
+        style = {
+            "unavailable": "red", "stale": "yellow",
+        }.get(item.status, "green")
         table.add_row(
             status_emoji,
             f"[{style}]{item.label}[/{style}]",
@@ -336,8 +416,14 @@ def display_readiness_report(console: Console, report: ReadinessReport) -> None:
         console.print(cacheable)
     if realtime.row_count > 0:
         console.print(realtime)
-    if report.warning_count > 0:
+    stale_count = sum(1 for i in report.items if i.status == "stale")
+    if not report.all_ready:
         console.print(f"\n[red]⚠ {report.warning_count} 项数据不可用，分析可能受限[/red]")
+    elif stale_count > 0:
+        console.print(
+            f"\n[yellow]⚠ {stale_count} 项缓存数据超龄，分析时将自动走线上刷新"
+            f"（pipeline 回补可能停摆，建议检查 quant_pipeline 运行记录）[/yellow]"
+        )
     else:
         console.print("\n[green]✅ 所有数据就绪[/green]")
     console.print()

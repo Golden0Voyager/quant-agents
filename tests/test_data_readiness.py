@@ -139,6 +139,32 @@ class TestCheckSmartmoneyTable:
     @patch("tradingagents.dataflows.smartmoney_vendor._to_smartmoney_symbol")
     @patch("tradingagents.dataflows.smartmoney_vendor._df_from_sql")
     @patch("tradingagents.agents.utils.data_readiness.load_ohlcv")
+    def test_ashare_cache_stale_flags_warning(
+        self, mock_load, mock_df, mock_to_sym, mock_is_a_share
+    ):
+        """Cache older than the stale budget flags 'stale' (yellow panel light)."""
+        mock_load.return_value = pd.DataFrame({"Date": ["2026-07-03"], "Close": [10.0]})
+        mock_is_a_share.return_value = True
+        mock_to_sym.return_value = "000001"
+        mock_df.return_value = pd.DataFrame({
+            "cnt": [45],
+            "latest": ["2026-06-18"],
+        })
+
+        report = check_data_readiness("000001.SZ", "2026-07-03", ["market"])
+        ff_items = [i for i in report.items if i.label == "资金流向"]
+        assert len(ff_items) == 1
+        assert ff_items[0].status == "stale"
+        assert "滞后" in ff_items[0].details
+        assert "45 条记录" in ff_items[0].details
+        # stale is a warning, not a blocker
+        assert report.all_ready is True
+        assert report.warning_count == 1
+
+    @patch("tradingagents.agents.utils.data_readiness.is_a_share_ticker")
+    @patch("tradingagents.dataflows.smartmoney_vendor._to_smartmoney_symbol")
+    @patch("tradingagents.dataflows.smartmoney_vendor._df_from_sql")
+    @patch("tradingagents.agents.utils.data_readiness.load_ohlcv")
     def test_ashare_cache_hit_none_latest(
         self, mock_load, mock_df, mock_to_sym, mock_is_a_share
     ):
@@ -501,6 +527,28 @@ class TestCheckDataReadinessIntegration:
             assert item.status == "available"
             assert item.category in ("realtime", "cacheable")
 
+    @patch("tradingagents.agents.utils.data_readiness.is_a_share_ticker")
+    @patch("tradingagents.dataflows.smartmoney_vendor._to_smartmoney_symbol")
+    @patch("tradingagents.dataflows.smartmoney_vendor._df_from_sql")
+    @patch("tradingagents.agents.utils.data_readiness.load_ohlcv")
+    def test_governance_ashare_uses_local_tables(
+        self, mock_load, mock_df, mock_to_sym, mock_is_a_share
+    ):
+        """A-share governance items are served from local tables when present."""
+        mock_load.return_value = pd.DataFrame({"Date": ["2026-07-03"], "Close": [10.0]})
+        mock_is_a_share.return_value = True
+        mock_to_sym.return_value = "000001"
+        mock_df.return_value = pd.DataFrame({"cnt": [5], "latest": ["2026-07-02"]})
+
+        report = check_data_readiness("000001.SZ", "2026-07-03", ["governance"])
+        by_label = {i.label: i for i in report.items}
+        # Items with local tables are now cacheable-first
+        for label in ("龙虎榜", "融资融券", "股东户数", "北向资金"):
+            assert by_label[label].category == "cacheable", label
+            assert by_label[label].status == "cached", label
+        # Pledge has no local table — stays realtime
+        assert by_label["股权质押"].category == "realtime"
+
     @patch("tradingagents.agents.utils.data_readiness.load_ohlcv")
     def test_industry_analyst_all_realtime(self, mock_load):
         """Industry analyst data sources are all realtime."""
@@ -605,6 +653,20 @@ class TestDisplayReadinessReport:
         item = ReadinessItem("某数据", "cacheable", "skipped", "已跳过", "market")
         report = ReadinessReport(items=[item], all_ready=True)
         display_readiness_report(console, report)
+
+    def test_display_stale_status(self):
+        """Stale items render with ⚠️ emoji and a yellow summary line."""
+        console = Console(width=100, force_terminal=True)
+        item = ReadinessItem(
+            "资金流向", "cacheable", "stale",
+            "45 条记录，最新 2026-06-18 ⚠️ 滞后 15 天（超 7 天阈值）", "market",
+        )
+        report = ReadinessReport(items=[item], all_ready=True, warning_count=1)
+        with console.capture() as capture:
+            display_readiness_report(console, report)
+        out = capture.get()
+        assert "⚠️" in out
+        assert "线上刷新" in out
 
     def test_display_unknown_status(self):
         """Unknown status defaults to ❓ emoji."""
