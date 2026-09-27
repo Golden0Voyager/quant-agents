@@ -6,6 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
+from tradingagents.dataflows.errors import NoMarketDataError
+
 
 def _create_test_db(path):
     conn = sqlite3.connect(path)
@@ -678,7 +680,7 @@ class GetSectorFundFlowTests(unittest.TestCase):
             db_path = f.name
         try:
             _create_full_test_db(db_path)
-            with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
+            with _PatchedVendor(db_path), self.assertRaises(NoMarketDataError):
                 get_sector_fund_flow("Nonexistent Sector")
         finally:
             os.unlink(db_path)
@@ -707,12 +709,49 @@ class GetSectorFundFlowTests(unittest.TestCase):
         try:
             _create_full_test_db(db_path)
             with _PatchedVendor(db_path):
-                with self.assertRaises(RuntimeError) as ctx:
+                with self.assertRaises(NoMarketDataError) as ctx:
                     get_sector_fund_flow("军工")
                 self.assertIn("军工电子", str(ctx.exception))
                 self.assertIn("军工装备", str(ctx.exception))
         finally:
             os.unlink(db_path)
+
+    def test_bare_probe_wins_over_ambiguous_pair(self):
+        """短名优先：候选里存在裸名时取它，"贸易行业" → "贸易" 而非判歧义。"""
+        from tradingagents.dataflows.smartmoney_vendor import _resolve_sector_name
+
+        names = ["白酒", "石油加工贸易", "贸易", "养殖业"]
+        self.assertEqual(_resolve_sector_name("贸易行业", names), "贸易")
+
+    def test_roman_numeral_authority_name_matches_local_plain_name(self):
+        """申万权威名带罗马数字（"白酒Ⅱ"），本地 fund_flow 不带（"白酒"）。"""
+        from tradingagents.dataflows.smartmoney_vendor import _resolve_sector_name
+
+        local = ["白酒", "贸易", "银行", "养殖业", "半导体"]
+        self.assertEqual(_resolve_sector_name("白酒Ⅱ", local), "白酒")
+        self.assertEqual(_resolve_sector_name("贸易Ⅲ", local), "贸易")
+        self.assertEqual(_resolve_sector_name("国有大型银行Ⅱ", local), "银行")
+
+    def test_normalization_never_collapses_two_local_sectors(self):
+        """归一化不得把本地两个不同板块折叠成一个——宁可降级。"""
+        from tradingagents.dataflows.errors import NoMarketDataError
+        from tradingagents.dataflows.smartmoney_vendor import _resolve_sector_name
+
+        with self.assertRaises(NoMarketDataError):
+            _resolve_sector_name("白酒", ["白酒Ⅱ", "白酒Ⅲ"])
+
+    def test_sector_name_failure_is_no_market_data_not_runtime(self):
+        """解析失败必须落在 VendorError 体系里，不能是 RuntimeError。
+
+        langgraph 的 ToolNode 默认只把 ToolInvocationError 转成 ToolMessage，
+        其余异常一律 re-raise——用 RuntimeError 会让一个板块名对不上直接
+        中断整只 ticker 的图（20260926 批次 300175/001316 即此因）。
+        """
+        from tradingagents.dataflows.smartmoney_vendor import _resolve_sector_name
+
+        with self.assertRaises(NoMarketDataError):
+            _resolve_sector_name("农牧饲渔", ["白酒", "贸易", "养殖业"])
+        self.assertFalse(issubclass(NoMarketDataError, RuntimeError))
 
     def test_zero_match_lists_available_sectors(self):
         """零命中报错并回传可用板块名，供 LLM 重试。"""
@@ -723,7 +762,7 @@ class GetSectorFundFlowTests(unittest.TestCase):
         try:
             _create_full_test_db(db_path)
             with _PatchedVendor(db_path):
-                with self.assertRaises(RuntimeError) as ctx:
+                with self.assertRaises(NoMarketDataError) as ctx:
                     get_sector_fund_flow("元宇宙")
                 self.assertIn("Available sectors", str(ctx.exception))
                 self.assertIn("白酒", str(ctx.exception))
@@ -811,7 +850,7 @@ class GetSectorFundFlowTests(unittest.TestCase):
         try:
             self._db_with_stock(db_path, "300999", "金龙鱼", "农牧饲渔")
             with _PatchedVendor(db_path):
-                with self.assertRaises(RuntimeError) as ctx:
+                with self.assertRaises(NoMarketDataError) as ctx:
                     get_sector_fund_flow("农业概念", ticker="300999.SZ")
                 self.assertIn("Available sectors", str(ctx.exception))
         finally:
@@ -826,7 +865,7 @@ class GetSectorFundFlowTests(unittest.TestCase):
         try:
             _create_full_test_db(db_path)
             with _PatchedVendor(db_path):
-                with self.assertRaises(RuntimeError) as ctx:
+                with self.assertRaises(NoMarketDataError) as ctx:
                     get_sector_fund_flow("元宇宙", ticker="000000.SZ")
                 self.assertIn("Available sectors", str(ctx.exception))
                 self.assertIn("元宇宙", str(ctx.exception))

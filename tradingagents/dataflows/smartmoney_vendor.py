@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sqlite3
 from datetime import datetime
 from typing import Annotated, Any
@@ -24,6 +25,7 @@ from typing import Annotated, Any
 import pandas as pd
 
 from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.dataflows.sw_industry_map import get_sw_industry
 
 logger = logging.getLogger(__name__)
 
@@ -1689,6 +1691,11 @@ _INDUSTRY_SECTOR_ALIASES = {
 
 _SECTOR_NAME_SUFFIXES = ("行业", "概念", "板块")
 
+# 申万官方在层级名后带罗马数字（"白酒Ⅱ"/"白酒Ⅲ"、"贸易Ⅱ"/"贸易Ⅲ"），本地
+# sector_fund_flow 用的是不带后缀的同一批板块名（"白酒"/"贸易"）。比较前统一
+# 剥掉罗马数字，否则"白酒"会同时命中"白酒Ⅱ"和"白酒Ⅲ"而被误判成歧义。
+_ROMAN_NUMERAL_SUFFIX = re.compile(r"[ⅠⅡⅢⅣⅤⅥ]+$")
+
 
 def _strip_sector_suffix(name: str) -> str:
     """剥掉 LLM 自由文本里常见的板块名后缀（如 "白酒行业" → "白酒"）。"""
@@ -1698,37 +1705,71 @@ def _strip_sector_suffix(name: str) -> str:
     return name
 
 
+def _normalize_sector_name(name: str) -> str:
+    return _ROMAN_NUMERAL_SUFFIX.sub("", name.strip()).strip()
+
+
 def _resolve_sector_name(requested: str, names: list[str]) -> str:
     """Resolve a requested sector/industry name to a sector_fund_flow entry.
 
+    Comparison runs on Roman-numeral-stripped names so Shenwan's "白酒Ⅱ" and the
+    local "白酒" are recognised as one sector, but the value returned is always
+    an original entry of ``names`` (that is what the SQL lookup needs).
+
     Resolution order: exact → unique bidirectional substring (on both the raw
-    and suffix-stripped probe) → alias table. A unique fuzzy hit is used
-    automatically; ambiguous/zero hits raise with the candidate/available
-    names so the LLM can retry with a valid one.
+    and suffix-stripped probe) → bare-probe tie-break → alias table. A unique
+    fuzzy hit is used automatically. When several sectors match but one of them
+    *is* the bare probe (贸易行业 → 贸易, rather than the 石油加工贸易/贸易
+    pair), the bare name wins; genuinely one-to-many hits (军工 → 军工电子 /
+    军工装备) and zero hits raise NoMarketDataError carrying the candidate and
+    available names, so the router degrades to NO_DATA_AVAILABLE (a missing
+    sector must never abort the ticker) and the LLM can retry a valid name.
     """
-    if requested in names:
-        return requested
-    # 双向包含："军工"→军工电子/军工装备；"电子元件"→元件；"白酒行业"→白酒
-    probes = {requested, _strip_sector_suffix(requested)} - {""}
+    requested_norm = _normalize_sector_name(requested)
+    normalized = {n: _normalize_sector_name(n) for n in names}
+
+    exact = [n for n in names if normalized[n] == requested_norm]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        raise NoMarketDataError(
+            requested,
+            detail=(
+                f"sector name is ambiguous in quant_core.db; "
+                f"matching sectors: {', '.join(sorted(exact))}. "
+                "Retry with one exact sector name."
+            ),
+        )
+
+    probes = {requested_norm, _normalize_sector_name(_strip_sector_suffix(requested))} - {""}
     candidates = sorted({
         n for n in names
         for probe in probes
-        if probe in n or n in probe
+        if probe in normalized[n] or normalized[n] in probe
     })
     if len(candidates) == 1:
         return candidates[0]
     if len(candidates) > 1:
-        raise RuntimeError(
-            f"Sector '{requested}' is ambiguous in quant_core.db; "
-            f"matching sectors: {', '.join(candidates)}. "
-            "Retry with one exact sector name."
+        bare = sorted({normalized[c] for c in candidates} & probes)
+        if len(bare) == 1:
+            return next(c for c in candidates if normalized[c] == bare[0])
+        raise NoMarketDataError(
+            requested,
+            detail=(
+                f"sector name is ambiguous in quant_core.db; "
+                f"matching sectors: {', '.join(candidates)}. "
+                "Retry with one exact sector name."
+            ),
         )
     alias = _INDUSTRY_SECTOR_ALIASES.get(requested)
     if alias and alias in names:
         return alias
-    raise RuntimeError(
-        f"No sector named '{requested}' in quant_core.db. "
-        f"Available sectors: {', '.join(sorted(names))}"
+    raise NoMarketDataError(
+        requested,
+        detail=(
+            f"no sector named {requested!r} in quant_core.db. "
+            f"Available sectors: {', '.join(sorted(names))}"
+        ),
     )
 
 
@@ -1749,6 +1790,47 @@ def _registered_industry(ticker: str) -> str | None:
     return str(industry).strip()
 
 
+def _resolve_sector_with_fallbacks(requested: str, names: list[str], ticker: str | None) -> tuple[str, str]:
+    """按 请求名 → stock_list 注册行业 → 申万权威行业 的顺序解析板块名。
+
+    每一级都只接受"精确或唯一"命中（见 `_resolve_sector_name`），全都不中就抛
+    最初的 NoMarketDataError，由路由层降级成 NO_DATA_AVAILABLE。绝不因为语义
+    相近就挑一个板块——那会把一只票的资金流错报成另一个行业的。返回
+    (板块名, 审计标注)，标注会写进工具输出，报告读者可核对推断来源。
+    """
+    resolved: str | None = None
+    direct_error: NoMarketDataError | None = None
+    try:
+        resolved = _resolve_sector_name(requested, names)
+    except NoMarketDataError as exc:
+        direct_error = exc
+    if resolved is not None:
+        note = f"（请求 '{requested}' 自动匹配到板块 '{resolved}'）" if resolved != requested else ""
+        return resolved, note
+
+    if ticker:
+        industry = _registered_industry(ticker)
+        if industry:
+            try:
+                resolved = _resolve_sector_name(industry, names)
+            except NoMarketDataError:
+                pass
+            else:
+                return resolved, f"（按 {ticker} 注册行业 '{industry}' 匹配到板块 '{resolved}'）"
+
+        sw = get_sw_industry(ticker)
+        if sw:
+            for level, authority in (("申万二级", sw[1]), ("申万三级", sw[2])):
+                if not authority:
+                    continue
+                try:
+                    resolved = _resolve_sector_name(authority, names)
+                except NoMarketDataError:
+                    continue
+                return resolved, f"（按 {ticker} {level} '{authority}' 匹配到板块 '{resolved}'）"
+    raise direct_error if direct_error is not None else NoMarketDataError(requested)
+
+
 def get_sector_fund_flow(sector_name: str, ticker: str | None = None) -> str:
     """Fetch sector fund-flow (板块资金流向) from quant_core.db.
 
@@ -1766,17 +1848,7 @@ def get_sector_fund_flow(sector_name: str, ticker: str | None = None) -> str:
     all_df = _df_from_sql("SELECT DISTINCT sector_name FROM sector_fund_flow", ())
     if all_df is not None and not all_df.empty:
         names = [str(n) for n in all_df["sector_name"].dropna()]
-        try:
-            resolved = _resolve_sector_name(requested, names)
-            if resolved != requested:
-                note = f"（请求 '{requested}' 自动匹配到板块 '{resolved}'）"
-        except RuntimeError as direct_error:
-            industry = _registered_industry(ticker) if ticker else None
-            if industry is None:
-                raise direct_error
-            # 注册行业也解析失败时同样抛带候选/可用板块名的错误，供 LLM 重试
-            resolved = _resolve_sector_name(industry, names)
-            note = f"（按 {ticker} 注册行业 '{industry}' 匹配到板块 '{resolved}'）"
+        resolved, note = _resolve_sector_with_fallbacks(requested, names, ticker)
 
     df = _df_from_sql(
         """
@@ -1792,8 +1864,12 @@ def get_sector_fund_flow(sector_name: str, ticker: str | None = None) -> str:
     )
 
     if df is None or df.empty:
-        raise RuntimeError(
-            f"No sector fund-flow data in quant_core.db for '{resolved}'"
+        raise NoMarketDataError(
+            resolved,
+            detail=(
+                "sector_fund_flow has no rows for the resolved sector in "
+                "quant_core.db"
+            ),
         )
 
     lines = [
