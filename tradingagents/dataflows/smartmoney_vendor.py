@@ -25,6 +25,7 @@ from typing import Annotated, Any
 import pandas as pd
 
 from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.dataflows.freshness import trading_sessions_between
 from tradingagents.dataflows.sw_industry_map import get_sw_industry
 
 logger = logging.getLogger(__name__)
@@ -145,17 +146,21 @@ def get_global_asset_data(
     A-share tickers are rejected immediately — they belong to ``daily_bars``.
 
     Freshness guard: when the latest local row lags ``end_date`` by more
-    than ``MAX_OHLCV_STALE_DAYS`` calendar days, raises ``NoMarketDataError``
+    than 5 calendar days, raises ``NoMarketDataError``
     so ``route_to_vendor`` falls back to the next vendor (online yfinance).
     """
     from tradingagents.dataflows.akshare_common import is_a_share_ticker
-    from tradingagents.dataflows.stockstats_utils import MAX_OHLCV_STALE_DAYS
 
     if is_a_share_ticker(symbol):
         raise NoMarketDataError(
             symbol, symbol,
             "A-share tickers are stored in daily_bars, not global_assets_bars.",
         )
+
+    # US / crypto markets: no single session calendar fits both (crypto trades
+    # 365d), so this path keeps a calendar-day budget — tightened from the old
+    # 10 days, which let a week of stale prices through silently.
+    _GLOBAL_ASSETS_STALE_DAYS = 5
 
     code = symbol.upper()
     df = _df_from_sql(
@@ -180,7 +185,7 @@ def get_global_asset_data(
     end = pd.to_datetime(end_date, errors="coerce")
     if pd.notna(latest) and pd.notna(end):
         stale_days = (end.normalize() - latest.normalize()).days
-        if stale_days > MAX_OHLCV_STALE_DAYS:
+        if stale_days > _GLOBAL_ASSETS_STALE_DAYS:
             raise NoMarketDataError(
                 symbol, code,
                 f"global_assets_bars latest row is {latest.date()}, "
@@ -1609,7 +1614,14 @@ def get_dragon_tiger(
     symbol: str,
     curr_date: str | None = None,
 ) -> str:
-    """Fetch dragon-tiger-board (龙虎榜) data from quant_core.db."""
+    """Fetch dragon-tiger-board (龙虎榜) data from quant_core.db.
+
+    Freshness is judged on the WHOLE TABLE's max trade_date (pipeline
+    health), not per-stock appearances: a stock that has not appeared on
+    the board recently legitimately has old per-stock rows, which are
+    returned as history. Only a stalled backfill (table-wide staleness)
+    falls through to the online vendor.
+    """
     code = _to_smartmoney_symbol(symbol)
 
     params = [code]
@@ -1617,6 +1629,23 @@ def get_dragon_tiger(
     if curr_date:
         date_filter = " AND trade_date <= ?"
         params.append(curr_date)
+
+    table_max = _df_from_sql(
+        "SELECT MAX(trade_date) AS latest FROM dragon_tiger", ()
+    )
+    anchor = (curr_date or datetime.now().strftime("%Y-%m-%d"))[:10]
+    if table_max is not None and not table_max.empty:
+        latest = table_max.iloc[0].get("latest")
+        if latest is not None and pd.notna(latest):
+            lag = trading_sessions_between(str(latest), anchor)
+            if lag is not None and lag >= _DRAGON_TIGER_STALE_SESSIONS:
+                raise NoMarketDataError(
+                    symbol, symbol,
+                    f"dragon_tiger table in quant_core.db is stale: newest "
+                    f"row {latest} misses {lag} trading sessions as of "
+                    f"{anchor} (budget {_DRAGON_TIGER_STALE_SESSIONS}); "
+                    f"falling through to the online vendor.",
+                )
 
     df = _df_from_sql(
         f"""
@@ -1632,8 +1661,6 @@ def get_dragon_tiger(
 
     if df is None or df.empty:
         raise RuntimeError(f"No dragon-tiger data in quant_core.db for {symbol}")
-
-    _assert_local_data_not_stale("dragon_tiger", symbol, df, "Date", curr_date)
 
     lines = [
         f"## {symbol.upper()} Dragon Tiger Board (龙虎榜) "
@@ -2061,11 +2088,32 @@ def _check_stale_warning(latest_date: str | None, curr_date: str | None, max_day
 #     row with the inline _check_stale_warning beats NO_DATA
 #   - stock_comment / stock_hot_rank: snapshot semantics — callers deliberately
 #     use the latest snapshot regardless of age and degrade to online fetches
-_LOCAL_TABLE_STALE_BUDGET_DAYS = {
-    "fund_flow": 7,
-    "margin_trading": 7,
-    "dragon_tiger": 10,
+# Trading-session freshness budgets for high-frequency local tables, judged
+# against the request's own date anchor (curr_date/trade_date as rewritten by
+# the data policy — never today, so backtests are not penalised). Session lag
+# is the count of trading days missing from the local table; weekends and
+# holidays add no sessions, so a healthy table over Spring Festival never
+# trips the guard, while a mid-week pipeline stall does after ~3 sessions.
+# Only tables with a working online fallback belong here: beyond the budget
+# the getter raises NoMarketDataError and route_to_vendor falls through to
+# the online vendor.
+# Tables intentionally excluded:
+#   - north_hold: quarter-end disclosure since 2024-08, no fresher source exists
+#   - chip_distribution: smartmoney_db is the only configured vendor; a stale
+#     row with the inline _check_stale_warning beats NO_DATA
+#   - stock_comment / stock_hot_rank: snapshot semantics — callers deliberately
+#     use the latest snapshot regardless of age and degrade to online fetches
+#   - dragon_tiger: sparse per-stock table — judged on the WHOLE TABLE's max
+#     date in get_dragon_tiger (pipeline health), not per-stock appearances
+_LOCAL_TABLE_STALE_SESSIONS = {
+    "fund_flow": 3,
+    "margin_trading": 3,
 }
+
+# Dragon-tiger staleness budget, judged on the whole table's max date (see
+# get_dragon_tiger): a sparse per-stock table must not trip on a stock that
+# simply has not appeared on the board recently.
+_DRAGON_TIGER_STALE_SESSIONS = 5
 
 
 def _assert_local_data_not_stale(
@@ -2077,28 +2125,27 @@ def _assert_local_data_not_stale(
 ) -> None:
     """Raise NoMarketDataError when the newest local row exceeds the budget.
 
-    ``anchor_date=None`` means "as of today". Malformed dates are ignored —
-    a freshness guard must never be the reason data becomes unavailable.
+    Budgets are trading sessions (see _LOCAL_TABLE_STALE_SESSIONS).
+    ``anchor_date=None`` means "as of today". Malformed dates and calendar
+    failures are ignored — a freshness guard must never be the reason data
+    becomes unavailable.
     """
-    budget = _LOCAL_TABLE_STALE_BUDGET_DAYS.get(table)
+    budget = _LOCAL_TABLE_STALE_SESSIONS.get(table)
     if not budget or df is None or df.empty or date_col not in df.columns:
         return
     latest = df[date_col].max()
     if latest is None or pd.isna(latest):
         return
     anchor = (anchor_date or datetime.now().strftime("%Y-%m-%d"))[:10]
-    try:
-        lag = (
-            pd.to_datetime(anchor) - pd.to_datetime(str(latest)[:10])
-        ).days
-    except (TypeError, ValueError):
+    lag = trading_sessions_between(str(latest), anchor)
+    if lag is None:
         return
-    if lag > budget:
+    if lag >= budget:
         raise NoMarketDataError(
             symbol, symbol,
-            f"{table} data in quant_core.db is stale: newest row {latest} is "
-            f"{lag} days older than the requested as-of date {anchor} "
-            f"(budget {budget}d); falling through to the online vendor.",
+            f"{table} data in quant_core.db is stale: newest row {latest} "
+            f"misses {lag} trading sessions as of {anchor} "
+            f"(budget {budget}); falling through to the online vendor.",
         )
 
 

@@ -14,7 +14,7 @@ from tradingagents.dataflows.interface import (
     route_to_vendor,
 )
 from tradingagents.dataflows.stockstats_utils import (
-    MAX_OHLCV_STALE_DAYS,
+    MAX_OHLCV_STALE_SESSIONS,
 )
 from tradingagents.dataflows.symbol_utils import normalize_symbol
 from tradingagents.portfolio.models import Holding, Portfolio, PortfolioMetadata, Transaction
@@ -197,13 +197,13 @@ class InterfaceEdgeTests(unittest.TestCase):
 
 
 # =========================================================================
-# dataflows/stockstats_utils.py — MAX_OHLCV_STALE_DAYS constant
+# dataflows/stockstats_utils.py — MAX_OHLCV_STALE_SESSIONS constant
 # =========================================================================
 
 @pytest.mark.unit
 class StockstatsConstantsTest(unittest.TestCase):
-    def test_max_stale_days_constant_exists(self):
-        self.assertEqual(MAX_OHLCV_STALE_DAYS, 10)
+    def test_max_stale_sessions_constant_exists(self):
+        self.assertEqual(MAX_OHLCV_STALE_SESSIONS, 3)
 
 
 # =========================================================================

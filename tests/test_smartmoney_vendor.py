@@ -573,8 +573,10 @@ class GetDragonTigerTests(unittest.TestCase):
             db_path = f.name
         try:
             _create_full_test_db(db_path)
+            # curr_date anchors the table-level freshness guard at the
+            # fixture date; the unknown ticker then hits the empty branch.
             with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
-                get_dragon_tiger("999999.SS")
+                get_dragon_tiger("999999.SS", curr_date="2026-06-19")
         finally:
             os.unlink(db_path)
 
@@ -640,7 +642,8 @@ class LocalDataStalenessGuardTests(unittest.TestCase):
                 ('600519','2026-06-18',1e8,0.05,5e7,0.03,3e7,0.02,0);
         """)
         with _PatchedVendor(db_path), self.assertRaises(NoMarketDataError):
-            # 9 days old > 7-day budget: must fall through to the online vendor
+            # latest row misses 5 sessions (Jun 22-26) >= 3-session budget:
+            # must fall through to the online vendor
             get_fund_flow("600519.SS", curr_date="2026-06-27")
 
     def test_fund_flow_within_budget_returns(self):
@@ -700,6 +703,26 @@ class LocalDataStalenessGuardTests(unittest.TestCase):
             self.assertIn("Main Force", get_fund_flow("600519.SS", curr_date="2026-06-19"))
             self.assertIn("融资余额", get_margin_trading("600519.SS", curr_date="2026-06-19"))
             self.assertIn("龙虎榜", get_dragon_tiger("600519.SS", curr_date="2026-06-19"))
+
+    def test_holiday_gap_never_trips_guard(self):
+        """National Day (Oct 1-7): no sessions fall inside the holiday, so a
+        healthy table anchored mid-holiday has session lag 0 and is served."""
+        from tradingagents.dataflows.smartmoney_vendor import get_fund_flow
+
+        db_path = self._make_db("fund_flow", """
+            CREATE TABLE fund_flow (
+                ts_code TEXT, trade_date TEXT,
+                main_net_inflow REAL, main_net_inflow_pct REAL,
+                super_large_net_inflow REAL, super_large_net_inflow_pct REAL,
+                large_net_inflow REAL, large_net_inflow_pct REAL,
+                is_simulated INTEGER
+            );
+            INSERT INTO fund_flow VALUES
+                ('600519','2026-09-30',1e8,0.05,5e7,0.03,3e7,0.02,0);
+        """)
+        with _PatchedVendor(db_path):
+            result = get_fund_flow("600519.SS", curr_date="2026-10-05")
+        self.assertIn("Main Force", result)
 
     def test_malformed_dates_never_block(self):
         """A freshness guard must not be the reason data becomes unavailable."""
@@ -2068,7 +2091,7 @@ class GetGlobalAssetDataTests(unittest.TestCase):
         self._with_db(check)
 
     def test_stale_data_raises_for_online_fallback(self):
-        """Latest local row > MAX_OHLCV_STALE_DAYS before end_date → no-data error."""
+        """Latest local row > 5 calendar days before end_date → no-data error."""
         from tradingagents.dataflows.smartmoney_vendor import get_global_asset_data
 
         def check():
@@ -2081,11 +2104,13 @@ class GetGlobalAssetDataTests(unittest.TestCase):
         self._with_db(check)
 
     def test_within_staleness_window_accepted(self):
-        """A long weekend / holiday gap (≤ MAX_OHLCV_STALE_DAYS) is still served."""
+        """A long weekend gap (≤ 5 calendar days) is still served."""
         from tradingagents.dataflows.smartmoney_vendor import get_global_asset_data
 
         def check():
-            result = get_global_asset_data("AAPL", "2026-06-15", "2026-06-25")
+            # AAPL's latest row is 2026-06-17; 2026-06-20 is 3 days later
+            # and inside the 5-day budget.
+            result = get_global_asset_data("AAPL", "2026-06-15", "2026-06-20")
             self.assertIn("# Total records: 3", result)
 
         self._with_db(check)
