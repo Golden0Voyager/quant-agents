@@ -25,6 +25,7 @@ from .akshare_vendor import (
     get_earnings_estimates as get_akshare_earnings_estimates,
     get_fund_flow as get_akshare_fund_flow,
     get_fundamentals as get_akshare_fundamentals,
+    get_global_news as get_akshare_global_news,
     get_income_statement as get_akshare_income_statement,
     get_indicators as get_akshare_indicators,
     get_industry_valuation as get_akshare_industry_valuation,
@@ -1169,6 +1170,7 @@ VENDOR_METHODS: dict[str, dict[str, Any]] = {
     "get_global_news": {
         "yfinance": get_global_news_yfinance,
         "alpha_vantage": get_alpha_vantage_global_news,
+        "akshare": get_akshare_global_news,
     },
     "get_insider_transactions": {
         "smartmoney_db": get_smartmoney_insider_transactions,
@@ -1352,13 +1354,20 @@ def _is_failure_sentinel(result: str) -> bool:
     )
 
 
-def _build_vendor_chain(method: str, vendor_config: str, symbol: str | None) -> list[str]:
+def _build_vendor_chain(
+    method: str,
+    vendor_config: str,
+    symbol: str | None,
+    market: Market | None = None,
+) -> list[str]:
     """Build the ordered vendor chain for *method*.
 
     - Explicit vendor lists (anything other than ``"default"``) are respected
       verbatim, filtered to vendors that actually implement *method*.
     - The ``"default"`` sentinel enables A-share local-first ordering:
-      ``smartmoney_db → akshare → others`` when the symbol is an A-share ticker.
+      ``smartmoney_db → akshare → others`` when the symbol is an A-share ticker
+      or the resolved runtime market is XSHG (covers date-first methods such as
+      ``get_global_news`` whose first argument is not a ticker).
     - ``DISABLE_YFINANCE_FALLBACK=1`` strips yfinance from A-share chains.
     """
     all_available_vendors = list(VENDOR_METHODS[method].keys())
@@ -1387,7 +1396,10 @@ def _build_vendor_chain(method: str, vendor_config: str, symbol: str | None) -> 
     ):
         vendor_chain.append("tushare")
 
-    is_ashare = isinstance(symbol, str) and is_a_share_ticker(symbol)
+    is_ashare = (
+        (isinstance(symbol, str) and is_a_share_ticker(symbol))
+        or market == "XSHG"
+    )
     if is_ashare and "akshare" in VENDOR_METHODS[method]:
         # Only the default chain gets local-first A-share promotion; explicit
         # user configuration is preserved verbatim.
@@ -1573,7 +1585,7 @@ def _resolve_route_with_source(
         raise ValueError(f"Method '{method}' not supported")
 
     vendor_config = get_vendor(category, method)
-    vendor_chain = _build_vendor_chain(method, vendor_config, symbol)
+    vendor_chain = _build_vendor_chain(method, vendor_config, symbol, market)
     if registered_policy:
         vendor_chain = [
             vendor for vendor in vendor_chain if vendor in policy.allowed_vendors

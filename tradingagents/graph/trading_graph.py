@@ -555,7 +555,10 @@ class TradingAgentsGraph:
             # A-share: use load_ohlcv (smartmoney_db → akshare) instead of yfinance
             # to avoid rate-limit failures on batch runs (#PR).
             from tradingagents.dataflows.akshare_common import is_a_share_ticker
-            from tradingagents.dataflows.stockstats_utils import load_ohlcv
+            from tradingagents.dataflows.stockstats_utils import (
+                load_index_ohlcv,
+                load_ohlcv,
+            )
 
             if is_a_share_ticker(canonical):
                 full = load_ohlcv(canonical, end_str, refresh=False)
@@ -566,10 +569,28 @@ class TradingAgentsGraph:
                     stock = full.loc[mask].copy()
                 else:
                     stock = pd.DataFrame()
+
+                # The benchmark is resolved as a yfinance-style index symbol
+                # (e.g. 399001.SZ / 000001.SS). Serve it from the local
+                # index_daily table (→ akshare fallback) for the same
+                # rate-limit reason; yfinance stays as the last resort.
+                local_bench = load_index_ohlcv(benchmark, trade_date, end_str)
+                if (
+                    local_bench is not None
+                    and not local_bench.empty
+                    and "Close" in local_bench.columns
+                ):
+                    bmask = (local_bench["Date"] >= trade_date) & (
+                        local_bench["Date"] <= end_str
+                    )
+                    bench = local_bench.loc[bmask].copy()
+                else:
+                    bench = yf.Ticker(benchmark).history(
+                        start=trade_date, end=end_str
+                    )
             else:
                 stock = yf.Ticker(canonical).history(start=trade_date, end=end_str)
-
-            bench = yf.Ticker(benchmark).history(start=trade_date, end=end_str)
+                bench = yf.Ticker(benchmark).history(start=trade_date, end=end_str)
 
             if len(stock) < 2 or len(bench) < 2:
                 return None, None, None

@@ -701,6 +701,33 @@ def _to_index_code(symbol: str) -> str:
     return f"sz{bare}"
 
 
+def get_index_daily_df(
+    index_code: str,
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame | None:
+    """Return ``index_daily`` rows as an ascending DataFrame, or None.
+
+    Columns: Date, Open, High, Low, Close, Volume. Unlike
+    :func:`get_index_daily` this never raises — callers that only need the
+    rows (e.g. return attribution) treat a miss as a fallback signal.
+    """
+    code = _to_index_code(index_code)
+    df = _df_from_sql(
+        """
+        SELECT trade_date AS Date, open AS Open, high AS High,
+               low AS Low, close AS Close, volume AS Volume
+        FROM index_daily
+        WHERE index_code = ? AND trade_date BETWEEN ? AND ?
+        ORDER BY trade_date ASC
+        """,
+        (code, start_date, end_date),
+    )
+    if df is None or df.empty:
+        return None
+    return df
+
+
 def get_index_daily(
     index_code: Annotated[
         str,
