@@ -108,16 +108,19 @@ def _check_smartmoney_table(
     ticker: str, table: str, label: str, analyst: str,
     date_col: str = "trade_date",
     trade_date: str | None = None,
-    stale_days: int | None = None,
+    stale_sessions: int | None = None,
 ) -> ReadinessItem | None:
     """检查 smartmoney_db 中某张表是否有该标的的数据。
 
-    当给出 ``stale_days`` 且表内最新日期距 ``trade_date`` 超过该阈值时，
-    状态标为 "stale"（面板亮黄灯）——提示 pipeline 回补可能已停摆。
+    当给出 ``stale_sessions`` 且表内最新日期距 ``trade_date`` 缺失的
+    交易日数达到该阈值时，状态标为 "stale"（面板亮黄灯）——提示
+    pipeline 回补可能已停摆。按交易日而非日历日度量：周末/长假期间
+    滞后不会增长，不会误报。
     """
     if not is_a_share_ticker(ticker):
         return None
     try:
+        from tradingagents.dataflows.freshness import trading_sessions_between
         from tradingagents.dataflows.smartmoney_vendor import (
             _df_from_sql,
             _to_smartmoney_symbol,
@@ -137,21 +140,16 @@ def _check_smartmoney_table(
                     f"{cnt} 条记录"
                     + (f"，最新 {latest_str}" if latest_str != "N/A" else "")
                 )
-                if stale_days and latest and trade_date:
-                    try:
-                        lag = (
-                            pd.to_datetime(str(trade_date)[:10])
-                            - pd.to_datetime(str(latest)[:10])
-                        ).days
-                        if lag > stale_days:
-                            return ReadinessItem(
-                                label, "cacheable", "stale",
-                                details + f" ⚠️ 滞后 {lag} 天（超 {stale_days} 天阈值，"
-                                f"分析时将走线上刷新）",
-                                analyst,
-                            )
-                    except (TypeError, ValueError):
-                        pass
+                if stale_sessions and latest and trade_date:
+                    lag = trading_sessions_between(str(latest), str(trade_date)[:10])
+                    if lag is not None and lag >= stale_sessions:
+                        return ReadinessItem(
+                            label, "cacheable", "stale",
+                            details + f" ⚠️ 滞后 {lag} 个交易日"
+                            f"（超 {stale_sessions} 个交易日阈值，"
+                            f"分析时将走线上刷新）",
+                            analyst,
+                        )
                 return ReadinessItem(
                     label, "cacheable", "cached",
                     details,
@@ -166,7 +164,7 @@ def _check_fund_flow(ticker: str, analyst: str, trade_date: str | None = None) -
     """检查资金流向缓存。"""
     result = _check_smartmoney_table(
         ticker, "fund_flow", "资金流向", analyst,
-        trade_date=trade_date, stale_days=7,
+        trade_date=trade_date, stale_sessions=3,
     )
     if result:
         return result
@@ -180,7 +178,7 @@ def _check_margin_trading(ticker: str, analyst: str, trade_date: str | None = No
     """检查融资融券缓存。"""
     result = _check_smartmoney_table(
         ticker, "margin_trading", "融资融券", analyst,
-        trade_date=trade_date, stale_days=7,
+        trade_date=trade_date, stale_sessions=3,
     )
     if result:
         return result
@@ -191,10 +189,10 @@ def _check_margin_trading(ticker: str, analyst: str, trade_date: str | None = No
 
 
 def _check_dragon_tiger(ticker: str, analyst: str, trade_date: str | None = None) -> ReadinessItem:
-    """检查龙虎榜缓存（稀疏表：只有上榜记录，滞后阈值放宽到 10 天）。"""
+    """检查龙虎榜缓存（稀疏表：只有上榜记录，阈值放宽到 5 个交易日）。"""
     result = _check_smartmoney_table(
         ticker, "dragon_tiger", "龙虎榜", analyst,
-        trade_date=trade_date, stale_days=10,
+        trade_date=trade_date, stale_sessions=5,
     )
     if result:
         return result
@@ -205,10 +203,10 @@ def _check_dragon_tiger(ticker: str, analyst: str, trade_date: str | None = None
 
 
 def _check_shareholders(ticker: str, analyst: str, trade_date: str | None = None) -> ReadinessItem:
-    """检查股东户数缓存（季度披露，滞后阈值放宽到 90 天）。"""
+    """检查股东户数缓存（季度披露，阈值放宽到 65 个交易日）。"""
     result = _check_smartmoney_table(
         ticker, "shareholder_count", "股东户数", analyst,
-        trade_date=trade_date, stale_days=90,
+        trade_date=trade_date, stale_sessions=65,
     )
     if result:
         return result

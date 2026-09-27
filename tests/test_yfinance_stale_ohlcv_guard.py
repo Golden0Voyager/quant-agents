@@ -54,8 +54,18 @@ class StaleGuardUnitTests(unittest.TestCase):
             pd.DataFrame(columns=["Date", "Close"]), "2026-06-11", "X"
         )
 
-    def test_long_holiday_gap_within_threshold_is_accepted(self):
-        _assert_ohlcv_not_stale(_frame("2026-06-02"), "2026-06-11", "X")  # 9 days
+    def test_holiday_gap_adds_no_sessions_and_is_accepted(self):
+        # National Day holiday (Oct 1-7): no trading sessions fall between
+        # the last pre-holiday session and a mid-holiday anchor, so session
+        # lag stays 0 no matter how many calendar days pass.
+        _assert_ohlcv_not_stale(_frame("2026-09-30"), "2026-10-05", "X")
+
+    def test_stall_case_trips_guard_within_a_week(self):
+        # Pipeline stalled after Wed Jun 3; a request on Wed Jun 10 has
+        # missed 5 sessions (>= 3) and must be rejected even though only
+        # 7 calendar days passed.
+        with self.assertRaises(NoMarketDataError):
+            _assert_ohlcv_not_stale(_frame("2026-06-03"), "2026-06-10", "X")
 
     def test_unparseable_curr_date_passes_through(self):
         _assert_ohlcv_not_stale(_frame("2026-06-10"), "bad-date", "CB")

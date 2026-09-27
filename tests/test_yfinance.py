@@ -82,16 +82,17 @@ class GetYFinDataOnlineTests(unittest.TestCase):
         self.canonical = "AAPL"
 
         dates = pd.date_range("2025-01-01", "2025-01-10", freq="B")
+        n = len(dates)
         self.history_df = pd.DataFrame(
             {
-                "Open": [100.12, 101.34, 102.56],
-                "High": [105.78, 106.89, 107.90],
-                "Low": [99.01, 100.12, 101.23],
-                "Close": [102.45, 103.67, 104.78],
-                "Adj Close": [102.45, 103.67, 104.78],
-                "Volume": [1000000, 1100000, 1200000],
+                "Open": [100.12, 101.34, 102.56] + [103.0] * (n - 3),
+                "High": [105.78, 106.89, 107.90] + [108.0] * (n - 3),
+                "Low": [99.01, 100.12, 101.23] + [102.0] * (n - 3),
+                "Close": [102.45, 103.67, 104.78] + [105.0] * (n - 3),
+                "Adj Close": [102.45, 103.67, 104.78] + [105.0] * (n - 3),
+                "Volume": [1000000, 1100000, 1200000] + [1300000] * (n - 3),
             },
-            index=dates[:3],
+            index=dates,
         )
         self.history_df.index = self.history_df.index.tz_localize("UTC")
 

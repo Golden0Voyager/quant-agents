@@ -11,16 +11,21 @@ import yfinance as yf
 from stockstats import wrap
 from yfinance.exceptions import YFRateLimitError
 
+from tradingagents.dataflows.freshness import trading_sessions_between
+
 from .config import get_config
 from .symbol_utils import NoMarketDataError, normalize_symbol
 from .utils import safe_ticker_component
 
 logger = logging.getLogger(__name__)
 
-# A vendor's latest OHLCV row this many calendar days before the requested date
-# is treated as stale. Generous enough to span long holiday weekends, tight
-# enough to catch the year-old frames yfinance occasionally returns (#1021).
-MAX_OHLCV_STALE_DAYS = 10
+# A vendor's latest OHLCV row missing this many *trading sessions* before the
+# requested date is treated as stale. Session lag stops growing across
+# weekends and holidays (no sessions, no growth), so the budget is both
+# tighter than the old 10-calendar-day rule in the stall case (a mid-week
+# pipeline outage trips it within ~3 sessions) and immune to the Spring
+# Festival / National Day false positives that a calendar budget suffers.
+MAX_OHLCV_STALE_SESSIONS = 3
 
 
 def yf_retry(func, max_retries=3, base_delay=2.0):
@@ -117,36 +122,39 @@ def _assert_ohlcv_not_stale(
     symbol: str,
     canonical: str | None = None,
     *,
-    max_stale_days: int = MAX_OHLCV_STALE_DAYS,
+    max_stale_sessions: int = MAX_OHLCV_STALE_SESSIONS,
 ) -> None:
-    """Reject OHLCV whose latest row is far older than curr_date.
+    """Reject OHLCV whose latest row misses too many trading sessions.
 
     Raises NoMarketDataError (with a stale-specific detail) so the router treats
     it like any other "no usable data from this vendor" — try the next vendor,
     then emit one clear unavailable signal. Empty frames are left to the
     caller's existing no-data handling; this guards only the dangerous case of
     present-but-stale rows (a vendor returning a year-old frame that would
-    otherwise feed wrong prices to the agent, #1021).
+    otherwise feed wrong prices to the agent, #1021). Unparseable dates or a
+    broken session calendar never block — the guard degrades to serving data.
     """
     if data is None or data.empty:
         return
     requested = pd.to_datetime(curr_date, errors="coerce")
     if pd.isna(requested):
         return
-    requested = requested.normalize()
     dates = _coerce_ohlcv_dates(data)
     if dates.empty:
         return
     latest = dates.max().normalize()
     if hasattr(latest, "tz") and latest.tz is not None:
         latest = latest.tz_localize(None)
-    stale_days = (requested - latest).days
-    if stale_days > max_stale_days:
+    missing = trading_sessions_between(str(latest.date()), str(requested.date())[:10])
+    if missing is None:
+        return
+    if missing >= max_stale_sessions:
         raise NoMarketDataError(
             symbol,
             canonical,
-            f"latest row is {latest.date()}, {stale_days} days before the "
-            f"requested {requested.date()} (stale) — refusing to use it",
+            f"latest row is {latest.date()}, missing {missing} trading "
+            f"sessions before the requested {requested.date()} (stale) — "
+            f"refusing to use it",
         )
 
 
@@ -365,7 +373,8 @@ def load_ohlcv(
     For non-A-share tickers (US stocks, crypto), tries the local quant_core.db
     ``global_assets_bars`` table first and falls back to online yfinance when
     the local archive is missing or stale (latest row lags ``curr_date`` by
-    more than ``MAX_OHLCV_STALE_DAYS``).
+    more than 5 calendar days; A-share staleness is measured in trading
+    sessions via ``MAX_OHLCV_STALE_SESSIONS``).
 
     Args:
         symbol: Ticker symbol.
