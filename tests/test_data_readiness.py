@@ -757,6 +757,8 @@ class TestDisplayReadinessReport:
 
     def test_display_anchor_aligned_note(self):
         """Weekend/holiday anchor alignment renders an info line."""
+        import re
+
         console = Console(width=100, force_terminal=True)
         report = ReadinessReport(
             items=[], all_ready=True,
@@ -764,9 +766,11 @@ class TestDisplayReadinessReport:
         )
         with console.capture() as capture:
             display_readiness_report(console, report)
-        out = capture.get()
+        # CI terminals inject ANSI style sequences that split digit runs —
+        # strip them before asserting on content
+        out = re.sub(r"\x1b\[[0-9;]*m", "", capture.get())
         assert "2026-07-04 非交易日" in out
-        assert "2026-07-03" in out
+        assert "分析锚点已对齐至最近交易日 2026-07-03" in out
 
     def test_display_unknown_status(self):
         """Unknown status defaults to ❓ emoji."""
