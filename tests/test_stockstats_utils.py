@@ -416,10 +416,10 @@ class AssertOhlcvNotStaleTests(unittest.TestCase):
         _assert_ohlcv_not_stale(df, "2026-01-10", "X")
 
     def test_recent_data_passes(self):
-        """Data within max_stale_days should not raise."""
-        dates = pd.bdate_range("2026-01-05", periods=3)
+        """Data at the requested date should not raise."""
+        dates = pd.bdate_range("2026-01-07", periods=3)
         df = pd.DataFrame({"Date": dates, "Close": [100.0, 101.0, 102.0]})
-        # latest date 2026-01-07, curr_date 2026-01-10 → 3 days stale
+        # latest date 2026-01-09, curr_date 2026-01-10 (Sat) → session lag 0
         _assert_ohlcv_not_stale(df, "2026-01-10", "X")
 
     def test_stale_data_raises(self):
@@ -440,8 +440,9 @@ class AssertOhlcvNotStaleTests(unittest.TestCase):
 
     def test_tz_aware_dates_passes(self):
         """Data with tz-aware dates should not raise when within range."""
-        dates = pd.bdate_range("2026-01-05", periods=3, tz="UTC")
+        dates = pd.bdate_range("2026-01-07", periods=3, tz="UTC")
         df = pd.DataFrame({"Date": dates, "Close": [100.0, 101.0, 102.0]})
+        # latest date 2026-01-09, curr_date 2026-01-10 (Sat) → session lag 0
         _assert_ohlcv_not_stale(df, "2026-01-10", "X")
 
 

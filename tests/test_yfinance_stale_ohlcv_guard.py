@@ -36,9 +36,10 @@ def _frame(date):
 
 @pytest.mark.unit
 class StaleGuardUnitTests(unittest.TestCase):
-    def test_recent_prior_trading_day_is_accepted(self):
-        # 1 day before curr_date — well within the freshness window.
-        _assert_ohlcv_not_stale(_frame("2026-06-10"), "2026-06-11", "CB")
+    def test_current_day_is_accepted(self):
+        # Same-day bar — the expectation for a pipeline refreshed daily after
+        # close (budget 1: even one missing session means a skipped day).
+        _assert_ohlcv_not_stale(_frame("2026-06-11"), "2026-06-11", "CB")
 
     def test_year_old_row_is_rejected_with_detail(self):
         with self.assertRaises(NoMarketDataError) as ctx:
@@ -62,7 +63,7 @@ class StaleGuardUnitTests(unittest.TestCase):
 
     def test_stall_case_trips_guard_within_a_week(self):
         # Pipeline stalled after Wed Jun 3; a request on Wed Jun 10 has
-        # missed 5 sessions (>= 3) and must be rejected even though only
+        # missed 5 sessions (>= 1) and must be rejected even though only
         # 7 calendar days passed.
         with self.assertRaises(NoMarketDataError):
             _assert_ohlcv_not_stale(_frame("2026-06-03"), "2026-06-10", "X")

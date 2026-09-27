@@ -25,7 +25,10 @@ from typing import Annotated, Any
 import pandas as pd
 
 from tradingagents.dataflows.errors import NoMarketDataError
-from tradingagents.dataflows.freshness import trading_sessions_between
+from tradingagents.dataflows.freshness import (
+    expected_report_period,
+    trading_sessions_between,
+)
 from tradingagents.dataflows.sw_industry_map import get_sw_industry
 
 logger = logging.getLogger(__name__)
@@ -495,6 +498,8 @@ def get_balance_sheet(
         raise NoMarketDataError(
             symbol, detail="local quarterly_financials row has only null metrics"
         )
+    # 指标可用再查时效：报告期早于应披露期时抛给线上 vendor 补数
+    _assert_quarterly_not_stale(symbol, period, curr_date)
     lines = [
         f"# Balance Sheet for {symbol.upper()} (截至 {period})",
         "# Source: quant_core.db (local SQLite, quarterly_financials)",
@@ -540,6 +545,8 @@ def get_cashflow(
         raise NoMarketDataError(
             symbol, detail="local quarterly_financials row has null operating_cashflow"
         )
+    # 指标可用再查时效：报告期早于应披露期时抛给线上 vendor 补数
+    _assert_quarterly_not_stale(symbol, period, curr_date)
     lines = [
         f"# Operating Cash Flow for {symbol.upper()} (截至 {period})",
         "# Source: quant_core.db (local SQLite, quarterly_financials)",
@@ -601,6 +608,8 @@ def get_income_statement(
         raise NoMarketDataError(
             symbol, detail="local quarterly_financials row has only null metrics"
         )
+    # 指标可用再查时效：报告期早于应披露期时抛给线上 vendor 补数
+    _assert_quarterly_not_stale(symbol, period, curr_date)
     lines = [
         f"# Income Statement for {symbol.upper()} (截至 {period})",
         "# Source: quant_core.db (local SQLite, quarterly_financials)",
@@ -2076,24 +2085,19 @@ def _check_stale_warning(latest_date: str | None, curr_date: str | None, max_day
     return ""
 
 
-# Calendar-day freshness budgets for high-frequency local tables, judged
-# against the request's own date anchor (curr_date/trade_date as rewritten by
-# the data policy — never against today, so backtests requesting old dates
-# are not penalised). Only tables with a working online fallback belong here:
-# when the newest local row is older than the budget, the getter raises
-# NoMarketDataError and route_to_vendor falls through to the online vendor.
-# Tables intentionally excluded:
-#   - north_hold: quarter-end disclosure since 2024-08, no fresher source exists
-#   - chip_distribution: smartmoney_db is the only configured vendor; a stale
-#     row with the inline _check_stale_warning beats NO_DATA
-#   - stock_comment / stock_hot_rank: snapshot semantics — callers deliberately
-#     use the latest snapshot regardless of age and degrade to online fetches
 # Trading-session freshness budgets for high-frequency local tables, judged
 # against the request's own date anchor (curr_date/trade_date as rewritten by
 # the data policy — never today, so backtests are not penalised). Session lag
 # is the count of trading days missing from the local table; weekends and
 # holidays add no sessions, so a healthy table over Spring Festival never
 # trips the guard, while a mid-week pipeline stall does after ~3 sessions.
+# Budgets follow each table's publication reality (the user refreshes the
+# pipeline daily after market close, so same-day-published tables are stale
+# as soon as the anchor day's session is missing):
+#   - fund_flow: published the same evening — budget 1 (missing the anchor
+#     day's session already means the pipeline skipped a day)
+#   - margin_trading: officially disclosed the NEXT morning — on day T the
+#     expected newest row is T-1, so budget 2 (missing T-1 trips it)
 # Only tables with a working online fallback belong here: beyond the budget
 # the getter raises NoMarketDataError and route_to_vendor falls through to
 # the online vendor.
@@ -2105,15 +2109,19 @@ def _check_stale_warning(latest_date: str | None, curr_date: str | None, max_day
 #     use the latest snapshot regardless of age and degrade to online fetches
 #   - dragon_tiger: sparse per-stock table — judged on the WHOLE TABLE's max
 #     date in get_dragon_tiger (pipeline health), not per-stock appearances
+#   - quarterly_financials: quarterly disclosure cadence — judged against the
+#     expected report period via _assert_quarterly_not_stale, not sessions
 _LOCAL_TABLE_STALE_SESSIONS = {
-    "fund_flow": 3,
-    "margin_trading": 3,
+    "fund_flow": 1,
+    "margin_trading": 2,
 }
 
 # Dragon-tiger staleness budget, judged on the whole table's max date (see
 # get_dragon_tiger): a sparse per-stock table must not trip on a stock that
-# simply has not appeared on the board recently.
-_DRAGON_TIGER_STALE_SESSIONS = 5
+# simply has not appeared on the board recently. The list is published in
+# the evening of day T, so at an after-close anchor the expected max date is
+# T-1 and the budget is 2 (missing T-1 means the pipeline skipped a day).
+_DRAGON_TIGER_STALE_SESSIONS = 2
 
 
 def _assert_local_data_not_stale(
@@ -2146,6 +2154,37 @@ def _assert_local_data_not_stale(
             f"{table} data in quant_core.db is stale: newest row {latest} "
             f"misses {lag} trading sessions as of {anchor} "
             f"(budget {budget}); falling through to the online vendor.",
+        )
+
+
+def _assert_quarterly_not_stale(
+    symbol: str,
+    report_period: object,
+    anchor_date: str | None,
+) -> None:
+    """Raise NoMarketDataError when the local quarterly report predates the expected period.
+
+    Quarterly disclosure has its own cadence: a report counts as "expected"
+    once its filing deadline plus the grace window has passed (see
+    freshness.expected_report_period). Without this guard the local getter
+    would silently serve a years-old report as "latest" after the pipeline
+    fell behind. Judged against the request's own date anchor — backtests
+    requesting old dates expect old reports and are never penalised.
+    Malformed periods or anchors never block.
+    """
+    expected = expected_report_period(anchor_date)
+    if expected is None:
+        return
+    latest = pd.to_datetime(str(report_period)[:10], errors="coerce")
+    if pd.isna(latest):
+        return
+    if str(latest.date()) < expected:
+        anchor = (anchor_date or datetime.now().strftime("%Y-%m-%d"))[:10]
+        raise NoMarketDataError(
+            symbol, symbol,
+            f"quarterly_financials newest report_period {latest.date()} predates "
+            f"the expected {expected} as of {anchor}; falling through to the "
+            f"online vendor.",
         )
 
 

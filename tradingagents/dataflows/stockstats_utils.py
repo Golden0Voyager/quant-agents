@@ -19,13 +19,24 @@ from .utils import safe_ticker_component
 
 logger = logging.getLogger(__name__)
 
-# A vendor's latest OHLCV row missing this many *trading sessions* before the
-# requested date is treated as stale. Session lag stops growing across
-# weekends and holidays (no sessions, no growth), so the budget is both
-# tighter than the old 10-calendar-day rule in the stall case (a mid-week
-# pipeline outage trips it within ~3 sessions) and immune to the Spring
-# Festival / National Day false positives that a calendar budget suffers.
-MAX_OHLCV_STALE_SESSIONS = 3
+# An A-share vendor's latest OHLCV row missing this many *trading sessions*
+# before the requested date is treated as stale. Session lag stops growing
+# across weekends and holidays (no sessions, no growth), so the budget is
+# both tighter than the old 10-calendar-day rule in the stall case and immune
+# to the Spring Festival / National Day false positives that a calendar
+# budget suffers. A-share daily bars publish right after close and the user
+# refreshes the pipeline every evening, so the same day's session is expected:
+# a budget of 1 means "missing the anchor day's bar already means the
+# pipeline skipped a day". Applies to A-share symbols only — non-A-share
+# symbols are judged in calendar days (see MAX_GLOBAL_OHLCV_STALE_DAYS),
+# because an XSHG session count is meaningless for US/crypto trading days.
+MAX_OHLCV_STALE_SESSIONS = 1
+
+# Non-A-share (US stock / crypto) local-archive freshness budget in calendar
+# days: the archive is stale when its latest row lags the requested date by
+# more than this many days. US-market holidays and the Beijing/US timezone
+# offset make a trading-session count meaningless here.
+MAX_GLOBAL_OHLCV_STALE_DAYS = 5
 
 
 def yf_retry(func, max_retries=3, base_delay=2.0):
@@ -123,6 +134,7 @@ def _assert_ohlcv_not_stale(
     canonical: str | None = None,
     *,
     max_stale_sessions: int = MAX_OHLCV_STALE_SESSIONS,
+    max_stale_days: int | None = None,
 ) -> None:
     """Reject OHLCV whose latest row misses too many trading sessions.
 
@@ -133,6 +145,12 @@ def _assert_ohlcv_not_stale(
     present-but-stale rows (a vendor returning a year-old frame that would
     otherwise feed wrong prices to the agent, #1021). Unparseable dates or a
     broken session calendar never block — the guard degrades to serving data.
+
+    A-share symbols are judged in trading sessions via ``max_stale_sessions``.
+    When ``max_stale_days`` is given (non-A-share US/crypto symbols), the
+    session check is skipped and staleness is judged in calendar days instead:
+    stale once the latest row lags the requested date by more than that many
+    days.
     """
     if data is None or data.empty:
         return
@@ -145,6 +163,17 @@ def _assert_ohlcv_not_stale(
     latest = dates.max().normalize()
     if hasattr(latest, "tz") and latest.tz is not None:
         latest = latest.tz_localize(None)
+    if max_stale_days is not None:
+        days_lag = (requested.normalize() - latest).days
+        if days_lag > max_stale_days:
+            raise NoMarketDataError(
+                symbol,
+                canonical,
+                f"latest row is {latest.date()}, lagging the requested "
+                f"{requested.date()} by {days_lag} calendar days "
+                f"(budget {max_stale_days}d) — refusing to use it",
+            )
+        return
     missing = trading_sessions_between(str(latest.date()), str(requested.date())[:10])
     if missing is None:
         return
@@ -461,7 +490,10 @@ def load_ohlcv(
             downloaded = _load_ohlcv_from_global_db(canonical, start_str, end_str)
             if downloaded is not None:
                 try:
-                    _assert_ohlcv_not_stale(downloaded, curr_date, symbol, canonical)
+                    _assert_ohlcv_not_stale(
+                        downloaded, curr_date, symbol, canonical,
+                        max_stale_days=MAX_GLOBAL_OHLCV_STALE_DAYS,
+                    )
                 except NoMarketDataError:
                     logger.info(
                         "quant_core.db global OHLCV for %s is stale relative to %s; "
@@ -497,8 +529,15 @@ def load_ohlcv(
             raise NoMarketDataError(symbol, canonical, "No data returned from any vendor")
 
         # Validate freshness before writing to cache; a stale DB frame must not
-        # poison the on-disk cache (P1-4).
-        _assert_ohlcv_not_stale(downloaded, curr_date, symbol, canonical)
+        # poison the on-disk cache (P1-4). Non-A-share frames are judged in
+        # calendar days — an XSHG session count is meaningless for US/crypto.
+        if is_a_share:
+            _assert_ohlcv_not_stale(downloaded, curr_date, symbol, canonical)
+        else:
+            _assert_ohlcv_not_stale(
+                downloaded, curr_date, symbol, canonical,
+                max_stale_days=MAX_GLOBAL_OHLCV_STALE_DAYS,
+            )
         downloaded.to_csv(data_file, index=False, encoding="utf-8")
         data = downloaded
 
@@ -508,8 +547,15 @@ def load_ohlcv(
     data = data[data["Date"] <= curr_date_dt]
 
     # Reject a stale frame (latest row far older than curr_date) rather than
-    # feeding year-old prices into indicators (#1021).
-    _assert_ohlcv_not_stale(data, curr_date, symbol, canonical)
+    # feeding year-old prices into indicators (#1021). Non-A-share frames are
+    # judged in calendar days — an XSHG session count is meaningless there.
+    if is_a_share_ticker(canonical):
+        _assert_ohlcv_not_stale(data, curr_date, symbol, canonical)
+    else:
+        _assert_ohlcv_not_stale(
+            data, curr_date, symbol, canonical,
+            max_stale_days=MAX_GLOBAL_OHLCV_STALE_DAYS,
+        )
 
     return data
 

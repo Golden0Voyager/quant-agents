@@ -203,7 +203,7 @@ class InterfaceEdgeTests(unittest.TestCase):
 @pytest.mark.unit
 class StockstatsConstantsTest(unittest.TestCase):
     def test_max_stale_sessions_constant_exists(self):
-        self.assertEqual(MAX_OHLCV_STALE_SESSIONS, 3)
+        self.assertEqual(MAX_OHLCV_STALE_SESSIONS, 1)
 
 
 # =========================================================================
