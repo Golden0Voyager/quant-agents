@@ -100,7 +100,16 @@ _POLICIES: dict[str, ToolPolicy] = {
         date_policy="calendar_window",
         empty_semantics="coverage_gap",
         impact="high",
-        allowed_vendors=("yfinance", "alpha_vantage"),
+        allowed_vendors=("yfinance", "alpha_vantage", "akshare"),
+    ),
+    # Deterministic verification snapshot (composite tool, no vendor routing);
+    # registered so production runs stop emitting the legacy-policy warning.
+    "get_verified_market_snapshot": ToolPolicy(
+        applicable_markets=_ALL_MARKETS,
+        date_policy="latest_snapshot",
+        empty_semantics="coverage_gap",
+        impact="medium",
+        allowed_vendors=(),
     ),
     "get_insider_transactions": ToolPolicy(
         applicable_markets=_ALL_MARKETS,

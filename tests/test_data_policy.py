@@ -153,7 +153,7 @@ from tradingagents.market_context import AnalysisDates
                 date_policy="calendar_window",
                 empty_semantics="coverage_gap",
                 impact="high",
-                allowed_vendors=("yfinance", "alpha_vantage"),
+                allowed_vendors=("yfinance", "alpha_vantage", "akshare"),
             ),
         ),
         (

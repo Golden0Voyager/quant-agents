@@ -450,7 +450,7 @@ class GetFundFlowTests(unittest.TestCase):
         try:
             _create_full_test_db(db_path)
             with _PatchedVendor(db_path):
-                result = get_fund_flow("600519.SS")
+                result = get_fund_flow("600519.SS", curr_date="2026-06-19")
                 self.assertIn("600519", result)
                 self.assertIn("Main Force Net Inflow", result)
         finally:
@@ -488,7 +488,7 @@ class GetFundFlowTests(unittest.TestCase):
             """)
             conn.close()
             with _PatchedVendor(db_path):
-                result = get_fund_flow("600519.SS")
+                result = get_fund_flow("600519.SS", curr_date="2026-06-19")
                 self.assertIn("simulated", result)
         finally:
             os.unlink(db_path)
@@ -504,7 +504,7 @@ class GetMarginTradingTests(unittest.TestCase):
         try:
             _create_full_test_db(db_path)
             with _PatchedVendor(db_path):
-                result = get_margin_trading("600519.SS")
+                result = get_margin_trading("600519.SS", curr_date="2026-06-19")
                 self.assertIn("融资余额", result)
                 self.assertIn("融券余量", result)
         finally:
@@ -541,7 +541,7 @@ class GetMarginTradingTests(unittest.TestCase):
             """)
             conn.close()
             with _PatchedVendor(db_path):
-                result = get_margin_trading("600519.SS")
+                result = get_margin_trading("600519.SS", curr_date="2026-06-19")
                 # short_balance and total_balance are NULL → should show N/A
                 self.assertIn("N/A", result)
                 # margin_balance has a value → should be formatted normally
@@ -560,7 +560,7 @@ class GetDragonTigerTests(unittest.TestCase):
         try:
             _create_full_test_db(db_path)
             with _PatchedVendor(db_path):
-                result = get_dragon_tiger("600519.SS")
+                result = get_dragon_tiger("600519.SS", curr_date="2026-06-19")
                 self.assertIn("龙虎榜", result)
                 self.assertIn("日涨幅偏离值达7%", result)
         finally:
@@ -597,10 +597,130 @@ class GetDragonTigerTests(unittest.TestCase):
             """)
             conn.close()
             with _PatchedVendor(db_path):
-                result = get_dragon_tiger("600519.SS")
+                result = get_dragon_tiger("600519.SS", curr_date="2026-06-19")
                 self.assertIn("龙虎榜", result)
         finally:
             os.unlink(db_path)
+
+
+@pytest.mark.unit
+class LocalDataStalenessGuardTests(unittest.TestCase):
+    """_assert_local_data_not_stale wired into high-frequency getters.
+
+    Stale local rows must raise NoMarketDataError so route_to_vendor falls
+    through to the online vendor instead of silently serving aged data.
+    """
+
+    def _make_db(self, table: str, ddl_and_rows: str) -> str:
+        import sqlite3
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        conn = sqlite3.connect(db_path)
+        conn.executescript(ddl_and_rows)
+        conn.close()
+        self.addCleanup(os.unlink, db_path)
+        return db_path
+
+    def test_fund_flow_stale_raises(self):
+        from tradingagents.dataflows.errors import NoMarketDataError
+        from tradingagents.dataflows.smartmoney_vendor import get_fund_flow
+
+        db_path = self._make_db("fund_flow", """
+            CREATE TABLE fund_flow (
+                ts_code TEXT, trade_date TEXT,
+                main_net_inflow REAL, main_net_inflow_pct REAL,
+                super_large_net_inflow REAL, super_large_net_inflow_pct REAL,
+                large_net_inflow REAL, large_net_inflow_pct REAL,
+                is_simulated INTEGER
+            );
+            INSERT INTO fund_flow VALUES
+                ('600519','2026-06-19',1e8,0.05,5e7,0.03,3e7,0.02,0),
+                ('600519','2026-06-18',1e8,0.05,5e7,0.03,3e7,0.02,0);
+        """)
+        with _PatchedVendor(db_path), self.assertRaises(NoMarketDataError):
+            # 9 days old > 7-day budget: must fall through to the online vendor
+            get_fund_flow("600519.SS", curr_date="2026-06-27")
+
+    def test_fund_flow_within_budget_returns(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_fund_flow
+
+        db_path = self._make_db("fund_flow", """
+            CREATE TABLE fund_flow (
+                ts_code TEXT, trade_date TEXT,
+                main_net_inflow REAL, main_net_inflow_pct REAL,
+                super_large_net_inflow REAL, super_large_net_inflow_pct REAL,
+                large_net_inflow REAL, large_net_inflow_pct REAL,
+                is_simulated INTEGER
+            );
+            INSERT INTO fund_flow VALUES
+                ('600519','2026-06-25',1e8,0.05,5e7,0.03,3e7,0.02,0);
+        """)
+        with _PatchedVendor(db_path):
+            result = get_fund_flow("600519.SS", curr_date="2026-06-27")
+        self.assertIn("Main Force Net Inflow", result)
+
+    def test_backtest_anchor_not_penalised(self):
+        """Old data is fine when the request itself targets an old date."""
+        from tradingagents.dataflows.smartmoney_vendor import (
+            get_dragon_tiger,
+            get_fund_flow,
+            get_margin_trading,
+        )
+
+        db_path = self._make_db("mixed", """
+            CREATE TABLE fund_flow (
+                ts_code TEXT, trade_date TEXT,
+                main_net_inflow REAL, main_net_inflow_pct REAL,
+                super_large_net_inflow REAL, super_large_net_inflow_pct REAL,
+                large_net_inflow REAL, large_net_inflow_pct REAL,
+                is_simulated INTEGER
+            );
+            INSERT INTO fund_flow VALUES
+                ('600519','2026-06-19',1e8,0.05,5e7,0.03,3e7,0.02,0);
+            CREATE TABLE margin_trading (
+                ts_code TEXT, trade_date TEXT,
+                margin_balance REAL, margin_buy REAL, margin_repay REAL,
+                short_balance REAL, short_sell REAL, short_repay REAL,
+                total_balance REAL
+            );
+            INSERT INTO margin_trading VALUES
+                ('600519','2026-06-19',1e10,5e8,4e8,1e6,2e5,1e5,1.001e10);
+            CREATE TABLE dragon_tiger (
+                ts_code TEXT, trade_date TEXT, close_price REAL,
+                pct_change REAL, net_buy_amount REAL, buy_amount REAL,
+                sell_amount REAL, turnover_rate REAL, market_cap REAL,
+                reason TEXT
+            );
+            INSERT INTO dragon_tiger VALUES
+                ('600519','2026-06-19',1550.0,2.5,1e7,5e7,4e7,0.01,2e11,'x');
+        """)
+        with _PatchedVendor(db_path):
+            self.assertIn("Main Force", get_fund_flow("600519.SS", curr_date="2026-06-19"))
+            self.assertIn("融资余额", get_margin_trading("600519.SS", curr_date="2026-06-19"))
+            self.assertIn("龙虎榜", get_dragon_tiger("600519.SS", curr_date="2026-06-19"))
+
+    def test_malformed_dates_never_block(self):
+        """A freshness guard must not be the reason data becomes unavailable."""
+        from tradingagents.dataflows.smartmoney_vendor import get_fund_flow
+
+        db_path = self._make_db("fund_flow", """
+            CREATE TABLE fund_flow (
+                ts_code TEXT, trade_date TEXT,
+                main_net_inflow REAL, main_net_inflow_pct REAL,
+                super_large_net_inflow REAL, super_large_net_inflow_pct REAL,
+                large_net_inflow REAL, large_net_inflow_pct REAL,
+                is_simulated INTEGER
+            );
+            INSERT INTO fund_flow VALUES
+                ('600519','not-a-date',1e8,0.05,5e7,0.03,3e7,0.02,0);
+        """)
+        with _PatchedVendor(db_path):
+            # no curr_date: guard anchors at today; unparseable latest must be
+            # ignored, not treated as infinitely stale
+            result = get_fund_flow("600519.SS")
+        self.assertIn("Main Force", result)
 
 
 @pytest.mark.unit

@@ -505,6 +505,77 @@ def load_ohlcv(
     return data
 
 
+def load_index_ohlcv(
+    symbol: str,
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame | None:
+    """Fetch A-share index daily OHLCV for return attribution benchmarks.
+
+    Tries the local quant_core.db ``index_daily`` table first, then akshare
+    (``ak.index_zh_a_hist``) as an online fallback. yfinance is deliberately
+    not consulted: it rate-limits aggressively on A-share index history, which
+    used to fail every ``_fetch_returns`` benchmark lookup on batch runs.
+
+    Args:
+        symbol: Index code in yfinance style (``000001.SS``), quant_core.db
+            style (``sh000001``), or bare (``000001``).
+        start_date: Window start ``YYYY-MM-DD`` (inclusive).
+        end_date: Window end ``YYYY-MM-DD`` (inclusive).
+
+    Returns:
+        Ascending DataFrame with Date/Open/High/Low/Close/Volume columns, or
+        None when neither source has data for the window.
+    """
+    from tradingagents.dataflows.smartmoney_vendor import get_index_daily_df
+
+    df = get_index_daily_df(symbol, start_date, end_date)
+    if df is not None:
+        return df
+
+    try:
+        import akshare as ak
+
+        from tradingagents.dataflows.akshare_common import no_proxy
+    except ImportError:
+        return None
+
+    bare = symbol.split(".")[0]
+    ak_start = start_date.replace("-", "")
+    ak_end = end_date.replace("-", "")
+    try:
+        with no_proxy():
+            raw = ak.index_zh_a_hist(
+                symbol=bare,
+                period="daily",
+                start_date=ak_start,
+                end_date=ak_end,
+            )
+    except Exception as exc:
+        logger.info("akshare index fetch failed for %s: %s", symbol, exc)
+        return None
+
+    if raw is None or raw.empty:
+        return None
+
+    column_map = {
+        "日期": "Date", "开盘": "Open", "收盘": "Close",
+        "最高": "High", "最低": "Low", "成交量": "Volume",
+    }
+    missing = [col for col in ("日期", "收盘") if col not in raw.columns]
+    if missing:
+        logger.info(
+            "akshare index response for %s missing columns %s", symbol, missing
+        )
+        return None
+
+    out = raw.rename(columns=column_map)[
+        [c for c in ("Date", "Open", "High", "Low", "Close", "Volume") if c in raw.rename(columns=column_map).columns]
+    ].copy()
+    out["Date"] = pd.to_datetime(out["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    return out.sort_values("Date").reset_index(drop=True)
+
+
 def filter_financials_by_date(data: pd.DataFrame, curr_date: str | None) -> pd.DataFrame:
     """Drop financial statement columns (fiscal period timestamps) after curr_date.
 
