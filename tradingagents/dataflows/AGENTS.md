@@ -9,9 +9,15 @@
   `quant_core.db`（SQLite）：A 股走 `daily_bars`（vendor 名 `smartmoney_db`），美股/加密货币
   走 `global_assets_bars`（vendor 名 `quant_db_global`，单独注册是因为路由器对非 A 股
   ticker 按名字跳过 `smartmoney_db`）。本地 OHLCV 不新鲜（A 股按交易日度量：最新行
-  距请求日期缺失 ≥ `MAX_OHLCV_STALE_SESSIONS`（3）个交易日；美股/加密货币按日历日 5 天）
+  距请求日期缺失 ≥ `MAX_OHLCV_STALE_SESSIONS`（1）个交易日——当天收盘后发布、pipeline
+  每日回补，缺锚定日当天即陈旧；美股/加密货币按日历日 5 天，`MAX_GLOBAL_OHLCV_STALE_DAYS`）
   时自动 fallback 到线上厂商。排查数据缺失时先区分是
   DB 缺失还是上游接口失效
+- 高频表（fund_flow 1 个交易日 / margin_trading 2 个交易日——官方 T+1 早上披露；
+  dragon_tiger 按整表最大日期 2 个交易日——傍晚发布）与季报（quarterly_financials
+  按披露截止日 + 7 天宽限对照期望报告期，`freshness.expected_report_period`）各有独立
+  新鲜度守卫，超龄抛 NoMarketDataError 走线上 fallback；守卫一律以请求自身的
+  日期锚点判断，回测旧日期不被误伤
 - `akshare_common.py` — 共享工具：`format_money_cn`、`to_akshare_symbol`、`no_proxy`
 - `sw_industry_map.py` — 申万行业归属缓存（ticker → 申万一/二/三级），板块名解析的
   权威兜底；**只读本地 SQLite**，联网抓取只发生在显式刷新时

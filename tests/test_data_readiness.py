@@ -125,7 +125,7 @@ class TestCheckSmartmoneyTable:
         mock_to_sym.return_value = "000001"
         mock_df.return_value = pd.DataFrame({
             "cnt": [15],
-            "latest": ["2026-07-02"],
+            "latest": ["2026-07-03"],
         })
 
         report = check_data_readiness("000001.SZ", "2026-07-03", ["market"])
@@ -133,7 +133,7 @@ class TestCheckSmartmoneyTable:
         assert len(ff_items) == 1
         assert ff_items[0].status == "cached"
         assert "15 条记录" in ff_items[0].details
-        assert "2026-07-02" in ff_items[0].details
+        assert "2026-07-03" in ff_items[0].details
 
     @patch("tradingagents.agents.utils.data_readiness.is_a_share_ticker")
     @patch("tradingagents.dataflows.smartmoney_vendor._to_smartmoney_symbol")
@@ -160,6 +160,50 @@ class TestCheckSmartmoneyTable:
         # stale is a warning, not a blocker
         assert report.all_ready is True
         assert report.warning_count == 1
+
+    @patch("tradingagents.agents.utils.data_readiness.is_a_share_ticker")
+    @patch("tradingagents.dataflows.smartmoney_vendor._to_smartmoney_symbol")
+    @patch("tradingagents.dataflows.smartmoney_vendor._df_from_sql")
+    @patch("tradingagents.agents.utils.data_readiness.load_ohlcv")
+    def test_fin_statements_behind_expected_period_flags_warning(
+        self, mock_load, mock_df, mock_to_sym, mock_is_a_share
+    ):
+        """quarterly report older than the expected period (deadline+grace)
+        flags 'stale' — judged by quarter, not by trading sessions."""
+        mock_load.return_value = pd.DataFrame({"Date": ["2026-09-15"], "Close": [10.0]})
+        mock_is_a_share.return_value = True
+        mock_to_sym.return_value = "000001"
+        mock_df.return_value = pd.DataFrame({
+            "cnt": [8],
+            "latest": ["2026-03-31"],
+        })
+
+        report = check_data_readiness("000001.SZ", "2026-09-15", ["fundamentals"])
+        fin_items = [i for i in report.items if i.label == "财务报表"]
+        assert len(fin_items) == 1
+        assert fin_items[0].status == "stale"
+        assert "应披露期" in fin_items[0].details
+        assert report.all_ready is True
+
+    @patch("tradingagents.agents.utils.data_readiness.is_a_share_ticker")
+    @patch("tradingagents.dataflows.smartmoney_vendor._to_smartmoney_symbol")
+    @patch("tradingagents.dataflows.smartmoney_vendor._df_from_sql")
+    @patch("tradingagents.agents.utils.data_readiness.load_ohlcv")
+    def test_fin_statements_current_period_stays_cached(
+        self, mock_load, mock_df, mock_to_sym, mock_is_a_share
+    ):
+        mock_load.return_value = pd.DataFrame({"Date": ["2026-06-19"], "Close": [10.0]})
+        mock_is_a_share.return_value = True
+        mock_to_sym.return_value = "000001"
+        mock_df.return_value = pd.DataFrame({
+            "cnt": [8],
+            "latest": ["2026-03-31"],
+        })
+
+        report = check_data_readiness("000001.SZ", "2026-06-19", ["fundamentals"])
+        fin_items = [i for i in report.items if i.label == "财务报表"]
+        assert len(fin_items) == 1
+        assert fin_items[0].status == "cached"
 
     @patch("tradingagents.agents.utils.data_readiness.is_a_share_ticker")
     @patch("tradingagents.dataflows.smartmoney_vendor._to_smartmoney_symbol")

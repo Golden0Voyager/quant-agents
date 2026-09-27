@@ -642,8 +642,9 @@ class LocalDataStalenessGuardTests(unittest.TestCase):
                 ('600519','2026-06-18',1e8,0.05,5e7,0.03,3e7,0.02,0);
         """)
         with _PatchedVendor(db_path), self.assertRaises(NoMarketDataError):
-            # latest row misses 5 sessions (Jun 22-26) >= 3-session budget:
-            # must fall through to the online vendor
+            # latest row misses 5 sessions (Jun 22-26) >= 1-session budget:
+            # fund_flow publishes the same evening, so even a single missing
+            # session means the pipeline skipped a day
             get_fund_flow("600519.SS", curr_date="2026-06-27")
 
     def test_fund_flow_within_budget_returns(self):
@@ -658,7 +659,7 @@ class LocalDataStalenessGuardTests(unittest.TestCase):
                 is_simulated INTEGER
             );
             INSERT INTO fund_flow VALUES
-                ('600519','2026-06-25',1e8,0.05,5e7,0.03,3e7,0.02,0);
+                ('600519','2026-06-26',1e8,0.05,5e7,0.03,3e7,0.02,0);
         """)
         with _PatchedVendor(db_path):
             result = get_fund_flow("600519.SS", curr_date="2026-06-27")
@@ -1183,7 +1184,7 @@ class GetBalanceSheetFromDbTests(unittest.TestCase):
         try:
             _create_full_test_db(db_path)
             with _PatchedVendor(db_path):
-                result = get_balance_sheet("600519.SS")
+                result = get_balance_sheet("600519.SS", curr_date="2026-06-19")
                 self.assertIn("资产负债率", result)
                 self.assertIn("12.12", result)
                 self.assertIn("每股净资产", result)
@@ -1237,7 +1238,7 @@ class GetCashflowFromDbTests(unittest.TestCase):
         try:
             _create_full_test_db(db_path)
             with _PatchedVendor(db_path):
-                result = get_cashflow("600519.SS")
+                result = get_cashflow("600519.SS", curr_date="2026-06-19")
                 self.assertIn("经营活动现金流净额", result)
                 self.assertIn("26,900,000,000", result)
         finally:
@@ -1288,7 +1289,7 @@ class GetIncomeStatementFromDbTests(unittest.TestCase):
         try:
             _create_full_test_db(db_path)
             with _PatchedVendor(db_path):
-                result = get_income_statement("600519.SS")
+                result = get_income_statement("600519.SS", curr_date="2026-06-19")
                 self.assertIn("营业总收入", result)
                 self.assertIn("54,700,000,000", result)
                 self.assertIn("毛利率", result)
@@ -1326,6 +1327,79 @@ class GetIncomeStatementFromDbTests(unittest.TestCase):
                 self.assertRaises(NoMarketDataError) as ctx,
             ):
                 get_income_statement("000603.SZ")
+            self.assertIn("null", str(ctx.exception))
+        finally:
+            os.unlink(db_path)
+
+
+@pytest.mark.unit
+class QuarterlyStalenessGuardTests(unittest.TestCase):
+    """_assert_quarterly_not_stale wired into the quarterly_financials getters.
+
+    A local report older than the expected report period (filing deadline +
+    grace, judged against the request's own date anchor) must raise
+    NoMarketDataError so route_to_vendor falls through to hithink/akshare
+    instead of silently serving an outdated report.
+    """
+
+    def test_stale_report_period_raises(self):
+        from tradingagents.dataflows.errors import NoMarketDataError
+        from tradingagents.dataflows.smartmoney_vendor import get_balance_sheet
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)  # latest report_period 2026-03-31
+            with _PatchedVendor(db_path), self.assertRaises(NoMarketDataError) as ctx:
+                # anchored past the H1 deadline + grace: Q2 (2026-06-30) is
+                # expected but the local table only has Q1
+                get_balance_sheet("600519.SS", curr_date="2026-09-15")
+            self.assertIn("predates", str(ctx.exception))
+        finally:
+            os.unlink(db_path)
+
+    def test_fresh_report_period_returns(self):
+        from tradingagents.dataflows.smartmoney_vendor import get_income_statement
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)  # latest report_period 2026-03-31
+            with _PatchedVendor(db_path):
+                # anchored in June: Q1 (deadline Apr 30 + grace) is the
+                # expected period and the local table has exactly that
+                result = get_income_statement("600519.SS", curr_date="2026-06-19")
+            self.assertIn("营业总收入", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_backtest_anchor_not_penalised(self):
+        """Old data is fine when the request itself targets an old date."""
+        from tradingagents.dataflows.smartmoney_vendor import get_cashflow
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            with _PatchedVendor(db_path):
+                result = get_cashflow("600519.SS", curr_date="2026-04-01")
+            self.assertIn("经营活动现金流净额", result)
+        finally:
+            os.unlink(db_path)
+
+    def test_null_metrics_row_still_reports_null_not_stale(self):
+        """The null-shell check fires before the staleness check, preserving
+        the more specific 'null metrics' fallback signal."""
+        from tradingagents.dataflows.errors import NoMarketDataError
+        from tradingagents.dataflows.smartmoney_vendor import get_balance_sheet
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            _create_full_test_db(db_path)
+            _insert_null_quarterly_row(db_path)
+            with _PatchedVendor(db_path), self.assertRaises(NoMarketDataError) as ctx:
+                get_balance_sheet("000603.SZ", curr_date="2026-09-15")
             self.assertIn("null", str(ctx.exception))
         finally:
             os.unlink(db_path)

@@ -109,13 +109,15 @@ def _check_smartmoney_table(
     date_col: str = "trade_date",
     trade_date: str | None = None,
     stale_sessions: int | None = None,
+    whole_table: bool = False,
 ) -> ReadinessItem | None:
     """检查 smartmoney_db 中某张表是否有该标的的数据。
 
     当给出 ``stale_sessions`` 且表内最新日期距 ``trade_date`` 缺失的
     交易日数达到该阈值时，状态标为 "stale"（面板亮黄灯）——提示
     pipeline 回补可能已停摆。按交易日而非日历日度量：周末/长假期间
-    滞后不会增长，不会误报。
+    滞后不会增长，不会误报。``whole_table`` 用于龙虎榜这类稀疏表：
+    按整表最大日期判断 pipeline 健康度，而不是按单个标的的出现记录。
     """
     if not is_a_share_ticker(ticker):
         return None
@@ -126,10 +128,12 @@ def _check_smartmoney_table(
             _to_smartmoney_symbol,
         )
         code = _to_smartmoney_symbol(ticker)
+        where = "" if whole_table else " WHERE ts_code = ?"
+        params = () if whole_table else (code,)
         df = _df_from_sql(
             f"SELECT COUNT(*) as cnt, MAX({date_col}) as latest "
-            f"FROM {table} WHERE ts_code = ?",
-            (code,),
+            f"FROM {table}{where}",
+            params,
         )
         if df is not None and not df.empty:
             cnt = df.iloc[0]["cnt"]
@@ -161,10 +165,10 @@ def _check_smartmoney_table(
 
 
 def _check_fund_flow(ticker: str, analyst: str, trade_date: str | None = None) -> ReadinessItem:
-    """检查资金流向缓存。"""
+    """检查资金流向缓存（当天傍晚发布，缺锚定日当天即滞后）。"""
     result = _check_smartmoney_table(
         ticker, "fund_flow", "资金流向", analyst,
-        trade_date=trade_date, stale_sessions=3,
+        trade_date=trade_date, stale_sessions=1,
     )
     if result:
         return result
@@ -175,10 +179,10 @@ def _check_fund_flow(ticker: str, analyst: str, trade_date: str | None = None) -
 
 
 def _check_margin_trading(ticker: str, analyst: str, trade_date: str | None = None) -> ReadinessItem:
-    """检查融资融券缓存。"""
+    """检查融资融券缓存（官方 T+1 早上披露，锚定日最新到 T-1 属正常）。"""
     result = _check_smartmoney_table(
         ticker, "margin_trading", "融资融券", analyst,
-        trade_date=trade_date, stale_sessions=3,
+        trade_date=trade_date, stale_sessions=2,
     )
     if result:
         return result
@@ -189,10 +193,12 @@ def _check_margin_trading(ticker: str, analyst: str, trade_date: str | None = No
 
 
 def _check_dragon_tiger(ticker: str, analyst: str, trade_date: str | None = None) -> ReadinessItem:
-    """检查龙虎榜缓存（稀疏表：只有上榜记录，阈值放宽到 5 个交易日）。"""
+    """检查龙虎榜缓存（稀疏表按整表最大日期判断，与线上守卫一致；
+    当天傍晚发布，锚定日最新到 T-1 属正常）。"""
     result = _check_smartmoney_table(
         ticker, "dragon_tiger", "龙虎榜", analyst,
-        trade_date=trade_date, stale_sessions=5,
+        trade_date=trade_date, stale_sessions=2,
+        whole_table=True,
     )
     if result:
         return result
@@ -292,12 +298,28 @@ def _check_index_daily(
     )
 
 
-def _check_fin_statements(ticker: str, analyst: str) -> ReadinessItem:
-    """检查财务报表缓存。"""
+def _check_fin_statements(ticker: str, analyst: str, trade_date: str | None = None) -> ReadinessItem:
+    """检查财务报表缓存（季度披露节奏：对照披露截止日+宽限算出的应披露报告期）。"""
     result = _check_smartmoney_table(
         ticker, "quarterly_financials", "财务报表", analyst, date_col="report_period"
     )
     if result:
+        if trade_date:
+            try:
+                from tradingagents.dataflows.freshness import expected_report_period
+                expected = expected_report_period(trade_date)
+                if expected:
+                    import re
+
+                    m = re.search(r"(\d{4}-\d{2}-\d{2})", result.details)
+                    if m and m.group(1) < expected:
+                        result.status = "stale"
+                        result.details += (
+                            f" ⚠️ 最新报告期 {m.group(1)} 落后于应披露期 {expected}"
+                            f"（分析时将走线上刷新）"
+                        )
+            except Exception as exc:
+                logger.debug("quarterly expected-period check failed: %s", exc)
         return result
     return ReadinessItem(
         "财务报表", "realtime", "available",
@@ -349,7 +371,7 @@ def check_data_readiness(
             elif req["key"] == "fund_flow":
                 item = _check_fund_flow(ticker, analyst_key, trade_date)
             elif req["key"] == "fin_statements":
-                item = _check_fin_statements(ticker, analyst_key)
+                item = _check_fin_statements(ticker, analyst_key, trade_date)
             elif req["key"] == "northbound":
                 item = _check_northbound(ticker, analyst_key)
             elif req["key"] == "margin_trading":
