@@ -11,12 +11,14 @@ agnes:
   agnes-2.0-flash: [0.0, 0.0]
 
 deepseek:
-  # Official rates verified 2026-08 (api-docs.deepseek.com): cache-miss input /
-  # output, PEAK window. Off-peak is 50% off and is applied automatically at
-  # lookup time when callers pass a timestamp (peak: 01:00-04:00 & 06:00-10:00
-  # UTC Mon-Fri; all other hours + weekends are off-peak). Cache-hit input is
-  # much cheaper (flash $0.014 / pro $0.044 peak). 1M context, 384K max output.
-  deepseek-v4-flash: [0.44, 1.32]
+  # Official rates verified 2026-09 (api.deepseek.com): deepseek-flash
+  # (DeepSeek-V4.1-Flash) cache-miss input $0.30 / output $1.20 per 1M,
+  # PEAK window. Off-peak is 50% off and is applied automatically at
+  # lookup time when callers pass a timestamp (peak: 01:00-04:00 &
+  # 06:00-10:00 UTC Mon-Fri; all other hours + weekends are off-peak).
+  # Cache-hit input is $0.006 peak. 1M context, 384K max output.
+  deepseek-flash: [0.30, 1.20]
+  deepseek-v4-flash: [0.30, 1.20]
   deepseek-v4-pro: [1.32, 3.96]
 
 kimi:
@@ -38,8 +40,10 @@ openrouter:
   nvidia/nemotron-3-super-120b-a12b:free: [0.0, 0.0]
 
 sensenova:
-  # SenseNova also routes DeepSeek V4-Flash (same USD rate as deepseek: section above).
-  deepseek-v4-flash: [0.44, 1.32]
+  # SenseNova also routes DeepSeek V4-Flash at the same USD rate as the
+  # deepseek: section above (deepseek-flash $0.30 / $1.20 cache-miss peak).
+  deepseek-flash: [0.30, 1.20]
+  deepseek-v4-flash: [0.30, 1.20]
   # TokenPlan 2026-08-28 起统一通用积分池（Flash-Lite 另有专属池，消耗 1:1 返赠
   # 通用积分）；Kimi K3 与 DeepSeek-V4 Pro 同日上线 TokenPlan。以下两条按各自
   # 官方费率登记，仅供成本参考（TokenPlan 订阅内实际按积分计）。

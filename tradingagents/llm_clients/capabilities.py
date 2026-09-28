@@ -96,6 +96,8 @@ _BY_ID: dict[str, ModelCapabilities] = {
     "deepseek-reasoner": _DEEPSEEK_THINKING,
     "deepseek-v4-flash": _DEEPSEEK_THINKING,
     "deepseek-v4-pro": _DEEPSEEK_THINKING,
+    # SenseNova Token Plan 2026-09 起以 deepseek-flash（V4.1 Flash）托管 DeepSeek
+    "deepseek-flash": _DEEPSEEK_THINKING,
     # ModelScope / NVIDIA NIM — hosted DeepSeek models with the same
     # tool-calling behaviour as the upstream API (no tool_choice support).
     "deepseek-ai/DeepSeek-V4-Flash": _DEEPSEEK_THINKING,

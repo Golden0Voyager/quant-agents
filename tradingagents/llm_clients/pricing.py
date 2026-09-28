@@ -43,6 +43,7 @@ Price = tuple[float, float]
 _DEEPSEEK_PEAK_MODELS = frozenset({
     "deepseek-v4-flash",
     "deepseek-v4-pro",
+    "deepseek-flash",
     "deepseek-v4-flash-vision-exp",
     "deepseek-ai/DeepSeek-V4-Flash-0731",
     "deepseek-ai/DeepSeek-V4-Pro-0813",
@@ -88,10 +89,13 @@ _DEFAULT_PRICING: dict[str, dict[str, Price | dict[str, Any]]] = {
         "agnes-2.0-flash": (0.00, 0.00),
     },
     # DeepSeek: official public pricing (cache-miss PEAK rates) — verified
-    # 2026-08 against https://api-docs.deepseek.com/quick_start/pricing.
-    # Off-peak is 50% off; cache-hit input is $0.014 (flash) / $0.044 (pro).
+    # 2026-09 against api.deepseek.com. deepseek-flash (DeepSeek-V4.1-Flash):
+    # $0.30/M in, $1.20/M out (cache-hit in $0.006); off-peak 50% off applied
+    # automatically. Legacy deepseek-v4-flash matches the flash rate;
+    # deepseek-v4-pro keeps its own rate below.
     "deepseek": {
-        "deepseek-v4-flash": (0.44, 1.32),
+        "deepseek-flash": (0.30, 1.20),
+        "deepseek-v4-flash": (0.30, 1.20),
         "deepseek-v4-pro":   (1.32, 3.96),
     },
     # Kimi (Moonshot AI): verified 2026-07 against
@@ -129,7 +133,8 @@ _DEFAULT_PRICING: dict[str, dict[str, Price | dict[str, Any]]] = {
         "sensenova-6.7-flash-lite": {"input": 1.5, "output": 4.5, "currency": "CNY"},
         "sensenova-6.8-flash-lite": {"input": 1.5, "output": 4.5, "currency": "CNY"},
         # SenseNova also routes DeepSeek V4-Flash at the same USD rate.
-        "deepseek-v4-flash": (0.44, 1.32),
+        "deepseek-flash": (0.30, 1.20),
+        "deepseek-v4-flash": (0.30, 1.20),
         # GLM-5.2 official rate; free on the SenseNova Token Plan (500 calls/5h),
         # kept at the official rate for cost-reference only.
         "glm-5.2": (1.40, 4.40),

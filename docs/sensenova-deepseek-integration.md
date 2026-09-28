@@ -1,6 +1,6 @@
 #商汤 SenseNova Token Plan 集成指南
 
-> **适用场景**：在 TradingAgents 框架中使用商汤 SenseNova Token Plan 提供的模型（sensenova-6.8-flash-lite / deepseek-v4-flash）。
+> **适用场景**：在 TradingAgents 框架中使用商汤 SenseNova Token Plan 提供的模型（sensenova-6.8-flash-lite / deepseek-flash）。
 > **文档性质**：实战指南 + 最佳实践。
 
 ---
@@ -16,8 +16,7 @@
 | 模型名称 | Model ID | 上下文长度 | 描述 |
 |---------|---------|-----------|------|
 | SenseNova 6.8 Flash-Lite | `sensenova-6.8-flash-lite` | 256K | 轻量多模态智能体模型，支持文本对话与图像输入 |
-| DeepSeek V4 Flash | `deepseek-v4-flash` | 256K | 高效经济型通用模型，支持思考/非思考模式、工具调用 |
-| DeepSeek V4 Pro | `deepseek-v4-pro` | 1M | 旗舰通用模型，面向复杂 Agent 与高强度推理 |
+| DeepSeek V4.1 Flash | `deepseek-flash` | 1M | 最新一代高效通用模型（2026-09 上线 Token Plan），支持思考/非思考模式、工具调用；旧 `deepseek-v4-flash` / `deepseek-v4-pro` 均下线并重定向至此 |
 | GLM-5.2 | `glm-5.2` | 1M | 智谱旗舰开源模型，长程 Coding / 复杂工程任务 |
 | Kimi K3 | `kimi-k3` | 1M | 月之暗面旗舰开源多模态 Agent 模型 |
 
@@ -36,13 +35,13 @@
 
 **影响**：并行运行的 researcher agent 容易在 5 小时窗口内耗尽通用积分，建议：
 - 研究深度（debate rounds）不要设太高
-- deep 角色优先用 `deepseek-v4-flash`（思考链短、积分消耗低），而非 GLM-5.2 / V4 Pro / K3
+- deep 角色优先用 `deepseek-flash`（思考链短、积分消耗低），而非 GLM-5.2 / V4 Pro / K3
 - 能用 Flash-Lite 的角色尽量用 Flash-Lite（烧专属积分 = 返赠通用积分）
 - batch 均匀贴着滚动 5 小时窗口跑，避免集中爆发
 
 **客户端限流（按模型 pacing）**：框架按 `llm_requests_per_minute` 配置做进程级 pacing，
 键可以是 `"provider/model"`（模型级条目优先于裸 provider 条目）。默认值
-（flash-lite 5 rpm、deepseek-v4-flash 1.7 rpm、兜底 5 rpm）是**保守的调用速率
+（flash-lite 5 rpm、deepseek-flash 1.7 rpm、兜底 5 rpm）是**保守的调用速率
 pacer**，并非积分配额的直接换算——积分按 token 计量，精确的窗口预算需要根据账户
 "积分明细"里的实际费率折算。配额耗尽类错误（quota exceeded / insufficient
 balance）不会在同档重试，直接进入 fallback 链的下一个 provider/model。
@@ -91,7 +90,7 @@ from tradingagents.default_config import DEFAULT_CONFIG
 config = DEFAULT_CONFIG.copy()
 config["llm_provider"] = "sensenova"
 config["quick_think_llm"] = "sensenova-6.8-flash-lite"   # 通用任务（无 reasoning）
-config["deep_think_llm"] = "deepseek-v4-flash"           # 推理任务（trader/manager）
+config["deep_think_llm"] = "deepseek-flash"               # 推理任务（trader/manager）
 
 ta = TradingAgentsGraph(debug=True, config=config)
 _, decision = ta.propagate("600901.SS", "2026-05-09")
@@ -122,13 +121,13 @@ _PROVIDER_CONFIG = {
 | 模型 | 是否返回 reasoning_content | 使用的客户端类 |
 |------|--------------------------|--------------|
 | `sensenova-6.8-flash-lite` | ❌ 否（OpenAI 兼容接口） | `NormalizedChatOpenAI` |
-| `deepseek-v4-flash` | ✅ 是（支持 reasoning_effort） | `DeepSeekChatOpenAI` |
+| `deepseek-flash` | ✅ 是（支持 reasoning_effort） | `DeepSeekChatOpenAI` |
 
 `DeepSeekChatOpenAI` 实现了 reasoning_content 的 sidecar 缓存机制，确保多轮对话中 thinking-mode 的往返正确。
 
 ### 3.3 推理力度控制
 
-`deepseek-v4-flash` 支持 `reasoning_effort` 参数：
+`deepseek-flash` 支持 `reasoning_effort` 参数：
 
 | 值 | 说明 |
 |----|------|
@@ -145,7 +144,7 @@ config["deep_think_llm_kwargs"] = {"reasoning_effort": "high"}
 
 ### 3.4 Structured Output
 
-`deepseek-v4-flash` 支持 `tool_choice`，因此可以使用 function-calling 做结构化输出。
+`deepseek-flash` 支持 `tool_choice`，因此可以使用 function-calling 做结构化输出。
 `sensenova-6.8-flash-lite` 也支持工具调用，框架中的 `structured.py` 会自动处理。
 
 ---
@@ -156,9 +155,9 @@ config["deep_think_llm_kwargs"] = {"reasoning_effort": "high"}
 |-----------|---------|------|
 | **Analyst** (并行) | `sensenova-6.8-flash-lite` | 轻量快速，256K 上下文；烧专属积分还能 1:1 返赠通用积分 |
 | **Bull/Bear 研究员、风险辩论员** | `sensenova-6.8-flash-lite` | 立场文/辩论产出占 deep 角色 token 量 90%+，对抗结构容错好；下放后返赠收益最大 |
-| **Research Manager** | `deepseek-v4-flash` | 全线判断密度最高的仲裁节点（评级校准），不建议用轻量模型 |
-| **Trader** | `deepseek-v4-flash` | 需要强推理能力做交易决策，思考链短、积分消耗低 |
-| **Portfolio Manager** | `deepseek-v4-flash` | 需要强推理能力做风险评估 |
+| **Research Manager** | `deepseek-flash` | 全线判断密度最高的仲裁节点（评级校准），不建议用轻量模型 |
+| **Trader** | `deepseek-flash` | 需要强推理能力做交易决策，思考链短、积分消耗低 |
+| **Portfolio Manager** | `deepseek-flash` | 需要强推理能力做风险评估 |
 
 **注意**：积分按 token 实际用量扣减（见 1.2），`glm-5.2` / `deepseek-v4-pro` / `kimi-k3`
 的费率通常更高，免费策略下不建议放进日常角色。
@@ -216,7 +215,7 @@ config["deep_think_llm_kwargs"] = {"reasoning_effort": "high"}
 ## 6. 最佳实践清单
 
 - [ ] 确保 `.env` 中 `SENSENOVA_API_KEY` 已配置
-- [ ] quick_think 用 `sensenova-6.8-flash-lite`，deep_think 用 `deepseek-v4-flash`
+- [ ] quick_think 用 `sensenova-6.8-flash-lite`，deep_think 用 `deepseek-flash`
 - [ ] 在账户"积分明细"中核对各模型实际费率，规划每个 5 小时窗口的 batch 量
 - [ ] 监控额度使用情况，避免滚动 5 小时/周窗口内超限
 - [ ] 中文 A 股场景下，配合 `ticker_resolver.py` 使用

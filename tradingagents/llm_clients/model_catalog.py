@@ -178,12 +178,12 @@ MODEL_OPTIONS: ProviderModeOptions = {
     "sensenova": {
         "quick": [
             ("sensenova-6.8-flash-lite - Lightweight multimodal, 256K ctx", "sensenova-6.8-flash-lite"),
-            ("deepseek-v4-flash - High-performance chat, reasoning mode", "deepseek-v4-flash"),
+            ("deepseek-flash (V4.1) - High-performance chat, reasoning mode", "deepseek-flash"),
             ("Custom model ID", "custom"),
         ],
         "deep": [
             ("GLM-5.2 - Zhipu flagship via SenseNova, 1M ctx, 128K output", "glm-5.2"),
-            ("deepseek-v4-flash - High-performance chat, reasoning mode", "deepseek-v4-flash"),
+            ("deepseek-flash (V4.1) - High-performance chat, reasoning mode", "deepseek-flash"),
             ("sensenova-6.8-flash-lite - Lightweight multimodal, 256K ctx", "sensenova-6.8-flash-lite"),
             ("Custom model ID", "custom"),
         ],

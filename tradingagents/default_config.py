@@ -85,7 +85,7 @@ _BASE_CONFIG = {
     "memory_log_max_entries": None,
     # LLM settings (defaults aligned with personal usage: SenseNova Token Plan)
     "llm_provider": "sensenova",
-    "deep_think_llm": "deepseek-v4-flash",
+    "deep_think_llm": "deepseek-flash",
     "quick_think_llm": "sensenova-6.8-flash-lite",
     # Per-role deep-think model overrides. Supported roles: the three
     # structured serial decision roles (research_manager / trader /
@@ -93,8 +93,9 @@ _BASE_CONFIG = {
     # / aggressive_debater / neutral_debater / conservative_debater). Roles
     # not listed — or mapped to None / the base model — share the
     # ``deep_think_llm`` chain. Empty by default: all deep roles run on
-    # deepseek-v4-flash, the most credit-efficient deep model on the
-    # SenseNova Token Plan (~1/3.3 the per-token rate of glm-5.2). To shift
+    # deepseek-flash (DeepSeek V4.1 Flash, newest on the SenseNova Token
+    # Plan), the most credit-efficient deep model on the plan (~1/3.3 the
+    # per-token rate of glm-5.2). To shift
     # work onto Flash-Lite 专属积分 (1:1 返赠通用积分), point the
     # error-tolerant debater roles at sensenova-6.8-flash-lite.
     "deep_think_llm_roles": {},
@@ -154,7 +155,7 @@ _BASE_CONFIG = {
     # plain calls) are all unusable and stay out.
     "quick_think_fallback": [
         {"provider": "sensenova",   "model": "sensenova-6.8-flash-lite"},
-        {"provider": "sensenova",   "model": "deepseek-v4-flash"},
+        {"provider": "sensenova",   "model": "deepseek-flash"},
         {"provider": "modelscope",  "model": "deepseek-ai/DeepSeek-V4-Flash-0731"},
         {"provider": "modelscope",  "model": "stepfun-ai/Step-3.7-Flash"},
         {"provider": "modelscope",  "model": "Qwen/Qwen3.8-27B"},
@@ -163,7 +164,7 @@ _BASE_CONFIG = {
         {"provider": "openrouter",  "model": "nvidia/nemotron-3-super-120b-a12b:free"},
     ],
     "deep_think_fallback": [
-        {"provider": "sensenova",   "model": "deepseek-v4-flash"},
+        {"provider": "sensenova",   "model": "deepseek-flash"},
         {"provider": "modelscope",  "model": "deepseek-ai/DeepSeek-V4-Pro-0813"},
         {"provider": "modelscope",  "model": "ZhipuAI/GLM-5.2"},
         {"provider": "modelscope",  "model": "stepfun-ai/Step-3.7-Flash"},
@@ -172,7 +173,7 @@ _BASE_CONFIG = {
     ],
     # Client-side request pacing (requests per minute). Keys are either a
     # bare provider ("sensenova") or a provider/model pair
-    # ("sensenova/deepseek-v4-flash"); the model-specific entry wins when both
+    # ("sensenova/deepseek-flash"); the model-specific entry wins when both
     # are present. A process-wide shared token-bucket limiter per key caps
     # aggregate RPM across all batch workers and both think tiers, preventing
     # 429 bursts against low-quota plans. A provider/model not listed here is
@@ -186,7 +187,7 @@ _BASE_CONFIG = {
     # the real per-model credit rates shown in the account's 积分明细.
     "llm_requests_per_minute": {
         "sensenova/sensenova-6.8-flash-lite": 5.0,
-        "sensenova/deepseek-v4-flash": 1.7,
+        "sensenova/deepseek-flash": 1.7,
         "sensenova": 5.0,
     },
     "input_token_price_per_1m": None,
