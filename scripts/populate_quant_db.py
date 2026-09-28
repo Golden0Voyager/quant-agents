@@ -61,6 +61,20 @@ def _ticker_to_code(ticker: str) -> str:
     return ticker.split(".")[0]
 
 
+def _normalize_report_date(value: object) -> int | None:
+    """Normalize a ``截至日期`` value to YYYYMMDD int.
+
+    quant_pipeline / smartmoney paths store ``report_date`` as an INTEGER
+    (e.g. 20260331); storing the raw string (e.g. "2026-03-31") would mix
+    formats in the same column and break downstream grouping/comparison.
+    Returns None when the value cannot be parsed.
+    """
+    try:
+        return int(pd.Timestamp(str(value)).strftime("%Y%m%d"))
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
 # ===========================================================================
 # Institutional holdings — derive from stock_main_stock_holder
 # ===========================================================================
@@ -107,7 +121,13 @@ def _populate_institutional_holdings(
 
     # Group by report date (截至日期) and derive institutional metrics
     written = 0
-    for report_date, group in df.groupby("截至日期"):
+    for report_date_raw, group in df.groupby("截至日期"):
+        report_date = _normalize_report_date(report_date_raw)
+        if report_date is None:
+            logger.warning(
+                "  [skip] unparseable 截至日期 %r for %s", report_date_raw, code
+            )
+            continue
         total_hold_pct = group["持股比例"].sum() if "持股比例" in group.columns else None
         # Count institution-type holders by name pattern
         inst_keywords = "基金|社保|保险|QFII|香港中央结算|中国证券金融|中央汇金|养老"
@@ -127,24 +147,24 @@ def _populate_institutional_holdings(
             written += 1
             continue
 
-        try:
-            conn.execute(
-                """INSERT OR REPLACE INTO institutional_holdings
-                   (ts_code, report_date, institution_count, total_hold_pct,
-                    top10_holder_ratio, data_source, updated_at)
-                   VALUES (?, ?, ?, ?, ?, 'akshare', datetime('now'))""",
-                (
-                    code,
-                    report_date,
-                    inst_count,
-                    float(inst_hold_pct) if pd.notna(inst_hold_pct) else None,
-                    float(total_hold_pct) if pd.notna(total_hold_pct) else None,
-                ),
-            )
-            conn.commit()
-            written += 1
-        except Exception as exc:
-            logger.warning("  [db-error] %s on %s: %s", code, report_date, exc)
+        # Let sqlite/schema errors propagate — they are programming or
+        # environment defects, not per-row data issues, and must not be
+        # silently swallowed into an empty-looking success.
+        conn.execute(
+            """INSERT OR REPLACE INTO institutional_holdings
+               (ts_code, report_date, institution_count, total_hold_pct,
+                top10_holder_ratio, data_source, updated_at)
+               VALUES (?, ?, ?, ?, ?, 'akshare', datetime('now'))""",
+            (
+                code,
+                report_date,
+                inst_count,
+                float(inst_hold_pct) if pd.notna(inst_hold_pct) else None,
+                float(total_hold_pct) if pd.notna(total_hold_pct) else None,
+            ),
+        )
+        conn.commit()
+        written += 1
 
     logger.info("  => %d report periods inserted for %s", written, code)
     return written > 0
@@ -225,7 +245,9 @@ def _populate_dragon_tiger(
                 net_buy = detail_df["净额"].sum() if "净额" in detail_df.columns else None
                 buy_amt = detail_df["买入金额"].sum() if "买入金额" in detail_df.columns else None
                 sell_amt = detail_df["卖出金额"].sum() if "卖出金额" in detail_df.columns else None
-            except Exception:
+            except Exception as exc:
+                # Aggregation bugs (e.g. non-numeric dtype) must be visible.
+                logger.warning("  [agg-error] LHB aggregation for %s on %s: %s", code, date_str, exc)
                 net_buy = buy_amt = sell_amt = None
 
             try:
@@ -281,6 +303,7 @@ def main() -> int:
 
     conn = _get_connection()
     tables = args.tables
+    failures = 0
 
     if args.all:
         all_codes = _tscodes_with_daily_bars(conn)
@@ -292,34 +315,42 @@ def main() -> int:
     total_inst = 0
     total_dt = 0
 
-    for code in all_codes:
-        ticker = f"{code}.SZ" if code.startswith("0") or code.startswith("3") else f"{code}.SS"
-        if code.startswith("8"):
-            ticker = f"{code}.BJ"
+    try:
+        for code in all_codes:
+            ticker = f"{code}.SZ" if code.startswith("0") or code.startswith("3") else f"{code}.SS"
+            if code.startswith("8"):
+                ticker = f"{code}.BJ"
 
-        if "institutional_holdings" in tables:
-            try:
-                if _populate_institutional_holdings(conn, code, ticker, args.dry_run):
-                    total_inst += 1
-            except Exception as exc:
-                logger.warning("  [error] institutional_holdings for %s: %s", code, exc)
+            if "institutional_holdings" in tables:
+                try:
+                    if _populate_institutional_holdings(conn, code, ticker, args.dry_run):
+                        total_inst += 1
+                except Exception as exc:
+                    failures += 1
+                    logger.warning("  [error] institutional_holdings for %s: %s", code, exc)
 
-        if "dragon_tiger" in tables:
-            try:
-                if _populate_dragon_tiger(conn, code, ticker, args.dry_run):
-                    total_dt += 1
-            except Exception as exc:
-                logger.warning("  [error] dragon_tiger for %s: %s", code, exc)
+            if "dragon_tiger" in tables:
+                try:
+                    if _populate_dragon_tiger(conn, code, ticker, args.dry_run):
+                        total_dt += 1
+                except Exception as exc:
+                    failures += 1
+                    logger.warning("  [error] dragon_tiger for %s: %s", code, exc)
+    finally:
+        conn.close()
 
     logger.info("")
     logger.info("=" * 50)
     logger.info("Summary:")
     logger.info("  Institutional holdings: %d tickers populated", total_inst)
     logger.info("  Dragon tiger:           %d tickers populated", total_dt)
+    if failures:
+        logger.error("  %d ticker(s) failed — see warnings above", failures)
     logger.info("=" * 50)
 
-    conn.close()
-    return 0
+    # Exit non-zero when anything failed so cron/CI surfaces the problem
+    # instead of recording a successful no-op run.
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

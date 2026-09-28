@@ -134,11 +134,14 @@ def ticker_matches(a: str, b: str) -> bool:
     if a_canon and b_canon and a_canon == b_canon:
         return True
 
-    # Bare code match for 6-digit A-shares
+    # Bare code match for 6-digit A-shares — only when the bare code's
+    # inferred canonical form agrees with the other side. A bare "603893"
+    # must NOT match "603893.SZ" (canonical is .SS): conflicting exchanges
+    # imply distinct instruments.
     a_bare = a_clean.split(".")[0]
     b_bare = b_clean.split(".")[0]
     if a_bare == b_bare and len(a_bare) == 6 and a_bare.isdigit():
-        return True
+        return bool(a_canon and b_canon and a_canon == b_canon)
 
     # HK variant cross-match (e.g. HK1810 and 1810)
     a_hk = a_clean[2:].lstrip("0") if (a_clean.startswith("HK") and a_clean[2:].isdigit()) else None

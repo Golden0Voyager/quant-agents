@@ -228,3 +228,16 @@ class TestDeduplicateHoldings:
     def test_empty_list(self):
         result = deduplicate_holdings([])
         assert result == {}
+
+
+@pytest.mark.unit
+class TestTickerMatchesExchangeConsistency:
+    def test_bare_code_with_conflicting_suffix_rejected(self):
+        # 603893 canonicalizes to .SS; a bare code must not match an
+        # explicit .SZ suffix — these are distinct instruments.
+        assert ticker_matches("603893", "603893.SZ") is False
+        assert ticker_matches("603893.SZ", "603893") is False
+
+    def test_bare_code_with_agreeing_suffix_accepted(self):
+        assert ticker_matches("000603", "000603.SZ") is True
+        assert ticker_matches("603893", "603893.SS") is True

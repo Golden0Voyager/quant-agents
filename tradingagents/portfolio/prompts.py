@@ -198,7 +198,7 @@ def build_trader_prompt(
         lines.append(f"- 网格策略: {h.grid_strategy}")
         lines.append("  请在设定 entry price 和 stop-loss 时参考上述网格区间。")
 
-    if h.market_price is not None and h.avg_cost is not None:
+    if h.market_price is not None and h.avg_cost:
         gap = (h.market_price - h.avg_cost) / h.avg_cost
         sign = "+" if gap >= 0 else ""
         lines.append(f"- 现价与成本价差: {sign}{gap * 100:.2f}%")
@@ -227,7 +227,10 @@ def build_market_prompt(ticker: str, portfolio: Portfolio | None) -> str:
     lines.append(f"- 成本价: {h.avg_cost:.3f}")
     if h.market_price is not None:
         lines.append(f"- 现价: {h.market_price:.3f}")
-        if h.market_price < h.avg_cost:
+        if not h.avg_cost:
+            # 零成本持仓（如获赠股份）——无法计算盈亏百分比，跳过。
+            pass
+        elif h.market_price < h.avg_cost:
             gap = (h.avg_cost - h.market_price) / h.avg_cost
             lines.append(f"- 当前浮亏: {gap * 100:.2f}%（成本线构成心理压力位）")
         else:

@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -62,9 +63,21 @@ class PortfolioRepository:
             with open(self._path, encoding="utf-8") as f:
                 data = json.load(f)
         except json.JSONDecodeError as exc:
-            # Backup corrupted file and raise
+            # Backup corrupted file and raise. The backup itself must never
+            # mask the real corruption error.
             backup_path = self._path.with_suffix(".json.bak")
-            shutil.copy2(self._path, backup_path)
+            try:
+                shutil.copy2(self._path, backup_path)
+            except OSError:
+                logger.warning(
+                    "Failed to back up corrupted portfolio %s",
+                    self._path,
+                    exc_info=True,
+                )
+                raise ValueError(
+                    "Portfolio JSON is corrupted and the backup failed. "
+                    "Please re-run sync-holdings."
+                ) from exc
             raise ValueError(
                 f"Portfolio JSON is corrupted. Backup saved to {backup_path}. "
                 f"Please re-run sync-holdings."
@@ -77,10 +90,15 @@ class PortfolioRepository:
         # Ensure parent directory exists
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Write to temp file then replace (atomic)
-        temp_path = self._path.with_suffix(".tmp")
+        # Write to a unique temp file then replace (atomic). A unique name
+        # per save prevents two writers from clobbering each other's temp
+        # file via a shared fixed ".tmp" path.
+        fd, tmp_name = tempfile.mkstemp(
+            dir=self._path.parent, prefix=self._path.name + ".", suffix=".tmp"
+        )
+        temp_path = Path(tmp_name)
         try:
-            with open(temp_path, "w", encoding="utf-8") as f:
+            with open(fd, "w", encoding="utf-8") as f:
                 json.dump(
                     portfolio.to_dict(),
                     f,

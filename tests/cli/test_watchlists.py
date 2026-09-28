@@ -45,3 +45,10 @@ def test_list_watchlists():
     save_watchlist("beta", ["B"])
     names = list_watchlists()
     assert sorted(names) == ["alpha", "beta"]
+
+
+def test_watchlist_name_rejects_path_traversal():
+    with pytest.raises(ValueError):
+        save_watchlist("../escape", ["A"])
+    with pytest.raises(ValueError):
+        load_watchlist("a/b")

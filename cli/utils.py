@@ -858,11 +858,12 @@ def ensure_api_key(provider: str) -> str | None:
             ("highlighted", "noinherit"),
         ]),
     ).ask()
-    if not key:
+    if not key or not key.strip():
         console.print(
             f"[red]Skipped. API calls will fail until {env_var} is set.[/red]"
         )
         return None
+    key = key.strip()
 
     env_path = find_dotenv(usecwd=True) or str(Path.cwd() / ".env")
     Path(env_path).touch(exist_ok=True)

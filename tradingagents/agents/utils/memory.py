@@ -208,6 +208,9 @@ class TradingMemoryLog:
 
             new_blocks = self._apply_rotation(new_blocks)
             new_text = self._SEPARATOR.join(new_blocks)
+            # Fixed ".tmp" name is intentional: a leftover tmp from a killed
+            # run is overwritten on the next update, and per-path locks
+            # (see _lock_for_path) serialize writers within the process.
             tmp_path = self._log_path.with_suffix(".tmp")
             tmp_path.write_text(new_text, encoding="utf-8")
             tmp_path.replace(self._log_path)
@@ -264,6 +267,9 @@ class TradingMemoryLog:
 
             new_blocks = self._apply_rotation(new_blocks)
             new_text = self._SEPARATOR.join(new_blocks)
+            # Fixed ".tmp" name is intentional: a leftover tmp from a killed
+            # run is overwritten on the next update, and per-path locks
+            # (see _lock_for_path) serialize writers within the process.
             tmp_path = self._log_path.with_suffix(".tmp")
             tmp_path.write_text(new_text, encoding="utf-8")
             tmp_path.replace(self._log_path)

@@ -40,3 +40,24 @@ def test_delete_profile():
     save_profile("to_delete", {"llm_provider": "openai"})
     delete_profile("to_delete")
     assert "to_delete" not in list_profiles()
+
+
+def test_profile_name_rejects_path_traversal():
+    with pytest.raises(ValueError):
+        save_profile("../../etc/evil", {})
+    with pytest.raises(ValueError):
+        save_profile("a/b", {})
+    with pytest.raises(ValueError):
+        load_profile("..")
+    with pytest.raises(ValueError):
+        delete_profile("../foo")
+
+
+def test_profile_name_json_suffix_normalized():
+    # "foo.json" and "foo" must address the same profile (no foo.json.json).
+    save_profile("foo.json", {"llm_provider": "openai"})
+    assert "foo" in list_profiles()
+    loaded = load_profile("foo")
+    assert loaded["config"]["llm_provider"] == "openai"
+    assert delete_profile("foo.json") is True
+    assert delete_profile("never_existed") is False

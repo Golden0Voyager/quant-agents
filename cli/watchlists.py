@@ -34,12 +34,35 @@ def parse_watchlist_entries(content: str) -> list[tuple[str, str]]:
     return entries
 
 
+def _watchlist_path(name: str) -> Path:
+    """Resolve a watchlist name to a path inside the watchlists directory.
+
+    Watchlist names come from CLI flags / interactive prompts, so they must
+    not be able to escape the directory via separators or ``..`` traversal.
+    """
+    directory = _ensure_dir().resolve()
+    base = name.strip()
+    if base.lower().endswith(".txt"):
+        base = base[:-4]
+    if not base:
+        raise ValueError("Watchlist name must not be empty")
+    if "/" in base or "\\" in base or ".." in base or base.startswith(("~", ".")):
+        raise ValueError(
+            f"Invalid watchlist name {name!r}: separators, traversal and hidden names are not allowed"
+        )
+    path = (directory / f"{base}.txt").resolve()
+    if path.parent != directory:
+        raise ValueError(f"Watchlist name {name!r} resolves outside the watchlists directory")
+    return path
+
+
 def save_watchlist(name: str, tickers: list[str]) -> Path:
     """Save a watchlist to disk. Returns the file path."""
-    directory = _ensure_dir()
-    path = directory / f"{name}.txt"
+    path = _watchlist_path(name)
     lines = "\n".join(tickers) + "\n"
-    path.write_text(lines, encoding="utf-8")
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(lines, encoding="utf-8")
+    tmp.replace(path)
     return path
 
 
@@ -53,7 +76,7 @@ def load_watchlist_entries(name: str) -> list[tuple[str, str]]:
 
     Raises FileNotFoundError if the watchlist file is missing.
     """
-    path = _ensure_dir() / f"{name}.txt"
+    path = _watchlist_path(name)
     if not path.exists():
         raise FileNotFoundError(f"Watchlist '{name}' not found at {path}")
     return parse_watchlist_entries(path.read_text(encoding="utf-8"))
@@ -62,7 +85,7 @@ def load_watchlist_entries(name: str) -> list[tuple[str, str]]:
 def list_watchlists() -> list[str]:
     """Return a list of saved watchlist names, with 'my' prioritized first."""
     directory = _ensure_dir()
-    names = sorted([p.stem for p in directory.glob("*.txt")])
+    names = sorted([p.stem for p in directory.glob("*.txt") if p.is_file()])
     if "my" in names:
         names.remove("my")
         names.insert(0, "my")
