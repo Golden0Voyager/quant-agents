@@ -184,12 +184,17 @@ class TestRoleOverridesPassthrough:
         assert runner._build_config()["deep_think_llm_roles"] == roles
 
     def test_deep_think_llm_roles_absent_keeps_default(self, tmp_path):
+        from tradingagents.default_config import default_config
+
         runner = BatchRunner(
             tickers=["AAPL"],
             profile_config={},
             output_dir=tmp_path,
         )
-        assert runner._build_config()["deep_think_llm_roles"] == {}
+        assert (
+            runner._build_config()["deep_think_llm_roles"]
+            == default_config()["deep_think_llm_roles"]
+        )
 
 
 class TestSaveReportToDisk:

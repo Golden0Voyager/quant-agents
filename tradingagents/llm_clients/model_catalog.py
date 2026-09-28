@@ -191,10 +191,12 @@ MODEL_OPTIONS: ProviderModeOptions = {
     # Agnes AI: free tier with 256K context, tool calling, thinking mode.
     "agnes": {
         "quick": [
+            ("Agnes-3.0-Flash - Newest free-tier flash, 256K ctx, tool calling", "agnes-3.0-flash"),
             ("Agnes-2.0-Flash - Fast, 256K ctx, tool calling", "agnes-2.0-flash"),
             ("Custom model ID", "custom"),
         ],
         "deep": [
+            ("Agnes-3.0-Flash - Newest free-tier flash, 256K ctx, tool calling", "agnes-3.0-flash"),
             ("Agnes-2.0-Flash - Fast, 256K ctx, tool calling", "agnes-2.0-flash"),
             ("Custom model ID", "custom"),
         ],
