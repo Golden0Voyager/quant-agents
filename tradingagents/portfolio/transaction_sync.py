@@ -60,10 +60,12 @@ _COLUMN_MAP = {
 }
 
 
-def _run_gws_command(sheet_id: str, range_str: str) -> list[list[str]]:
+def _run_gws_command(sheet_id: str, range_str: str) -> list[list[str]] | None:
     """Run gws CLI to read sheet values.
 
     The gws CLI must already be authenticated (``gws auth login``).
+    Returns None when the sheet reports no values (e.g. an empty sheet
+    serializes as ``"values": null``).
     """
     cmd = [
         "gws",
@@ -85,7 +87,15 @@ def _run_gws_command(sheet_id: str, range_str: str) -> list[list[str]]:
         logger.error("gws CLI failed: %s", exc.stderr)
         raise RuntimeError(f"gws CLI failed: {exc.stderr}") from exc
 
-    data = json.loads(result.stdout)
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"gws CLI returned non-JSON output: {result.stdout[:200]!r}"
+        ) from exc
+    # Preserve the established contract: a missing "values" key yields [],
+    # while an explicit null (empty sheet) yields None; both are treated as
+    # "no data" by callers.
     return data.get("values", [])
 
 
@@ -110,6 +120,9 @@ def _resolve_column_indices(headers: list[str]) -> dict[str, int]:
 
 def _transform_row(row: list[str], indices: dict[str, int]) -> Transaction | None:
     """Transform a raw sheet row into a Transaction."""
+    if not indices:
+        logger.error("No recognized columns; cannot transform row: %s", row)
+        return None
     max_idx = max(indices.values())
     if len(row) <= max_idx:
         return None
@@ -137,7 +150,7 @@ def _transform_row(row: list[str], indices: dict[str, int]) -> Transaction | Non
         action_normalized = "买入"
     elif "卖" in action_val:
         action_normalized = "卖出"
-    elif "分红" in action_val or "红" in action_val:
+    elif "分红" in action_val or "红利" in action_val:
         action_normalized = "分红"
 
     return Transaction(

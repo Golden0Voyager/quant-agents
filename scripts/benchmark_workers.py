@@ -49,8 +49,11 @@ def run_single_benchmark(
     stats = StatsCallbackHandler()
     callbacks = [stats]
 
+    # Initialise before the try so the error path always has a meaningful
+    # start time (previously a failure before `t0` binding reported None).
+    t0 = time.perf_counter()
+
     try:
-        t0 = time.perf_counter()
         graph = TradingAgentsGraph(
             debug=False, config=config, callbacks=callbacks
         )
@@ -68,7 +71,7 @@ def run_single_benchmark(
 
     except Exception as e:
         result["error"] = str(e)
-        result["total_time"] = round(time.perf_counter() - t0, 2) if "t0" in dir() else None
+        result["total_time"] = round(time.perf_counter() - t0, 2)
 
     return result
 
@@ -115,8 +118,16 @@ def benchmark_parallel(
 
 def analyze_results(
     all_results: dict[int, list[dict[str, Any]]],
+    wall_times: dict[int, float] | None = None,
 ) -> None:
-    """Print comparison table and bottleneck analysis."""
+    """Print comparison table and bottleneck analysis.
+
+    ``wall_times`` maps worker count -> measured wall-clock seconds for that
+    phase. Per-ticker ``max(total_time)`` systematically understates batch
+    duration (it ignores inter-ticker gaps and the slowest path), so real
+    wall-clock is preferred whenever available.
+    """
+    wall_times = wall_times or {}
     print("\n" + "=" * 80)
     print("📊 基准测试结果")
     print("=" * 80)
@@ -126,7 +137,9 @@ def analyze_results(
     print("-" * 60)
 
     for workers, results in sorted(all_results.items()):
-        total_time = max((r["total_time"] for r in results if r.get("total_time")), default=0)
+        total_time = wall_times.get(workers) or max(
+            (r["total_time"] for r in results if r.get("total_time")), default=0
+        )
         avg_time = total_time / len(results) if results else 0
         success = sum(1 for r in results if not r.get("error"))
         failed = len(results) - success
@@ -176,22 +189,30 @@ def analyze_results(
         print("\n" + "=" * 80)
         print("📈 并发扩展效率")
         print("=" * 80)
-        baseline_time = max(
-            r["total_time"] for r in all_results[1] if r.get("total_time")
+        baseline_time = wall_times.get(1) or max(
+            (r["total_time"] for r in all_results[1] if r.get("total_time")),
+            default=None,
         )
-        for workers, results in sorted(all_results.items()):
-            if workers == 1:
-                continue
-            batch_time = max(
-                r["total_time"] for r in results if r.get("total_time")
-            )
-            ideal = baseline_time / workers
-            efficiency = (ideal / batch_time * 100) if batch_time > 0 else 0
-            print(
-                f"  workers={workers}: "
-                f"实际 {batch_time:.1f}s vs 理想 {ideal:.1f}s "
-                f"→ 效率 {efficiency:.0f}%"
-            )
+        if baseline_time is None:
+            print("  ⚠ 无有效 baseline 数据，跳过扩展效率分析")
+        else:
+            for workers, results in sorted(all_results.items()):
+                if workers == 1:
+                    continue
+                batch_time = wall_times.get(workers) or max(
+                    (r["total_time"] for r in results if r.get("total_time")),
+                    default=None,
+                )
+                if batch_time is None:
+                    print(f"  workers={workers}: 无有效数据，跳过")
+                    continue
+                ideal = baseline_time / workers
+                efficiency = (ideal / batch_time * 100) if batch_time > 0 else 0
+                print(
+                    f"  workers={workers}: "
+                    f"实际 {batch_time:.1f}s vs 理想 {ideal:.1f}s "
+                    f"→ 效率 {efficiency:.0f}%"
+                )
 
 
 def main():
@@ -213,8 +234,18 @@ def main():
     )
     args = parser.parse_args()
 
-    tickers = [t.strip() for t in args.tickers.split(",")]
-    worker_counts = [int(w.strip()) for w in args.workers.split(",")]
+    tickers = [t.strip() for t in args.tickers.split(",") if t.strip()]
+    if not tickers:
+        print("❌ --tickers 为空")
+        sys.exit(1)
+    try:
+        worker_counts = [int(w.strip()) for w in args.workers.split(",") if w.strip()]
+    except ValueError:
+        print(f"❌ --workers 含非数字项: {args.workers!r}（应为逗号分隔的正整数）")
+        sys.exit(1)
+    if not worker_counts or any(w < 1 for w in worker_counts):
+        print(f"❌ --workers 必须是正整数列表，当前: {worker_counts}")
+        sys.exit(1)
 
     # Build config
     config = DEFAULT_CONFIG.copy()
@@ -248,7 +279,9 @@ def main():
 
     # Run with workers=1 for baseline
     print(f"\n  使用 {len(tickers)} 只股票 × workers=1:")
+    wall_start = time.perf_counter()
     results_1 = benchmark_sequential(tickers, single_config)
+    wall_times = {1: time.perf_counter() - wall_start}
 
     all_results = {1: results_1}
 
@@ -257,11 +290,13 @@ def main():
         if workers == 1:
             continue
         print(f"\n  使用 {len(tickers)} 只股票 × workers={workers}:")
+        wall_start = time.perf_counter()
         results_n = benchmark_parallel(tickers, single_config, workers)
+        wall_times[workers] = time.perf_counter() - wall_start
         all_results[workers] = results_n
 
     # Phase 3: Analysis
-    analyze_results(all_results)
+    analyze_results(all_results, wall_times)
 
     # Save raw results
     output_path = Path("reports") / f"benchmark_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"

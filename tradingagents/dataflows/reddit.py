@@ -200,9 +200,13 @@ def fetch_reddit_posts(
     stay under Reddit's public per-IP rate limit; combined with the RSS-first
     path it makes 429s rare even when several analyses run back-to-back.
     """
+    # Materialize up front: ``subreddits`` is iterated twice (fetch loop and
+    # the empty-result summary), which silently yields nothing on the second
+    # pass when a one-shot iterator/generator is passed in.
+    subs = list(subreddits)
     blocks = []
     total_posts = 0
-    for i, sub in enumerate(subreddits):
+    for i, sub in enumerate(subs):
         if i > 0:
             time.sleep(inter_request_delay)
         posts = _fetch_subreddit(ticker, sub, limit_per_sub, timeout)
@@ -240,6 +244,6 @@ def fetch_reddit_posts(
     if total_posts == 0:
         return (
             f"<no Reddit posts found mentioning {ticker.upper()} across "
-            f"{', '.join(f'r/{s}' for s in subreddits)} in the past 7 days>"
+            f"{', '.join(f'r/{s}' for s in subs)} in the past 7 days>"
         )
     return "\n\n".join(blocks)

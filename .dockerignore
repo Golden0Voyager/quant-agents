@@ -1,11 +1,14 @@
 .git
 .venv
-.env
+# Exclude all env-file variants (.env, .env.local, .env.enterprise, ...) so
+# real secrets can never leak into the Docker build context.
+.env*
 .claude
 .idea
 .vscode
 .DS_Store
 __pycache__
+**/__pycache__
 *.egg-info
 build
 dist

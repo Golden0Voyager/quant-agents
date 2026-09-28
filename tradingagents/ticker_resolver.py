@@ -113,13 +113,23 @@ def _resolve_chinese_name_hithink(name: str) -> str | None:
         return None
 
     a_share_items = [it for it in items if it.get("asset_type") == "a-share"]
+
+    def _valid_code(value: object) -> str | None:
+        # The caller feeds the result into suffix inference which requires a
+        # bare 6-digit code; a malformed hit (e.g. a thscode like
+        # "600519.SH") would otherwise turn a good lookup into a hard crash.
+        if isinstance(value, str) and len(value) == 6 and value.isdigit():
+            return value
+        return None
+
     # Exact name match wins; otherwise take the API's top-ranked A-share hit.
     for it in a_share_items:
         if it.get("name") == name:
-            return it.get("ticker") or None
+            return _valid_code(it.get("ticker"))
     for it in a_share_items:
-        if it.get("ticker"):
-            return it["ticker"]
+        code = _valid_code(it.get("ticker"))
+        if code:
+            return code
     return None
 
 

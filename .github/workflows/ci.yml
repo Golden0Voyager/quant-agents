@@ -9,6 +9,10 @@ on:
 env:
   UV_SYSTEM_PYTHON: 1
 
+# CI jobs only read the repository; no job needs write access.
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -70,6 +74,10 @@ jobs:
 
   test-integration:
     runs-on: ubuntu-latest
+    env:
+      # The guard below reads the environment variable; the .env file alone
+      # never exports it into this step's shell.
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

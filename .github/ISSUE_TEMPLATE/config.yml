@@ -1,3 +1,4 @@
-name: Issues
-description: 无模板问题
-body: []
+# Template chooser configuration (GitHub special file). Keep it minimal —
+# the chooser only supports the keys below; extra fields make GitHub fall
+# back to treating this as a broken issue template with no input fields.
+blank_issues_enabled: true

@@ -15,9 +15,6 @@ on:
         required: false
         default: ''
 
-permissions:
-  contents: write
-
 env:
   UV_SYSTEM_PYTHON: 1
 
@@ -26,6 +23,9 @@ jobs:
     name: Analyze My List
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    # Least privilege: analysis jobs only need to read the repository.
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -51,9 +51,13 @@ jobs:
           EOF
 
       - name: Run my list analysis
+        # Route the dispatch input through env to avoid script injection:
+        # the raw string is never interpolated into the shell script body.
+        env:
+          MY_TICKERS_OVERRIDE: ${{ inputs.my_tickers }}
         run: |
-          if [ -n "${{ inputs.my_tickers }}" ]; then
-            TICKERS=$(echo '${{ inputs.my_tickers }}' | jq -R 'split(",") | map(gsub("^\\s+|\\s+$"; ""))')
+          if [ -n "$MY_TICKERS_OVERRIDE" ]; then
+            TICKERS=$(echo "$MY_TICKERS_OVERRIDE" | jq -R 'split(",") | map(gsub("^\\s+|\\s+$"; ""))')
             jq --argjson tickers "$TICKERS" '.tickers = $tickers' config/daily-my.json > /tmp/daily_my_override.json
             uv run python -m cli.main analyze --config /tmp/daily_my_override.json
           else
@@ -72,6 +76,9 @@ jobs:
     name: Analyze Erin List
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    # Least privilege: analysis jobs only need to read the repository.
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -97,9 +104,13 @@ jobs:
           EOF
 
       - name: Run Erin list analysis
+        # Route the dispatch input through env to avoid script injection:
+        # the raw string is never interpolated into the shell script body.
+        env:
+          ERIN_TICKERS_OVERRIDE: ${{ inputs.erin_tickers }}
         run: |
-          if [ -n "${{ inputs.erin_tickers }}" ]; then
-            TICKERS=$(echo '${{ inputs.erin_tickers }}' | jq -R 'split(",") | map(gsub("^\\s+|\\s+$"; ""))')
+          if [ -n "$ERIN_TICKERS_OVERRIDE" ]; then
+            TICKERS=$(echo "$ERIN_TICKERS_OVERRIDE" | jq -R 'split(",") | map(gsub("^\\s+|\\s+$"; ""))')
             jq --argjson tickers "$TICKERS" '.tickers = $tickers' config/daily-erin.json > /tmp/daily_erin_override.json
             uv run python -m cli.main analyze --config /tmp/daily_erin_override.json
           else
@@ -120,6 +131,9 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Only this job creates releases; keep write access scoped here.
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -127,12 +141,16 @@ jobs:
       - uses: astral-sh/setup-uv@v5
 
       - name: Download my reports
+        # Analysis jobs may have failed before uploading; keep the notify
+        # chain running so the Feishu alert still goes out.
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: reports-my-${{ github.run_id }}
           path: reports/my/
 
       - name: Download Erin reports
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: reports-erin-${{ github.run_id }}

@@ -60,8 +60,15 @@ def _run_gws_command(sheet_id: str, range_str: str) -> list[list[str]]:
         logger.error("gws CLI failed: %s", exc.stderr)
         raise RuntimeError(f"gws CLI failed: {exc.stderr}") from exc
 
-    data = json.loads(result.stdout)
-    return data.get("values", [])
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"gws CLI returned non-JSON output: {result.stdout[:200]!r}"
+        ) from exc
+    # gws may return "values": null for an empty sheet — normalize to [].
+    values = data.get("values") or []
+    return values
 
 
 class PortfolioSyncService:
