@@ -1,10 +1,13 @@
 import getpass
+import logging
 
 import requests
 from rich.console import Console
 from rich.panel import Panel
 
 from cli.config import CLI_CONFIG
+
+logger = logging.getLogger(__name__)
 
 
 def fetch_announcements(url: str | None = None, timeout: float | None = None) -> dict:
@@ -17,15 +20,26 @@ def fetch_announcements(url: str | None = None, timeout: float | None = None) ->
         response = requests.get(endpoint, timeout=timeout)
         response.raise_for_status()
         data = response.json()
-        return {
-            "announcements": data.get("announcements", [fallback]),
-            "require_attention": data.get("require_attention", False),
-        }
-    except Exception:
+    except (requests.RequestException, ValueError) as exc:
+        # Network/HTTP/JSON failures degrade to the fallback banner; they are
+        # expected in offline environments. Programming errors still raise.
+        logger.warning("Announcements fetch failed (%s: %s); using fallback", type(exc).__name__, exc)
         return {
             "announcements": [fallback],
             "require_attention": False,
         }
+
+    # Validate the payload shape: the endpoint may return a non-list or a
+    # list containing non-strings, which would break "\n".join downstream.
+    announcements = data.get("announcements", [fallback])
+    if not isinstance(announcements, list) or not all(isinstance(a, str) for a in announcements):
+        logger.warning("Announcements payload malformed (got %r); using fallback", announcements)
+        announcements = [fallback]
+
+    return {
+        "announcements": announcements,
+        "require_attention": bool(data.get("require_attention", False)),
+    }
 
 
 def display_announcements(console: Console, data: dict) -> None:
@@ -36,7 +50,7 @@ def display_announcements(console: Console, data: dict) -> None:
     if not announcements:
         return
 
-    content = "\n".join(announcements)
+    content = "\n".join(str(a) for a in announcements)
 
     panel = Panel(
         content,

@@ -4,7 +4,8 @@ Notify Feishu (local + CI)
 ==========================
 复用 .github/workflows/daily-analysis.yml 里 Notify Feishu 步骤的逻辑,
 支持从本地 reports/<YYYYMMDD_batch_*>/ 目录构造 summary + 发送飞书卡片,
-并把每只 ticker 的 complete_report.md 转 docx 上传到飞书群.
+并把每只 ticker 的 complete_report.md 直接以 markdown 文件上传飞书群
+(file_type="stream"; 不做 docx 转换,与实现一致).
 
 Usage:
     # Dry-run (默认,只打印 payload,不实际发)
@@ -180,8 +181,11 @@ def _post_json(url: str, payload: dict, *, token: str | None = None) -> tuple[in
             return e.code, json.loads(e.read().decode("utf-8"))
         except Exception:
             return e.code, {}
-    except Exception as e:
-        return 0, {"error": str(e)}
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as e:
+        # Network/transport failure — distinguishable from an API-level
+        # rejection (which returns a real HTTP status) and logged.
+        print(f"[error] feishu POST transport failed: {type(e).__name__}: {e}", file=sys.stderr)
+        return 0, {"error": f"{type(e).__name__}: {e}"}
 
 
 def _upload_file(token: str, file_path: Path, file_name: str, file_type: str) -> str:
@@ -212,8 +216,8 @@ def _upload_file(token: str, file_path: Path, file_name: str, file_type: str) ->
         with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             return data.get("data", {}).get("file_key", "")
-    except Exception as e:
-        print(f"  ! upload failed: {e}", file=sys.stderr)
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as e:
+        print(f"  ! upload failed: {type(e).__name__}: {e}", file=sys.stderr)
         return ""
 
 
@@ -305,19 +309,21 @@ def main() -> int:
     # 3) 发卡片
     status, body = _post_json(webhook, payload)
     print(f"[card] POST -> status={status} code={body.get('code')} msg={body.get('msg')}")
-    if status != 200 or body.get("code") != 0:
+    card_failed = status != 200 or body.get("code") != 0
+    if card_failed:
         print(f"[error] card send failed: {body}", file=sys.stderr)
-        # 卡片失败不致命,继续尝试文件上传
+        # 卡片失败不致命,继续尝试文件上传;但最终退出码会反映失败,
+        # 这样定时任务/CI 不会把"通知未送达"记录为成功。
 
     # 4) 上传文件
     if args.skip_files or not latest:
-        return 0
+        return 4 if card_failed else 0
 
     app_id = os.environ.get("FEISHU_APP_ID", "")
     app_secret = os.environ.get("FEISHU_APP_SECRET", "")
     if not (app_id and app_secret):
         print("[warn] FEISHU_APP_ID/FEISHU_APP_SECRET missing, skip file upload", file=sys.stderr)
-        return 0
+        return 4 if card_failed else 0
 
     token = _get_tenant_token(app_id, app_secret)
     if not token:
@@ -343,7 +349,7 @@ def main() -> int:
             print(f"[file] FAILED: {upload_name}", file=sys.stderr)
 
     print(f"\n[done] {sent} file(s) sent to chat {args.chat_id}")
-    return 0
+    return 4 if card_failed else 0
 
 
 if __name__ == "__main__":

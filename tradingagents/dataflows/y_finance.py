@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from typing import Annotated
 
@@ -16,6 +17,8 @@ from .stockstats_utils import (
 )
 from .symbol_utils import normalize_symbol
 
+logger = logging.getLogger(__name__)
+
 
 def get_YFin_data_online(
     symbol: Annotated[str, "ticker symbol of the company"],
@@ -25,10 +28,12 @@ def get_YFin_data_online(
     # Default canonical to the raw symbol so error handling can always report
     # what was requested, even if normalization fails before ``canonical`` is set.
     canonical = symbol
+    # Validate caller input BEFORE the network guard: a malformed date is an
+    # input error (ValueError), not a market-data absence, and must not be
+    # re-wrapped into NoMarketDataError for the routing layer.
+    datetime.strptime(start_date, "%Y-%m-%d")
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
     try:
-        datetime.strptime(start_date, "%Y-%m-%d")
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-
         # Resolve broker/forex symbols to Yahoo's convention (XAUUSD+ -> GC=F).
         canonical = normalize_symbol(symbol)
         ticker = yf.Ticker(canonical)
@@ -202,7 +207,7 @@ def get_stock_stats_indicators_window(
     except NoMarketDataError:
         raise  # Unknown/delisted symbol — let the router emit the sentinel
     except Exception as e:
-        print(f"Error getting bulk stockstats data: {e}")
+        logger.warning("Error getting bulk stockstats data: %s", e)
         # Fallback to original implementation if bulk method fails
         ind_string = ""
         curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
@@ -277,8 +282,9 @@ def get_stockstats_indicator(
     except NoMarketDataError:
         raise  # Unknown/delisted symbol — let the router emit the sentinel
     except Exception as e:
-        print(
-            f"Error getting stockstats indicator data for indicator {indicator} on {curr_date}: {e}"
+        logger.warning(
+            "Error getting stockstats indicator data for indicator %s on %s: %s",
+            indicator, curr_date, e,
         )
         return ""
 

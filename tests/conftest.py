@@ -74,6 +74,73 @@ def _reset_pricing_yaml_cache():
     pricing_module._PRICING_YAML = None
 
 
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost"}
+
+
+class _NetworkBlockedError(RuntimeError):
+    """Raised when a unit/smoke test tries to open an external connection."""
+
+
+@pytest.fixture(autouse=True)
+def _block_external_network(request, monkeypatch):
+    """Fail fast when unit/smoke tests touch the real network.
+
+    Several unit tests historically opened live connections (e.g. yfinance
+    hitting Yahoo), which hangs indefinitely under flaky network conditions
+    and stalls the whole suite — on CI runners without network this wedges
+    the job until timeout. Unit tests must mock their vendors; this guard
+    makes violations visible in milliseconds instead of hanging. Loopback
+    is allowed for tests that stand up local servers.
+    """
+    marker = request.node.get_closest_marker("unit") or request.node.get_closest_marker("smoke")
+    if not marker:
+        yield
+        return
+
+    import socket
+
+    original_connect = socket.socket.connect
+
+    def guarded_connect(sock, address):
+        host = address[0] if isinstance(address, tuple) else None
+        if host in _LOOPBACK_HOSTS:
+            return original_connect(sock, address)
+        raise _NetworkBlockedError(
+            f"unit test attempted external network connection to {address!r}; "
+            f"mock the vendor instead of calling the network"
+        )
+
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+    # Safety net: even loopback or pre-existing connections must not stall.
+    monkeypatch.setattr(socket, "getdefaulttimeout", lambda: 10.0)
+    socket.setdefaulttimeout(10.0)
+
+    # curl_cffi (yfinance's HTTP backend) drives libcurl in C and bypasses
+    # the socket.socket.connect patch above — guard it at the Session layer.
+    try:
+        import curl_cffi.requests as cffi_requests
+    except ImportError:
+        cffi_requests = None
+    if cffi_requests is not None:
+        from urllib.parse import urlparse
+
+        original_request = cffi_requests.Session.request
+
+        def guarded_request(session, method, url, *args, **kwargs):
+            host = urlparse(str(url)).hostname or ""
+            if host in _LOOPBACK_HOSTS:
+                return original_request(session, method, url, *args, **kwargs)
+            raise _NetworkBlockedError(
+                f"unit test attempted external HTTP request to {url!r}; "
+                f"mock the vendor instead of calling the network"
+            )
+
+        monkeypatch.setattr(cffi_requests.Session, "request", guarded_request)
+
+    yield
+    socket.setdefaulttimeout(None)
+
+
 @pytest.fixture()
 def mock_llm_client():
     client = MagicMock()

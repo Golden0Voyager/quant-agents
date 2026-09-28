@@ -312,8 +312,16 @@ def _fetch_company_name(ticker: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def resolve_ticker(user_input: str) -> dict[str, str]:
+def resolve_ticker(user_input: str, *, fetch_name: bool = True) -> dict[str, str]:
     """Resolve arbitrary user input to a normalised ticker and company name.
+
+    Args:
+        user_input: raw ticker or (Chinese) company name.
+        fetch_name: when False, skip the company-name lookup entirely and
+            return ``company_name`` as an empty string. Name resolution hits
+            live vendor endpoints (akshare/yfinance) and can stall for
+            minutes on a bad network — pure filesystem/coding callers (e.g.
+            report-folder matching) should pass False.
 
     Returns a dict with keys:
         - "ticker": exchange-qualified ticker (e.g. "600901.SS")
@@ -331,8 +339,11 @@ def resolve_ticker(user_input: str) -> dict[str, str]:
         raw,
         re.IGNORECASE,
     )
+
     def _resolve_name(ticker: str) -> str:
         """Resolve company name: akshare > local DB > hithink > yfinance."""
+        if not fetch_name:
+            return ""
         return (
             _fetch_company_name_from_akshare(ticker)
             or _fetch_company_name_from_db(ticker)

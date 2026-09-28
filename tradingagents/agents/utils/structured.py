@@ -145,20 +145,31 @@ def invoke_structured_or_freetext(
             rendered = render(result)
             return f"{rendered}\n\n{note}" if note else rendered
         except Exception as exc:
+            # Broad catch is intentional: provider capability gaps (e.g.
+            # deepseek-reasoner raising NotImplementedError for tool_choice)
+            # must degrade to free text. Programming errors still surface via
+            # the full traceback in the logs.
             logger.warning(
-                "%s: structured-output invocation failed (%s); retrying once as free text",
-                agent_name, exc,
+                "%s: structured-output invocation failed (%s: %s); "
+                "falling back to free text",
+                agent_name, type(exc).__name__, exc,
+                exc_info=True,
             )
 
     response = plain_llm.invoke(prompt)
-    content = response.content
+    # Last-resort path: the pipeline must never block on a missing attribute.
+    content = getattr(response, "content", None)
+    if content is None:
+        content = str(response)
     fallback = f"\n{FALLBACK_MARKER}\n{content}"
     # The free-text path bypasses the schema renderer, so the structured
     # ``**Confidence**`` line is normally lost. If the model stated a
     # confidence level anywhere in prose, re-surface it in the canonical form
     # so downstream consumers (report body, batch summary) still see it and do
     # not have to assume "low" just because the output format degraded.
-    if isinstance(content, str) and "**Confidence**" not in content:
+    # Case-insensitive: the model may emit "**confidence**" or
+    # "**CONFIDENCE**", which would otherwise get a duplicated line.
+    if isinstance(content, str) and "**confidence**" not in content.lower():
         level = parse_confidence(content)
         if level is not None:
             fallback = f"{fallback}\n\n**Confidence**: {level}"

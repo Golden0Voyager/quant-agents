@@ -114,15 +114,11 @@ def _call_with_timeout(func: Callable[[], T], timeout_seconds: float | None = No
         return future.result(timeout=timeout_seconds)
 
 
-def _akshare_retry(
-    func: Callable[[], T],
-    max_retries: int = 3,
-    base_delay: float = 1.0,
-) -> T:
-    """Execute an akshare call with exponential backoff on transient network errors."""
+def _network_error_types() -> tuple[type[BaseException], ...]:
+    """Exception types treated as transient network failures for retry purposes."""
     import requests.exceptions as _re  # local import — requests is an akshare dependency
 
-    _network_errors: tuple[type[BaseException], ...] = (
+    errors: tuple[type[BaseException], ...] = (
         ConnectionError,
         TimeoutError,
         _re.ConnectionError,
@@ -133,9 +129,20 @@ def _akshare_retry(
     )
     try:
         import curl_cffi.errors as _curl_errors
-        _network_errors = _network_errors + (_curl_errors.CurlError,)
+
+        errors = errors + (_curl_errors.CurlError,)
     except Exception:
         pass
+    return errors
+
+
+def _akshare_retry(
+    func: Callable[[], T],
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+) -> T:
+    """Execute an akshare call with exponential backoff on transient network errors."""
+    _network_errors = _network_error_types()
 
     for attempt in range(max_retries + 1):
         try:

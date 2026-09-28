@@ -350,7 +350,10 @@ class TypeSafeClientTests(unittest.TestCase):
             "tradingagents.llm_clients.typesafe_client.requests.post",
             return_value=_ok_response({}),
         ):
-            self.assertIsNone(gate.score_articles(_articles(2), {}))
+            # A partial/empty answer set no longer fails open for the whole
+            # batch: returned articles get a neutral 1.0, one bad row
+            # degrades only itself.
+            self.assertEqual(gate.score_articles(_articles(2), {}), [1.0, 1.0])
 
 
 class DecisionLogErrorTests(unittest.TestCase):
