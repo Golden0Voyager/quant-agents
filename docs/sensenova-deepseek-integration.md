@@ -41,9 +41,12 @@
 
 **客户端限流（按模型 pacing）**：框架按 `llm_requests_per_minute` 配置做进程级 pacing，
 键可以是 `"provider/model"`（模型级条目优先于裸 provider 条目）。默认值
-（flash-lite 5 rpm、deepseek-flash 1.7 rpm、兜底 5 rpm）是**保守的调用速率
-pacer**，并非积分配额的直接换算——积分按 token 计量，精确的窗口预算需要根据账户
-"积分明细"里的实际费率折算。配额耗尽类错误（quota exceeded / insufficient
+（flash-lite 5 rpm、deepseek-flash 3.0 rpm、agnes-3.0-flash 9.0 rpm、兜底 5 rpm）
+是**保守的调用速率 pacer**，并非积分配额的直接换算——积分按 token 计量，精确的
+窗口预算需要根据账户"积分明细"里的实际费率折算。deepseek-flash 在辩论角色
+分流到 Agnes 后只承载 3 个串行决策角色（2026-09-28 批次实测约 2.5-3k 积分/票，
+60k/5h 窗口约可跑 21+ 票），3.0 rpm 按实测余量校准； Agnes 9.0 rpm 系 2026-09-23
+公告免费档 10 RPM 留 10% 余量。配额耗尽类错误（quota exceeded / insufficient
 balance）不会在同档重试，直接进入 fallback 链的下一个 provider/model。
 
 **请求超时**：`llm_request_timeout`（默认 600 秒，可用

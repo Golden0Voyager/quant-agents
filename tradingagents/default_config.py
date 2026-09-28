@@ -215,7 +215,12 @@ _BASE_CONFIG = {
     # the real per-model credit rates shown in the account's 积分明细.
     "llm_requests_per_minute": {
         "sensenova/sensenova-6.8-flash-lite": 5.0,
-        "sensenova/deepseek-flash": 1.7,
+        # 3.0 rpm: after the Agnes split only the three serial decision roles
+        # remain here (~6-9 calls/ticker, ~2.5-3k credits/ticker measured from
+        # the 2026-09-28 batch vs ~5.3k before), so the 60k/5h window sustains
+        # ~21+ tickers — 1.7 was calibrated for all 8 deep roles and is now
+        # ~2x conservative. Overflow still falls back through deep_think_fallback.
+        "sensenova/deepseek-flash": 3.0,
         "sensenova": 5.0,
         # Agnes free tier: 10 RPM per the 2026-09-23 notice (50% cut from 20).
         # Pacer set ~10% under the published limit so client token-bucket /
