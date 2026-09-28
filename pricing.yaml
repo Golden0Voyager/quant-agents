@@ -49,5 +49,4 @@ sensenova:
   # Token Plan it is effectively free (500 calls / 5h per model) — this entry
   # is kept at the official rate for cost-reference only.
   glm-5.2: [1.40, 4.40]
-  sensenova-6.7-flash-lite: [0.22, 0.66]  # legacy compatibility until 2026-08-31
-  sensenova-6.8-flash-lite: [0.22, 0.66]  # temporary carry-over; verify new official rate
+  sensenova-6.8-flash-lite: [0.22, 0.66]  # matches builtin catalog rate (¥1.5 / ¥4.5 per 1M)
