@@ -48,14 +48,31 @@ _ENV_OVERRIDES = {
 }
 
 
-def _coerce(value: str, reference):
-    """Coerce env-var string to the type of the existing default value."""
+# Explicit target types for env overrides whose built-in default is None.
+# _coerce derives the target type from the existing default, which degrades
+# to "keep string" when the default is None — so float-valued knobs like
+# temperature or per-1M token prices would silently become strings here.
+_ENV_TYPES = {
+    "benchmark_ticker": str,
+    "temperature": float,
+    "input_token_price_per_1m": float,
+    "output_token_price_per_1m": float,
+}
+
+
+def _coerce(value: str, reference, target_type=None):
+    """Coerce env-var string to the type of the existing default value.
+
+    Falls back to ``target_type`` when the reference default is None.
+    """
     if isinstance(reference, bool):
         return value.strip().lower() in ("true", "1", "yes", "on")
     if isinstance(reference, int) and not isinstance(reference, bool):
         return int(value)
     if isinstance(reference, float):
         return float(value)
+    if reference is None and target_type is not None:
+        return target_type(value)
     return value
 
 
@@ -65,7 +82,7 @@ def _apply_env_overrides(config: dict) -> dict:
         raw = os.environ.get(env_var)
         if raw is None or raw == "":
             continue
-        config[key] = _coerce(raw, config.get(key))
+        config[key] = _coerce(raw, config.get(key), _ENV_TYPES.get(key))
     return config
 
 

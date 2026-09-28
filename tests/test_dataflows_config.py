@@ -52,12 +52,18 @@ class DataflowsConfigIsolationTests(unittest.TestCase):
         self.assertEqual(fresh["data_vendors"]["fundamental_data"], "smartmoney_db,hithink,akshare,yfinance")
         self.assertEqual(fresh["data_vendors"]["news_data"], "akshare,yfinance")
 
-    def test_nested_dict_updates_merge_one_level_deep(self):
+    def test_nested_dict_updates_do_not_leak_between_set_calls(self):
+        """set_config adopts a fresh default-derived config each call.
+
+        A partial nested update only carries keys it names; keys introduced
+        by an earlier set_config call (but absent from the defaults) must not
+        silently persist into the next adoption.
+        """
         set_config({"tool_vendors": {"get_stock_data": "alpha_vantage"}})
         set_config({"tool_vendors": {"get_news": "alpha_vantage"}})
 
         fresh = get_config()
-        self.assertEqual(fresh["tool_vendors"]["get_stock_data"], "alpha_vantage")
+        self.assertNotIn("get_stock_data", fresh["tool_vendors"])
         self.assertEqual(fresh["tool_vendors"]["get_news"], "alpha_vantage")
 
     def test_get_config_calls_initialize_when_config_is_none(self):
