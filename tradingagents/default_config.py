@@ -109,13 +109,24 @@ _BASE_CONFIG = {
     # portfolio_manager) and the debaters (bull_researcher / bear_researcher
     # / aggressive_debater / neutral_debater / conservative_debater). Roles
     # not listed — or mapped to None / the base model — share the
-    # ``deep_think_llm`` chain. Empty by default: all deep roles run on
-    # deepseek-flash (DeepSeek V4.1 Flash, newest on the SenseNova Token
-    # Plan), the most credit-efficient deep model on the plan (~1/3.3 the
-    # per-token rate of glm-5.2). To shift
-    # work onto Flash-Lite 专属积分 (1:1 返赠通用积分), point the
-    # error-tolerant debater roles at sensenova-6.8-flash-lite.
-    "deep_think_llm_roles": {},
+    # ``deep_think_llm`` chain. Values are either a bare model string (same
+    # provider as ``llm_provider``) or a {"provider": ..., "model": ...} dict
+    # for cross-provider offload.
+    #
+    # Default: the five debate roles (whose output is ~90%+ of deep-tier
+    # tokens and is fault-tolerant by design) are offloaded to Agnes AI's
+    # free-tier agnes-3.0-flash, because deepseek-flash on the SenseNova
+    # Token Plan keeps hitting its conservative 1.7 rpm pacing / credit
+    # limits; the three serial decision roles stay on deepseek-flash where
+    # reasoning density matters most. Agnes quota-exceeded errors fall back
+    # through the deep_think_fallback chain automatically.
+    "deep_think_llm_roles": {
+        "bull_researcher":      {"provider": "agnes", "model": "agnes-3.0-flash"},
+        "bear_researcher":      {"provider": "agnes", "model": "agnes-3.0-flash"},
+        "aggressive_debater":   {"provider": "agnes", "model": "agnes-3.0-flash"},
+        "neutral_debater":      {"provider": "agnes", "model": "agnes-3.0-flash"},
+        "conservative_debater": {"provider": "agnes", "model": "agnes-3.0-flash"},
+    },
     # Per-role quick-think model overrides. Supported roles: the six
     # analysts (market / social / news / fundamentals / governance /
     # industry) and the reflector. Roles not listed — or mapped to None /
@@ -206,6 +217,9 @@ _BASE_CONFIG = {
         "sensenova/sensenova-6.8-flash-lite": 5.0,
         "sensenova/deepseek-flash": 1.7,
         "sensenova": 5.0,
+        # Agnes free tier: conservative pacer until the real per-key quota is
+        # known; 429s still fall back through the deep_think_fallback chain.
+        "agnes/agnes-3.0-flash": 5.0,
     },
     "input_token_price_per_1m": None,
     "output_token_price_per_1m": None,

@@ -297,24 +297,53 @@ class TradingAgentsGraph:
         """Shared per-role LLM builder backing both think tiers.
 
         Every role defaults to ``base_llm``; an entry in
-        ``config[roles_config_key]`` whose model differs from ``base_model``
-        gets a dedicated fallback chain built from ``config_key``. Unknown
-        roles are warned about and ignored; empty or base-equal overrides
-        keep sharing the base chain.
+        ``config[roles_config_key]`` gets a dedicated fallback chain built
+        from ``config_key`` when it points somewhere other than the base
+        model. Two value forms are accepted:
+
+        - ``"some-model"`` — same provider as the tier's base, different
+          model (legacy form).
+        - ``{"provider": ..., "model": ...}`` — a different provider+model
+          pair (cross-provider offload, e.g. routing debate roles to a
+          free-tier provider).
+
+        Unknown roles are warned about and ignored; empty, malformed, or
+        base-equal overrides keep sharing the base chain.
         """
         role_llms: dict[str, Any] = dict.fromkeys(roles, base_llm)
-        for role, model in (self.config.get(roles_config_key) or {}).items():
+        base_provider = self.config.get("llm_provider")
+        for role, override in (self.config.get(roles_config_key) or {}).items():
             if role not in role_llms:
                 logger.warning(f"Unknown {roles_config_key} entry %r ignored", role)
                 continue
-            if not model or model == base_model:
-                continue
+            if isinstance(override, dict):
+                provider = override.get("provider")
+                model = override.get("model")
+                if not provider or not model:
+                    logger.warning(
+                        f"Malformed {roles_config_key} entry for %r ignored: %r",
+                        role,
+                        override,
+                    )
+                    continue
+                if (provider, model) == (base_provider, base_model):
+                    continue
+            else:
+                provider, model = None, override
+                if not model or model == base_model:
+                    continue
             role_llms[role] = self._create_fallback_llm(
-                config_key, llm_kwargs, model_override=model
+                config_key,
+                llm_kwargs,
+                model_override=(
+                    {"provider": provider, "model": model}
+                    if provider
+                    else model
+                ),
             )
         return role_llms
 
-    def _create_fallback_llm(self, config_key: str, llm_kwargs: dict, model_override: str | None = None):
+    def _create_fallback_llm(self, config_key: str, llm_kwargs: dict, model_override: str | dict | None = None):
         """Create an LLM instance with provider fallback chain.
 
         The primary tier comes from the explicit model configuration —
@@ -326,6 +355,11 @@ class TradingAgentsGraph:
         primary's ``invoke`` is patched to try each fallback on transient
         provider errors.
 
+        *model_override* may be a bare model string (same provider as the
+        tier base) or a ``{"provider": ..., "model": ...}`` dict for
+        cross-provider offload; the tier base URL only applies when the
+        override keeps the base provider.
+
         Fallback tiers whose API key is not set in the environment are
         silently skipped so the graph can start even when only the primary
         provider is configured.
@@ -335,8 +369,15 @@ class TradingAgentsGraph:
             return self._fallback_to_legacy(config_key, llm_kwargs)
 
         model_key = "deep_think_llm" if "deep" in config_key else "quick_think_llm"
-        primary_provider = self.config.get("llm_provider")
-        primary_model = model_override or self.config.get(model_key)
+        override_provider: str | None = None
+        override_model: str | None = None
+        if isinstance(model_override, dict):
+            override_provider = model_override.get("provider")
+            override_model = model_override.get("model")
+        else:
+            override_model = model_override
+        primary_provider = override_provider or self.config.get("llm_provider")
+        primary_model = override_model or self.config.get(model_key)
         if not primary_provider or not primary_model:  # pragma: no cover  -- defensive; both are set in default config
             return self._fallback_to_legacy(config_key, llm_kwargs)
 
@@ -350,9 +391,13 @@ class TradingAgentsGraph:
         rpm_map = self.config.get("llm_requests_per_minute") or {}
         llm_chain = []
         for i, entry in enumerate(tiers):
+            # ``backend_url`` belongs to the tier base provider (it is the
+            # SenseNova Token Plan endpoint). It must not leak onto tiers of
+            # a cross-provider role override — those use their provider's
+            # default endpoint.
             tier_base_url = (
                 self.config.get("backend_url")
-                if entry["provider"] == primary_provider
+                if entry["provider"] == primary_provider and not override_provider
                 else None
             )
             tier_kwargs = dict(llm_kwargs)

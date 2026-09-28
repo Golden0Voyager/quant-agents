@@ -671,13 +671,25 @@ class ConstructorTests(unittest.TestCase):
                 ]
                 return [primary, *rest]
 
-            # Constructor builds: base deep chain and quick chain. With no
-            # per-role overrides configured (the default), all three
+            # Constructor builds: base deep chain, quick chain, then one
+            # dedicated chain per non-base role override. The default config
+            # offloads the five debaters to agnes/agnes-3.0-flash; the three
             # structured decision roles share the base deep chain.
             expected = (
                 expected_chain("deep_think_llm", "deep_think_fallback")
                 + expected_chain("quick_think_llm", "quick_think_fallback")
             )
+            for override in (cfg.get("deep_think_llm_roles") or {}).values():
+                if isinstance(override, dict):
+                    primary = (override["provider"], override["model"])
+                else:
+                    primary = (primary_provider, override)
+                rest = [
+                    (e["provider"], e["model"])
+                    for e in cfg["deep_think_fallback"]
+                    if (e["provider"], e["model"]) != primary
+                ]
+                expected += [primary, *rest]
             created = [
                 (c.kwargs["provider"], c.kwargs["model"])
                 for c in mock_create_llm.call_args_list
@@ -695,7 +707,8 @@ class ConstructorTests(unittest.TestCase):
                 f"llm:{primary_provider}:{cfg['quick_think_llm']}",
             )
 
-            # Role LLMs: without overrides, every role shares the base chain.
+            # Role LLMs: the three structured decision roles share the base
+            # chain; the five debaters hold dedicated agnes chains.
             self.assertIs(g.deep_think_role_llms["trader"], g.deep_thinking_llm)
             self.assertIs(
                 g.deep_think_role_llms["portfolio_manager"], g.deep_thinking_llm
@@ -703,6 +716,14 @@ class ConstructorTests(unittest.TestCase):
             self.assertIs(
                 g.deep_think_role_llms["research_manager"], g.deep_thinking_llm
             )
+            for role in (
+                "bull_researcher",
+                "bear_researcher",
+                "aggressive_debater",
+                "neutral_debater",
+                "conservative_debater",
+            ):
+                self.assertIsNot(g.deep_think_role_llms[role], g.deep_thinking_llm)
             # GraphSetup receives the role mapping.
             self.assertIs(
                 mock_graph_setup.call_args.kwargs["role_llms"],
@@ -1239,6 +1260,71 @@ class CreateRoleLlmTests(unittest.TestCase):
             "conservative_debater",
         ):
             self.assertIs(role_llms[role], g.deep_thinking_llm)
+
+    def test_dict_override_routes_to_cross_provider(self):
+        """{"provider": ..., "model": ...} values offload the role to another
+        provider: primary tier uses the override provider with its own default
+        endpoint (base_url must NOT leak the primary provider's backend_url),
+        and the non-duplicate fallback tiers still apply on errors."""
+        g = self._make_graph(
+            {
+                "deep_think_llm_roles": {
+                    "bull_researcher": {
+                        "provider": "agnes",
+                        "model": "agnes-3.0-flash",
+                    },
+                }
+            }
+        )
+        mock_client = MagicMock()
+        mock_client.get_llm.side_effect = lambda: MagicMock(name="agnes_llm")
+
+        with patch(
+            "tradingagents.graph.trading_graph.create_llm_client",
+            return_value=mock_client,
+        ) as mock_create:
+            role_llms = g._create_role_llms({})
+
+        # Primary override tier (agnes) + the single non-duplicate fallback tier.
+        first = mock_create.call_args_list[0].kwargs
+        self.assertEqual(first["provider"], "agnes")
+        self.assertEqual(first["model"], "agnes-3.0-flash")
+        self.assertIsNone(first["base_url"])
+        models = [c.kwargs["model"] for c in mock_create.call_args_list]
+        self.assertEqual(models, ["agnes-3.0-flash", "deepseek-v4-flash"])
+        self.assertIsNot(role_llms["bull_researcher"], g.deep_thinking_llm)
+        self.assertIs(role_llms["bear_researcher"], g.deep_thinking_llm)
+
+    def test_dict_override_equal_to_base_shares_base_chain(self):
+        g = self._make_graph(
+            {
+                "deep_think_llm_roles": {
+                    "trader": {"provider": "sensenova", "model": "glm-5.2"},
+                }
+            }
+        )
+        with patch(
+            "tradingagents.graph.trading_graph.create_llm_client"
+        ) as mock_create:
+            role_llms = g._create_role_llms({})
+
+        mock_create.assert_not_called()
+        self.assertIs(role_llms["trader"], g.deep_thinking_llm)
+
+    def test_malformed_dict_override_is_warned_and_ignored(self):
+        g = self._make_graph(
+            {"deep_think_llm_roles": {"trader": {"provider": "agnes"}}}
+        )
+        with (
+            patch("tradingagents.graph.trading_graph.create_llm_client") as mock_create,
+            patch("tradingagents.graph.trading_graph.logger") as mock_logger,
+        ):
+            role_llms = g._create_role_llms({})
+
+        mock_create.assert_not_called()
+        mock_logger.warning.assert_called_once()
+        self.assertIn("trader", mock_logger.warning.call_args[0][1])
+        self.assertIs(role_llms["trader"], g.deep_thinking_llm)
 
 
 @pytest.mark.unit

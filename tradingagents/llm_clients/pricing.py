@@ -87,6 +87,9 @@ _DEFAULT_PRICING: dict[str, dict[str, Price | dict[str, Any]]] = {
     # https://agnes-ai.com — see also docs/api/Agnes_AI_API_Report.md
     "agnes": {
         "agnes-2.0-flash": (0.00, 0.00),
+        # agnes-3.0-flash: newest free-tier flash; official rate card not
+        # published yet — kept at 0.0 like agnes-2.0-flash, revisit when billed
+        "agnes-3.0-flash": (0.00, 0.00),
     },
     # DeepSeek: official public pricing (cache-miss PEAK rates) — verified
     # 2026-09 against api.deepseek.com. deepseek-flash (DeepSeek-V4.1-Flash):
