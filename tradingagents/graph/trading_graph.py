@@ -32,6 +32,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_dragon_tiger,
     get_earnings_estimates,
     get_earnings_forecast,
+    get_fund_flow,
     get_fundamentals,
     get_global_news,
     get_historical_valuation,
@@ -49,6 +50,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_pledge_ratio,
     get_research_reports,
     get_restricted_release,
+    get_sector_fund_flow,
     get_shareholder_count,
     get_stock_data,
     get_verified_market_snapshot,
@@ -835,8 +837,18 @@ class TradingAgentsGraph:
                             return cached_state, self.process_signal(
                                 cached_state["final_trade_decision"]
                             )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # Degrading to a full re-run is the right outcome, but the
+                    # cause must be observable — a bare pass here made
+                    # malformed state logs and process_signal bugs silent.
+                    logger.warning(
+                        "Could not reuse cached state log for %s on %s; re-running: %s: %s",
+                        ticker,
+                        trade_date,
+                        type(exc).__name__,
+                        exc,
+                        exc_info=True,
+                    )
 
             self._checkpointer_ctx = get_checkpointer(
                 self.config["data_cache_dir"], ticker

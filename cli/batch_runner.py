@@ -251,7 +251,10 @@ class BatchRunner:
         try:
             from tradingagents.ticker_resolver import resolve_ticker
 
-            resolved = resolve_ticker(ticker)
+            # fetch_name=False: this is a pure filesystem lookup — resolving
+            # the company name would fire live vendor requests (yfinance etc.)
+            # and can stall the batch start for minutes on a bad network.
+            resolved = resolve_ticker(ticker, fetch_name=False)
             candidates.add(resolved["ticker"])
             company_name = resolved.get("company_name", "")
             if company_name:

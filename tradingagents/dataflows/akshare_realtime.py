@@ -31,16 +31,26 @@ def _with_retry(fn: Callable, *, attempts: int = 3, delay_s: float = 2.0) -> Any
     Eastmoney/Xueqiu intermittently close the connection (`RemoteDisconnected`)
     or return rate-limit 400s. Each retry waits delay_s * (2 ** i) seconds,
     so attempts=3 yields 2s + 4s = 6s of cumulative back-off before giving up.
+
+    Only transient network errors are retried/absorbed; programming errors
+    (changed akshare schema, TypeError, ...) propagate immediately instead of
+    being masked behind retries. Every attempt is bounded by
+    ``_call_with_timeout`` (AKSHARE_TIMEOUT) so a hung socket cannot block
+    forever, and exhaustion is logged at WARNING so total failure is
+    distinguishable from a legitimately empty result.
     """
-    last_exc = None
+    from .akshare_common import _call_with_timeout, _network_error_types
+
+    network_errors = _network_error_types()
+    last_exc: BaseException | None = None
     for i in range(attempts):
         try:
-            return fn()
-        except Exception as exc:
+            return _call_with_timeout(fn)
+        except network_errors as exc:
             last_exc = exc
             if i < attempts - 1:
-                time.sleep(delay_s * (2 ** i))
-    logger.debug("retry exhausted: %s", last_exc)
+                time.sleep(delay_s * (2**i))
+    logger.warning("realtime fetch failed after %d attempts: %s", attempts, last_exc)
     return None
 
 

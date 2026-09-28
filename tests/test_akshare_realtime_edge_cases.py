@@ -26,12 +26,12 @@ class TestWithRetry:
         fn.assert_called_once()
 
     def test_retries_and_succeeds(self):
-        fn = MagicMock(side_effect=[ValueError("try1"), ValueError("try2"), "ok"])
+        fn = MagicMock(side_effect=[ConnectionError("try1"), ConnectionError("try2"), "ok"])
         assert _with_retry(fn, attempts=3) == "ok"
         assert fn.call_count == 3
 
     def test_exhausts_retries_returns_none(self):
-        fn = MagicMock(side_effect=ValueError("always fails"))
+        fn = MagicMock(side_effect=ConnectionError("always fails"))
         result = _with_retry(fn, attempts=2)
         assert result is None
         assert fn.call_count == 2
@@ -47,8 +47,8 @@ class TestRealtimeSnapshotEdgeCases:
     def test_both_sources_fail_returns_none(self):
         """When both Xueqiu and Eastmoney fail → returns None."""
         with patch("tradingagents.dataflows.akshare_realtime.ak") as mock_ak:
-            mock_ak.stock_individual_spot_xq.side_effect = ValueError("XQ timeout")
-            mock_ak.stock_individual_info_em.side_effect = ValueError("EM timeout")
+            mock_ak.stock_individual_spot_xq.side_effect = ConnectionError("XQ timeout")
+            mock_ak.stock_individual_info_em.side_effect = ConnectionError("EM timeout")
             snap = fetch_realtime_snapshot("600519.SS", xq_token="dummy")
         assert snap is None
 

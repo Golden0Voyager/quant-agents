@@ -135,12 +135,12 @@ class GetYFinDataOnlineTests(unittest.TestCase):
             with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError):
                 get_YFin_data_online(self.symbol, self.start, self.end)
 
-    def test_invalid_dates_raise_no_market_data(self):
-        with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value=self.canonical):
-            mock_ticker = MagicMock()
-            mock_ticker.history.return_value = self.history_df
-            with patch("tradingagents.dataflows.y_finance.yf.Ticker", return_value=mock_ticker), self.assertRaises(NoMarketDataError):
-                get_YFin_data_online(self.symbol, "bad-date", self.end)
+    def test_invalid_dates_raise_value_error(self):
+        # Invalid dates are a caller input error (ValueError), not a
+        # market-data absence — they must not be re-wrapped into
+        # NoMarketDataError for the routing layer.
+        with self.assertRaises(ValueError):
+            get_YFin_data_online(self.symbol, "bad-date", self.end)
 
     def test_generic_exception_raises_no_market_data(self):
         with patch("tradingagents.dataflows.y_finance.normalize_symbol", return_value=self.canonical):

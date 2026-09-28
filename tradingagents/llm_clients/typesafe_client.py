@@ -84,11 +84,14 @@ class TypeSafeNewsGate:
             f"article_{i}": {
                 "type": "noul",
                 "instructions": {
+                    # Defensive access: one malformed article (missing key or
+                    # None body) must degrade only itself, not drop the whole
+                    # batch into the fail-open None path.
                     "article": {
-                        "title": a["title"],
-                        "body": a["body"][:trunc],
-                        "publisher": a["publisher"],
-                        "pub_date": a["pub_date"],
+                        "title": a.get("title") or "",
+                        "body": (a.get("body") or "")[:trunc],
+                        "publisher": a.get("publisher") or "",
+                        "pub_date": a.get("pub_date") or "",
                     },
                     "question": _QUESTION if question is None else question,
                 },
@@ -104,10 +107,25 @@ class TypeSafeNewsGate:
                 timeout=self._timeout,
             )
             resp.raise_for_status()
-            answers = resp.json()["answers"]
-            scores = [answers[f"article_{i}"]["noul"] for i in range(len(judged))]
+            # Per-article defensive extraction: a partial answer set must not
+            # discard the scores that were returned (defaulting to a neutral
+            # 1.0 keeps the gate's meaning intact for unanswered articles).
+            answers = resp.json().get("answers", {})
+            scores = [
+                (answers.get(f"article_{i}") or {}).get("noul", 1.0)
+                for i in range(len(judged))
+            ]
         except Exception as exc:  # noqa: BLE001 — 门控故障绝不外抛
-            logger.warning("Jev news gate scoring failed: %s", exc)
+            # Log status when available: a persistent 401/403 (revoked/wrong
+            # key) must be distinguishable from a transient network blip so
+            # misconfiguration is not silently fail-open forever.
+            status = getattr(locals().get("resp", None), "status_code", None)
+            logger.warning(
+                "Jev news gate scoring failed (status=%s): %s: %s",
+                status,
+                type(exc).__name__,
+                exc,
+            )
             return None
         scores.extend([1.0] * (len(articles) - len(judged)))
         return scores

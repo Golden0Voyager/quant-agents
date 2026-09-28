@@ -25,7 +25,9 @@ def safe_prefetch(label: str, fetch: Callable[[], str]) -> str:
         detail = "empty response"
     except Exception as exc:  # noqa: BLE001 - enrichment must degrade gracefully
         logger.warning("%s prefetch failed: %s", label, exc)
-        detail = type(exc).__name__
+        # Include the message (truncated): for vendor failures it is the
+        # root-cause detail, and the analyst prompt is a key diagnostic.
+        detail = f"{type(exc).__name__}: {exc}"[:200]
     return (
         f"DATA_UNAVAILABLE: {label} could not be retrieved ({detail}). "
         "Proceed without it; do not fabricate values."
