@@ -73,10 +73,10 @@ class StaleGuardUnitTests(unittest.TestCase):
         # holiday, so missing == 1 is exactly the anchor day itself.
         # Run Monday 10:00 Shanghai (pre-close): the bar cannot exist
         # yet, so the prior close must be accepted.
-        import datetime as _dt
-        from zoneinfo import ZoneInfo as _ZI
+        import datetime as dt
+        from zoneinfo import ZoneInfo
 
-        preclose = _dt.datetime(2026, 9, 28, 10, 0, tzinfo=_ZI("Asia/Shanghai"))
+        preclose = dt.datetime(2026, 9, 28, 10, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
         with mock.patch(
             "tradingagents.dataflows.stockstats_utils._now_shanghai",
             create=True,
@@ -88,17 +88,19 @@ class StaleGuardUnitTests(unittest.TestCase):
         # Same gap but run Monday 16:00 Shanghai (post-close): the bar
         # should have been published, so missing == 1 still means a
         # skipped pipeline day and must be rejected.
-        import datetime as _dt
-        from zoneinfo import ZoneInfo as _ZI
+        import datetime as dt
+        from zoneinfo import ZoneInfo
 
-        postclose = _dt.datetime(2026, 9, 28, 16, 0, tzinfo=_ZI("Asia/Shanghai"))
-        with mock.patch(
-            "tradingagents.dataflows.stockstats_utils._now_shanghai",
-            create=True,
-            return_value=postclose,
+        postclose = dt.datetime(2026, 9, 28, 16, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+        with (
+            mock.patch(
+                "tradingagents.dataflows.stockstats_utils._now_shanghai",
+                create=True,
+                return_value=postclose,
+            ),
+            self.assertRaises(NoMarketDataError),
         ):
-            with self.assertRaises(NoMarketDataError):
-                _assert_ohlcv_not_stale(_frame("2026-09-24"), "2026-09-28", "X")
+            _assert_ohlcv_not_stale(_frame("2026-09-24"), "2026-09-28", "X")
 
     def test_unparseable_curr_date_passes_through(self):
         _assert_ohlcv_not_stale(_frame("2026-06-10"), "bad-date", "CB")
