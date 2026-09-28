@@ -217,9 +217,11 @@ _BASE_CONFIG = {
         "sensenova/sensenova-6.8-flash-lite": 5.0,
         "sensenova/deepseek-flash": 1.7,
         "sensenova": 5.0,
-        # Agnes free tier: conservative pacer until the real per-key quota is
-        # known; 429s still fall back through the deep_think_fallback chain.
-        "agnes/agnes-3.0-flash": 5.0,
+        # Agnes free tier: 10 RPM per the 2026-09-23 notice (50% cut from 20).
+        # Pacer set ~10% under the published limit so client token-bucket /
+        # server window misalignment never trips a 429; excess still falls
+        # back through the deep_think_fallback chain.
+        "agnes/agnes-3.0-flash": 9.0,
     },
     "input_token_price_per_1m": None,
     "output_token_price_per_1m": None,
