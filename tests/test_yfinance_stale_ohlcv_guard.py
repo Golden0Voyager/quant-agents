@@ -68,6 +68,38 @@ class StaleGuardUnitTests(unittest.TestCase):
         with self.assertRaises(NoMarketDataError):
             _assert_ohlcv_not_stale(_frame("2026-06-03"), "2026-06-10", "X")
 
+    def test_intraday_missing_anchor_day_accepted_preclose(self):
+        # 2026-09-24 (Thu) -> 2026-09-28 (Mon): 09-25 is Mid-Autumn
+        # holiday, so missing == 1 is exactly the anchor day itself.
+        # Run Monday 10:00 Shanghai (pre-close): the bar cannot exist
+        # yet, so the prior close must be accepted.
+        import datetime as _dt
+        from zoneinfo import ZoneInfo as _ZI
+
+        preclose = _dt.datetime(2026, 9, 28, 10, 0, tzinfo=_ZI("Asia/Shanghai"))
+        with mock.patch(
+            "tradingagents.dataflows.stockstats_utils._now_shanghai",
+            create=True,
+            return_value=preclose,
+        ):
+            _assert_ohlcv_not_stale(_frame("2026-09-24"), "2026-09-28", "X")
+
+    def test_intraday_missing_anchor_day_rejected_postclose(self):
+        # Same gap but run Monday 16:00 Shanghai (post-close): the bar
+        # should have been published, so missing == 1 still means a
+        # skipped pipeline day and must be rejected.
+        import datetime as _dt
+        from zoneinfo import ZoneInfo as _ZI
+
+        postclose = _dt.datetime(2026, 9, 28, 16, 0, tzinfo=_ZI("Asia/Shanghai"))
+        with mock.patch(
+            "tradingagents.dataflows.stockstats_utils._now_shanghai",
+            create=True,
+            return_value=postclose,
+        ):
+            with self.assertRaises(NoMarketDataError):
+                _assert_ohlcv_not_stale(_frame("2026-09-24"), "2026-09-28", "X")
+
     def test_unparseable_curr_date_passes_through(self):
         _assert_ohlcv_not_stale(_frame("2026-06-10"), "bad-date", "CB")
 

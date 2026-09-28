@@ -38,6 +38,29 @@ MAX_OHLCV_STALE_SESSIONS = 1
 # offset make a trading-session count meaningless here.
 MAX_GLOBAL_OHLCV_STALE_DAYS = 5
 
+# A-share cash session closes at 15:00 Asia/Shanghai. Before that the
+# anchor day's bar physically cannot exist, so a one-session lag intraday
+# is "not yet published", not "pipeline skipped a day".
+ASHG_CLOSE_HOUR = 15
+
+
+def _now_shanghai():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    return datetime.now(ZoneInfo("Asia/Shanghai"))
+
+
+def _is_today_preclose(anchor: str) -> bool:
+    from datetime import datetime
+
+    try:
+        anchor_day = datetime.strptime(str(anchor)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return False
+    now = _now_shanghai()
+    return anchor_day == now.date() and (now.hour, now.minute) < (ASHG_CLOSE_HOUR, 0)
+
 
 def yf_retry(func, max_retries=3, base_delay=2.0):
     """Execute a yfinance call with exponential backoff on rate limits.
@@ -176,6 +199,8 @@ def _assert_ohlcv_not_stale(
         return
     missing = trading_sessions_between(str(latest.date()), str(requested.date())[:10])
     if missing is None:
+        return
+    if missing == max_stale_sessions and _is_today_preclose(curr_date):
         return
     if missing >= max_stale_sessions:
         raise NoMarketDataError(
