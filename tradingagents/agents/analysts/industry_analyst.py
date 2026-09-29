@@ -79,6 +79,18 @@ def create_industry_analyst(llm):
         market = state.get("market") or infer_market(ticker)
         market_tools, bound_llm = bound_tools.get(market)
 
+        regime_block = (state.get("market_regime_report") or "").strip()
+        regime_section = (
+            " Whole-market regime context for "
+            f"{current_date} (A-share, identical for every stock analysed today — use it to "
+            "position the sector view within the market environment):\n\n"
+            "<start_of_market_regime>\n"
+            f"{regime_block}\n"
+            "<end_of_market_regime>\n"
+            if regime_block
+            else ""
+        )
+
         company_line = f"Target company: {company_name} ({ticker}). " if company_name else ""
         system_message = (
             company_line +
@@ -91,6 +103,7 @@ def create_industry_analyst(llm):
             "underlying commodity spot/futures evidence into the industry view. "
             "Highlight any valuation anomalies or regime shifts. Provide specific, actionable "
             "insights with supporting evidence to help traders make informed decisions."
+            + regime_section
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
             + (
                 "\n\n## Missing Data Protocol\n"

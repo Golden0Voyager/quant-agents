@@ -1087,6 +1087,35 @@ class TradingAgentsGraph:
                     exc,
                 )
 
+        # Build the shared whole-market regime report once per trading date
+        # (A-share runs only). Process + disk caches make tickers 2..N of a
+        # batch reuse the first ticker's synthesis, so a 24-ticker batch pays
+        # for one LLM call instead of 24 and every ticker shares the same
+        # market context.
+        if (
+            self.config.get("market_regime_enabled", True)
+            and not resume_from_checkpoint
+            and not init_agent_state.get("market_regime_report")
+            and runtime_context.market == "XSHG"
+        ):
+            try:
+                from tradingagents.dataflows.market_regime import (
+                    get_market_regime_report,
+                )
+
+                init_agent_state["market_regime_report"] = get_market_regime_report(
+                    str(trade_date),
+                    llm=self.quick_thinking_llm,
+                    data_cache_dir=self.config.get("data_cache_dir"),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Could not build market regime report for %s on %s: %s",
+                    company_name,
+                    trade_date,
+                    exc,
+                )
+
         # Always use stream() for per-node timing collection.
         # Override to "updates" mode so each chunk is {node_name: {changed_fields}}.
         timings = []

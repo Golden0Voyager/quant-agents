@@ -77,6 +77,7 @@ class Propagator:
             "market_report": "",
             "verified_market_snapshot": "",
             "verified_fundamentals_snapshot": "",
+            "market_regime_report": "",
             "fundamentals_report": "",
             "sentiment_report": "",
             "news_report": "",

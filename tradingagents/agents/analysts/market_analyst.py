@@ -106,6 +106,24 @@ Benchmark stocks with their call-auction pct change and sector tags: a quick rea
 <end_of_short_term_benchmark>
 """
 
+        regime_block = (state.get("market_regime_report") or "").strip()
+        regime_section = (
+            f"""
+## Pre-fetched whole-market regime context (A-share, shared across all analysed stocks for {current_date})
+
+The block below is a market-wide environment report for the analysis date (index performance,
+market breadth, risk grade, trend). It is identical for every stock analysed on this date —
+use it as environment context for {ticker}, not as stock-specific evidence. Your own analysis
+must remain stock-specific.
+
+<start_of_market_regime>
+{regime_block}
+<end_of_market_regime>
+"""
+            if regime_block
+            else ""
+        )
+
         ticker_guard = (
             f"TICKER VERIFICATION — You are analyzing {company_name} ({ticker}). "
             f"DO NOT change the company, ticker, or industry focus. ALL data calls "
@@ -140,6 +158,7 @@ Volume-Based Indicators:
 - Select indicators that provide diverse and complementary information. Avoid redundancy (e.g., do not select both rsi and stochrsi). Also briefly explain why they are suitable for the given market context. When calling an available indicator tool, use the exact indicator names above because they are defined parameters. If tool outputs conflict, flag the discrepancy rather than inventing a reconciled number. Do not claim historical validation, support/resistance bounces, or exact percentage moves unless directly supported by concrete dates and prices."""
             + tool_guidance_for(market_tools, tool_guidance)
             + auction_section
+            + regime_section
             + " Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
             + (

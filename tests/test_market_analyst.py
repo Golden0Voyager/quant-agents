@@ -458,3 +458,37 @@ class TestMarketFullCoverageTools:
         full_text = captured.get("full", "")
         for expected in ("get_option_sentiment", "get_ah_premium", "get_cb_redeem"):
             assert expected in full_text, expected
+
+
+@pytest.mark.unit
+class TestMarketAnalystRegimeContext:
+    """The shared whole-market regime report is injected when present in state."""
+
+    def _capturing_llm(self):
+        llm = MagicMock()
+        captured = {}
+
+        def capture_invoke(messages):
+            captured["prompt"] = str(messages)
+            result = MagicMock()
+            result.content = "Analysis"
+            result.tool_calls = []
+            result.additional_kwargs = {}
+            return result
+
+        bound_llm = MagicMock()
+        bound_llm.side_effect = capture_invoke
+        llm.bind_tools.return_value = bound_llm
+        return llm, captured
+
+    def test_regime_block_included_when_state_carries_report(self):
+        llm, captured = self._capturing_llm()
+        state = dict(_BASE_STATE, market_regime_report="🟡 中等风险，➡️ 震荡（共享市场环境）")
+        create_market_analyst(llm)(state)
+        assert "start_of_market_regime" in captured["prompt"]
+        assert "🟡 中等风险，➡️ 震荡（共享市场环境）" in captured["prompt"]
+
+    def test_regime_block_absent_when_state_empty(self):
+        llm, captured = self._capturing_llm()
+        create_market_analyst(llm)(dict(_BASE_STATE))
+        assert "start_of_market_regime" not in captured["prompt"]

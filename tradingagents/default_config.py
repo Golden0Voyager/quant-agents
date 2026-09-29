@@ -14,6 +14,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_QUICK_THINK_LLM":      "quick_think_llm",
     "TRADINGAGENTS_LLM_BACKEND_URL":      "backend_url",
     "TRADINGAGENTS_OUTPUT_LANGUAGE":      "output_language",
+    "TRADINGAGENTS_MARKET_REGIME_ENABLED": "market_regime_enabled",
     "TRADINGAGENTS_MAX_DEBATE_ROUNDS":    "max_debate_rounds",
     "TRADINGAGENTS_MAX_RISK_ROUNDS":      "max_risk_discuss_rounds",
     "TRADINGAGENTS_CHECKPOINT_ENABLED":   "checkpoint_enabled",
@@ -177,6 +178,12 @@ _BASE_CONFIG = {
     # Output language for analyst reports and final decision
     # Internal agent debate stays in English for reasoning quality
     "output_language": "Chinese",
+    # Shared whole-market regime report for A-share runs (index performance +
+    # market breadth from the local quant_core.db, one LLM synthesis per
+    # trading date, cached in-process and on disk). Injected into the Market
+    # and Industry analysts so every ticker in a batch is judged against the
+    # same market context. Disable with TRADINGAGENTS_MARKET_REGIME_ENABLED=false.
+    "market_regime_enabled": True,
     # Token pricing overrides (fallback for unknown models in cost estimation)
     # Provider fallback chains: when the primary LLM returns a transient
     # error (quota exceeded, rate limit, 5xx), the system tries each
