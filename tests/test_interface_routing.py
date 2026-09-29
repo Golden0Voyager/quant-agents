@@ -489,6 +489,27 @@ class TestRouteToVendorSentinel(unittest.TestCase):
             )
         self.assertIn("NO_DATA_AVAILABLE", result)
 
+    def test_margin_trading_empty_degrades_to_sentinel(self):
+        """Regression (2026-09-28 batch, 605299.SS): smartmoney had no local
+        margin rows and the online fallback errored too. Before the fix
+        smartmoney raised a bare RuntimeError, which escaped the router
+        (governance_risk is not optional) and aborted the whole ticker run.
+        The empty result must degrade to a NO_DATA_AVAILABLE sentinel."""
+        from tradingagents.dataflows import interface
+
+        def raises_no_data(symbol, *a, **k):
+            raise NoMarketDataError(symbol, symbol, "no margin rows")
+
+        def raises_generic(symbol, *a, **k):
+            raise RuntimeError("akshare online fetch failed")
+
+        patched = {"smartmoney_db": raises_no_data, "akshare": raises_generic}
+        with patch.dict(
+            interface.VENDOR_METHODS, {"get_margin_trading": patched}, clear=False
+        ):
+            result = interface.route_to_vendor("get_margin_trading", "605299.SS")
+        self.assertIn("NO_DATA_AVAILABLE", result)
+
 
 # ===========================================================================
 # Regression: every tool bound by analysts must route through a category.
