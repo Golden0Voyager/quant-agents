@@ -66,11 +66,12 @@ def apply_news_gate(
     return kept, demoted
 
 
-def _log_decision(config, symbol, articles, scores, kept, demoted, shadow):
+def _log_decision(config, symbol, articles, scores, kept, demoted, shadow, source="news"):
     path = os.path.join(config.get("data_cache_dir", "."), "jev_gate_decisions.jsonl")
     record = {
         "ts": datetime.now(timezone.utc).isoformat(),  # noqa: UP017 — datetime.UTC needs 3.11+, floor is 3.10
         "symbol": symbol,
+        "source": source,
         "shadow": shadow,
         "articles": [
             {"title": a["title"], "score": s, "kept": i in kept}

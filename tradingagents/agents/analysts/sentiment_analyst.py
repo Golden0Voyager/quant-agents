@@ -16,6 +16,13 @@ the LLM is invoked and injects them into the prompt as structured blocks:
 
 StockTwits and Reddit were removed in 2026-Q3 because their public
 endpoints became reliably unreliable (StockTwits 403, Reddit SSL errors).
+They are available again as an OPT-IN enrichment (``social_posts_enabled``,
+default off): the fetchers have since gained graceful degradation and the
+posts are Jev-screened (``jev_post_gate_*``) before they reach the prompt,
+so enabling them no longer reintroduces the fabrication pressure that led
+to their removal — off-topic and promotional posts are dropped, and the
+block says how many were kept. Only fetched for markets with real coverage
+(XHKG / XNYS / CRYPTO; A-shares stay on the Eastmoney sources).
 
 The agent does not use tool-calling; the data is in the prompt from
 turn 0. Output uses the structured-output pattern (json_schema for
@@ -47,10 +54,24 @@ from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
+from tradingagents.dataflows import post_gate, reddit, stocktwits
+from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.interface import route_to_vendor
 from tradingagents.market_context import infer_market
 
 logger = logging.getLogger(__name__)
+
+
+def _fetch_stocktwits_screened(ticker: str, company_name: str = "") -> str:
+    """StockTwits block with Jev post screening applied (when configured)."""
+    screen = post_gate.make_post_screen(ticker, company_name, source="stocktwits")
+    return stocktwits.fetch_stocktwits_messages(ticker, screen=screen)
+
+
+def _fetch_reddit_screened(ticker: str, company_name: str = "") -> str:
+    """Reddit block with Jev post screening applied (when configured)."""
+    screen = post_gate.make_post_screen(ticker, company_name, source="reddit")
+    return reddit.fetch_reddit_posts(ticker, screen=screen)
 
 
 def _seven_days_back(trade_date: str) -> str:
@@ -108,6 +129,29 @@ def create_sentiment_analyst(llm):
             lambda: route_to_vendor("get_anomaly_reason", ticker),
         )
 
+        # Opt-in global social posts (StockTwits / Reddit), Jev-screened.
+        # Disabled by default: removed in 2026-Q3 for endpoint flakiness,
+        # restored as an opt-in with screening + graceful degradation.
+        social_enabled = get_config().get("social_posts_enabled", False)
+        if social_enabled:
+            stocktwits_block = prefetch_for_market(
+                "fetch_stocktwits_messages",
+                market,
+                "StockTwits messages",
+                lambda: _fetch_stocktwits_screened(ticker, company_name),
+            )
+            reddit_block = prefetch_for_market(
+                "fetch_reddit_posts",
+                market,
+                "Reddit discussion posts",
+                lambda: _fetch_reddit_screened(ticker, company_name),
+            )
+        else:
+            stocktwits_block = reddit_block = (
+                "<social posts not enabled: set TRADINGAGENTS_SOCIAL_POSTS_ENABLED=true "
+                "to fetch StockTwits / Reddit (Jev-screened) for non-A-share markets>"
+            )
+
         system_message = _build_system_message(
             ticker=ticker,
             company_name=company_name,
@@ -118,6 +162,8 @@ def create_sentiment_analyst(llm):
             guba_block=guba_block,
             hot_keywords_block=hot_keywords_block,
             anomaly_block=anomaly_block,
+            stocktwits_block=stocktwits_block,
+            reddit_block=reddit_block,
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -177,13 +223,15 @@ def _build_system_message(
     guba_block: str,
     hot_keywords_block: str,
     anomaly_block: str,
+    stocktwits_block: str,
+    reddit_block: str,
 ) -> str:
     """Assemble the sentiment-analyst system message with structured data blocks."""
     ticker_guard = (
         f"TICKER VERIFICATION — The assigned company is {company_name} ({ticker}). "
         f"DO NOT change the company, ticker, or industry focus.\n\n"
     ) if company_name else ""
-    return ticker_guard + f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on three complementary data sources that have already been collected for you.
+    return ticker_guard + f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on the complementary data sources collected for you below.
 
 ## Data sources (pre-fetched, in this prompt)
 
@@ -226,6 +274,20 @@ HiThink (同花顺) anomaly analysis: when the stock hit a limit or moved abnorm
 {anomaly_block}
 <end_of_anomaly>
 
+### StockTwits — retail trader messages (global, English; opt-in)
+Individual retail-trader messages with Bullish/Bearish labels where the author set one. When the block opens with a "Screened by Jev" line, off-topic/promotional posts were already dropped and the counts that follow cover the kept posts only. Coverage is thin for A-shares; for non-A-share tickers with no stream the block says so.
+
+<start_of_stocktwits>
+{stocktwits_block}
+<end_of_stocktwits>
+
+### Reddit — retail discussion posts (global, English; opt-in)
+Posts from finance subreddits mentioning the ticker, with score/comment counts when available. Same Jev screening contract as the StockTwits block: a "Screened by Jev" line means off-topic posts were dropped.
+
+<start_of_reddit>
+{reddit_block}
+<end_of_reddit>
+
 ## How to analyze this data (best practices)
 
 1. **Read the 人气排名 trend as a retail-attention signal.** A stock rising in rank (lower number = better) with increasing 铁杆粉丝 ratio suggests growing retail conviction. A sudden spike into the top 10 without a news catalyst may indicate coordinated retail attention (contrarian risk).
@@ -251,7 +313,7 @@ Fill the following fields:
   - **overall_band**: Exactly one of Bullish / Mildly Bullish / Neutral / Mixed / Mildly Bearish / Bearish. Use Mixed when sources point in clearly different directions; Neutral only when all sources are genuinely silent.
   - **overall_score**: A number from 0 (maximally bearish) to 10 (maximally bullish); 5 is neutral. Keep it consistent with overall_band.
   - **confidence**: low / medium / high, based on data quality and sample size.
-  - **narrative**: Full source-by-source breakdown (news + Eastmoney hot rank + Guba sentiment + market hot keywords), divergences, dominant narrative themes, catalysts and risks, and a markdown summary table of key sentiment signals (direction, source, supporting evidence).
+  - **narrative**: Full source-by-source breakdown (news + Eastmoney hot rank + Guba sentiment + market hot keywords + social posts when present), divergences, dominant narrative themes, catalysts and risks, and a markdown summary table of key sentiment signals (direction, source, supporting evidence).
 
 {get_language_instruction()}"""
 

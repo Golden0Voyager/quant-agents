@@ -351,3 +351,42 @@ class TestRedditEdgeCases(unittest.TestCase):
         with patch("tradingagents.dataflows.reddit._fetch_subreddit", return_value=[]):
             result = fetch_reddit_posts("NVDA", subreddits=("stocks",), inter_request_delay=0, limit_per_sub=5)
         self.assertIn("<no Reddit posts found", result)
+
+    def test_screen_drops_off_topic_posts(self):
+        """The Jev post screen receives title + body per post; off-topic posts
+        are dropped from the block and the note heads the subreddit block."""
+        from tradingagents.dataflows.reddit import fetch_reddit_posts
+
+        posts = [
+            {"title": "Real NVDA catalyst discussion", "selftext": "Datacenter demand...",
+             "created_utc": 1700000000, "source": "rss"},
+            {"title": "Spam coin shill", "selftext": "buy my token",
+             "created_utc": 1700000100, "source": "rss"},
+        ]
+
+        def screen(texts):
+            assert len(texts) == 2
+            assert "Real NVDA catalyst discussion" in texts[0]
+            return [True, False], "Screened by Jev: 1 of the 2 posts kept."
+
+        with patch("tradingagents.dataflows.reddit._fetch_subreddit", return_value=posts), \
+             patch("tradingagents.dataflows.reddit.time.sleep"):
+            result = fetch_reddit_posts("NVDA", subreddits=("stocks",), limit_per_sub=5,
+                                        inter_request_delay=0, screen=screen)
+        self.assertIn("Screened by Jev", result)
+        self.assertIn("Real NVDA catalyst discussion", result)
+        self.assertNotIn("Spam coin shill", result)
+        self.assertIn("1 recent posts mentioning NVDA", result)
+
+    def test_screen_dropping_everything_per_sub(self):
+        from tradingagents.dataflows.reddit import fetch_reddit_posts
+
+        posts = [{"title": "off topic", "selftext": "", "created_utc": 1700000000,
+                  "source": "rss"}]
+        with patch("tradingagents.dataflows.reddit._fetch_subreddit", return_value=posts), \
+             patch("tradingagents.dataflows.reddit.time.sleep"):
+            result = fetch_reddit_posts("NVDA", subreddits=("stocks",), limit_per_sub=5,
+                                        inter_request_delay=0,
+                                        screen=lambda texts: ([False], "note"))
+        self.assertIn("after screening", result)
+        self.assertIn("1 fetched", result)

@@ -192,6 +192,7 @@ def fetch_reddit_posts(
     limit_per_sub: int = 5,
     timeout: float = 10.0,
     inter_request_delay: float = 1.0,
+    screen=None,
 ) -> str:
     """Fetch recent Reddit posts mentioning ``ticker`` across finance
     subreddits and return them as a formatted plaintext block.
@@ -199,6 +200,11 @@ def fetch_reddit_posts(
     ``inter_request_delay`` paces the (now RSS-only) per-subreddit requests to
     stay under Reddit's public per-IP rate limit; combined with the RSS-first
     path it makes 429s rare even when several analyses run back-to-back.
+
+    ``screen`` is an optional post screen (see
+    :mod:`tradingagents.dataflows.post_gate`): it receives each post's
+    title + body text and returns one keep flag per post plus a note line.
+    Off-topic posts are dropped from the block; the note heads the block.
     """
     # Materialize up front: ``subreddits`` is iterated twice (fetch loop and
     # the empty-result summary), which silently yields nothing on the second
@@ -215,10 +221,27 @@ def fetch_reddit_posts(
             blocks.append(f"r/{sub}: <no posts found mentioning {ticker.upper()} in the past 7 days>")
             continue
 
+        note = ""
+        if screen is not None:
+            # The screen judges title + body (pre-truncation); the formatted
+            # block only ever contains kept posts.
+            texts = [
+                ((p.get("title") or "") + "\n" + (p.get("selftext") or "")).strip()
+                for p in posts
+            ]
+            keep, note = screen(texts)
+            posts = [p for p, k in zip(posts, keep, strict=True) if k]
+            if not posts:
+                blocks.append(
+                    f"r/{sub}: <no posts about {ticker.upper()} remain after "
+                    f"screening; {len(texts)} fetched>"
+                )
+                continue
+
         via_rss = any(p.get("source") == "rss" for p in posts)
         header = f"r/{sub} — {len(posts)} recent posts mentioning {ticker.upper()}"
         header += " (via RSS feed; scores/comments unavailable):" if via_rss else ":"
-        lines = [header]
+        lines = [note, header] if note else [header]
         for p in posts:
             title = (p.get("title") or "").replace("\n", " ").strip()
             score = p.get("score")
