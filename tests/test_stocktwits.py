@@ -443,5 +443,94 @@ def test_old_messages_filtered_by_days_back():
     assert "This is old" not in result  # old message should be filtered out
 
 
+def test_html_entities_decoded_in_message_bodies():
+    """Upstream 4187716: StockTwits serves bodies HTML-escaped (``&amp;``,
+    ``&#39;``). The prompt must see plain text, not entities."""
+    now = datetime.now(UTC)
+    messages = [
+        {
+            "created_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "body": "S&amp;P wasn&#39;t up but this stock was",
+            "user": {"username": "trader1"},
+        },
+    ]
+    payload = json.dumps({"messages": messages}).encode("utf-8")
+
+    with patch("tradingagents.dataflows.stocktwits.urlopen") as mock:
+        mock_resp = MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.read.return_value = payload
+        mock.return_value = mock_resp
+
+        result = fetch_stocktwits_messages("AAPL", limit=5, days_back=7)
+    assert "S&P wasn't up" in result
+    assert "&amp;" not in result
+    assert "&#39;" not in result
+
+
+def test_screen_drops_off_topic_messages():
+    """A screen that flags the second body off-topic removes it from the
+    block, recomputes the counts, and prepends the note."""
+    now = datetime.now(UTC)
+    messages = [
+        {
+            "created_at": (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "body": "Real news about the company",
+            "user": {"username": "real1"},
+            "entities": {"sentiment": {"basic": "Bullish"}},
+        },
+        {
+            "created_at": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "body": "Spam promoting another ticker",
+            "user": {"username": "spammer"},
+            "entities": {"sentiment": {"basic": "Bullish"}},
+        },
+    ]
+    payload = json.dumps({"messages": messages}).encode("utf-8")
+
+    def screen(bodies):
+        assert len(bodies) == 2
+        return [True, False], "Screened by Jev: 1 of the 2 posts kept."
+
+    with patch("tradingagents.dataflows.stocktwits.urlopen") as mock:
+        mock_resp = MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.read.return_value = payload
+        mock.return_value = mock_resp
+
+        result = fetch_stocktwits_messages("AAPL", limit=5, days_back=7, screen=screen)
+    assert "Screened by Jev" in result
+    assert "Real news about the company" in result
+    assert "Spam promoting" not in result
+    # Counts reflect only the kept message.
+    assert "Bullish: 1 (100%)" in result
+    assert "Total: 1 most-recent" in result
+
+
+def test_screen_dropping_everything_returns_placeholder():
+    now = datetime.now(UTC)
+    messages = [
+        {
+            "created_at": (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "body": "irrelevant",
+            "user": {"username": "u1"},
+        },
+    ]
+    payload = json.dumps({"messages": messages}).encode("utf-8")
+
+    with patch("tradingagents.dataflows.stocktwits.urlopen") as mock:
+        mock_resp = MagicMock()
+        mock_resp.__enter__.return_value = mock_resp
+        mock_resp.read.return_value = payload
+        mock.return_value = mock_resp
+
+        result = fetch_stocktwits_messages(
+            "AAPL", limit=5, days_back=7,
+            screen=lambda bodies: ([False], "note"),
+        )
+    assert "after screening" in result
+    assert "1 fetched" in result
+
+
 if __name__ == "__main__":
     unittest.main()

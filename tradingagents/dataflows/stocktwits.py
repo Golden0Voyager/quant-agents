@@ -14,6 +14,7 @@ network call succeeded.
 
 from __future__ import annotations
 
+import html
 import http.client
 import json
 import logging
@@ -28,12 +29,18 @@ _UA = "tradingagents/0.2 (+https://github.com/TauricResearch/TradingAgents)"
 
 def fetch_stocktwits_messages(
     ticker: str, limit: int = 30, timeout: float = 10.0, days_back: int = 7,
+    screen=None,
 ) -> str:
     """Fetch recent StockTwits messages for ``ticker`` and return them as a
     formatted plaintext block ready for prompt injection.
 
     ``days_back`` filters out messages older than N days (default 7) to
     prevent stale sentiment from influencing backdated analyses.
+
+    ``screen`` is an optional post screen (see
+    :mod:`tradingagents.dataflows.post_gate`): it receives the raw message
+    bodies and returns one keep flag per body plus a note line. Off-topic
+    messages are dropped from the block; the note heads the summary.
 
     Returns a placeholder string when the endpoint is unreachable, the
     symbol has no messages, or the response shape is unexpected — the
@@ -70,15 +77,29 @@ def fetch_stocktwits_messages(
                 filtered.append(m)
         messages = filtered
 
+    selected = messages[:limit]
+    note = ""
+    if screen is not None and selected:
+        # The screen judges raw bodies (pre-truncation); the formatted block
+        # only ever contains kept messages.
+        bodies = [html.unescape(m.get("body") or "") for m in selected]
+        keep, note = screen(bodies)
+        selected = [m for m, k in zip(selected, keep, strict=True) if k]
+        if not selected:
+            return (
+                f"<no StockTwits messages about ${ticker.upper()} remain "
+                f"after screening; {len(bodies)} fetched>"
+            )
+
     lines = []
     bullish = bearish = unlabeled = 0
-    for m in messages[:limit]:
+    for m in selected:
         created = m.get("created_at", "")
         user = (m.get("user") or {}).get("username", "?")
         entities = m.get("entities") or {}
         sentiment_obj = entities.get("sentiment") or {}
         sentiment = sentiment_obj.get("basic") if isinstance(sentiment_obj, dict) else None
-        body = (m.get("body") or "").replace("\n", " ").strip()
+        body = html.unescape(m.get("body") or "").replace("\n", " ").strip()
         if len(body) > 280:
             body = body[:280] + "…"
 
@@ -102,4 +123,6 @@ def fetch_stocktwits_messages(
         f"Unlabeled: {unlabeled} · "
         f"Total: {total} most-recent messages"
     )
+    if note:
+        summary = note + "\n" + summary
     return summary + "\n\n" + "\n".join(lines)
