@@ -26,6 +26,7 @@ from .akshare_vendor import (
     get_fund_flow as get_akshare_fund_flow,
     get_fundamentals as get_akshare_fundamentals,
     get_global_news as get_akshare_global_news,
+    get_hk_stock_data as get_akshare_hk_stock_data,
     get_income_statement as get_akshare_income_statement,
     get_indicators as get_akshare_indicators,
     get_industry_valuation as get_akshare_industry_valuation,
@@ -1039,6 +1040,9 @@ VENDOR_METHODS: dict[str, dict[str, Any]] = {
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
         "akshare": get_akshare_stock_data,
+        # Sina-sourced HK daily bars; serves *.HK only, bails cheaply on
+        # other symbols. Sits after yfinance so US tickers are unaffected.
+        "akshare_hk": get_akshare_hk_stock_data,
     },
     "get_index_daily": {
         "smartmoney_db": get_smartmoney_index_daily,

@@ -55,6 +55,7 @@ from tradingagents.market_context import AnalysisDates
                     "alpha_vantage",
                     "yfinance",
                     "akshare",
+                    "akshare_hk",
                 ),
             ),
         ),

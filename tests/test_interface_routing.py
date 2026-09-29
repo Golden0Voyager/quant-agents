@@ -510,6 +510,31 @@ class TestRouteToVendorSentinel(unittest.TestCase):
             result = interface.route_to_vendor("get_margin_trading", "605299.SS")
         self.assertIn("NO_DATA_AVAILABLE", result)
 
+    def test_hk_ticker_falls_through_to_akshare_hk(self):
+        """Regression (2026-09-28 batch, 1810.HK): local archive has no HK
+        rows and yfinance's cookie/crumb handshake is unreachable from this
+        network, so *.HK tickers must survive to the akshare_hk tier."""
+        from tradingagents.dataflows import interface
+
+        def raises_no_data(symbol, *a, **k):
+            raise NoMarketDataError(symbol, symbol, "no rows")
+
+        def serves_hk(symbol, start_date, end_date):
+            return "HK daily bars served"
+
+        patched = {
+            "quant_db_global": raises_no_data,
+            "yfinance": raises_no_data,
+            "akshare_hk": serves_hk,
+        }
+        with patch.dict(
+            interface.VENDOR_METHODS, {"get_stock_data": patched}, clear=False
+        ):
+            result = interface.route_to_vendor(
+                "get_stock_data", "1810.HK", "2026-09-20", "2026-09-28"
+            )
+        self.assertEqual(result, "HK daily bars served")
+
 
 # ===========================================================================
 # Regression: every tool bound by analysts must route through a category.

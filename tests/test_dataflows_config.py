@@ -20,7 +20,7 @@ class DataflowsConfigIsolationTests(unittest.TestCase):
         cfg["tool_vendors"]["get_stock_data"] = "alpha_vantage"
 
         fresh = get_config()
-        self.assertEqual(fresh["data_vendors"]["core_stock_apis"], "smartmoney_db,quant_db_global,akshare,yfinance")
+        self.assertEqual(fresh["data_vendors"]["core_stock_apis"], "smartmoney_db,quant_db_global,akshare,yfinance,akshare_hk")
         self.assertNotIn("get_stock_data", fresh["tool_vendors"])
 
     def test_set_config_does_not_alias_caller_nested_dicts(self):

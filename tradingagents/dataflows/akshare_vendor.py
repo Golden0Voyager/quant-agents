@@ -152,6 +152,77 @@ def get_stock_data(
     return header + df.to_csv()
 
 
+def get_hk_stock_data(
+    symbol: Annotated[str, "HK ticker e.g. 1810.HK"],
+    start_date: Annotated[str, "Start date YYYY-MM-DD"],
+    end_date: Annotated[str, "End date YYYY-MM-DD"],
+) -> str:
+    """Fetch HK-stock daily OHLCV from Sina via akshare (forward-adjusted).
+
+    HK tickers (.HK) get no usable data from yfinance on networks where
+    Yahoo's cookie/crumb handshake times out, so this vendor sits behind
+    yfinance in the get_stock_data chain and only serves ``*.HK`` symbols —
+    anything else bails with ``NoMarketDataError`` before touching the
+    network. ``stock_hk_daily`` returns full history, so the window is
+    filtered locally.
+    """
+    if not symbol.upper().endswith(".HK"):
+        raise NoMarketDataError(
+            symbol,
+            detail="akshare_hk only serves *.HK tickers",
+        )
+
+    # Sina's HK endpoint expects a 5-digit zero-padded code ("1810" -> "01810").
+    digits = "".join(ch for ch in symbol if ch.isdigit())
+    if not digits:
+        raise NoMarketDataError(symbol, detail=f"no digits in HK ticker {symbol!r}")
+    code = digits.zfill(5)
+
+    with _akshare_task_context(f"📊 {symbol} 港股历史行情"), no_proxy():
+        df = _akshare_retry(
+            lambda: ak.stock_hk_daily(symbol=code, adjust="qfq"),
+            max_retries=3,
+            base_delay=2.0,
+        )
+
+    if df is None or df.empty:
+        raise NoMarketDataError(
+            symbol,
+            canonical=code,
+            detail=f"no HK daily rows for {symbol} via akshare/sina",
+        )
+
+    rename_map = {
+        "date": "Date",
+        "open": "Open",
+        "close": "Close",
+        "high": "High",
+        "low": "Low",
+        "volume": "Volume",
+    }
+    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+    df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)]
+    if df.empty:
+        raise NoMarketDataError(
+            symbol,
+            canonical=code,
+            detail=f"no HK daily rows between {start_date} and {end_date} via akshare/sina",
+        )
+
+    df = df.set_index("Date")
+    for col in ("Open", "High", "Low", "Close"):
+        if col in df.columns:
+            df[col] = df[col].round(2)
+
+    header = (
+        f"# Stock data for {symbol.upper()} from {start_date} to {end_date}\n"
+        f"# Total records: {len(df)}\n"
+        f"# Source: akshare (Sina HK, 前复权)\n"
+        f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    )
+    return header + df.to_csv()
+
+
 def _safe_call(func, *args, **kwargs):
     """Invoke an akshare function with network-error retry.
 
