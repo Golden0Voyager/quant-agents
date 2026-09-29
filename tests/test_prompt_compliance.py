@@ -109,3 +109,101 @@ def test_fundamentals_duplicate_tool_registration_removed():
     """A stray duplicate get_dividend_summary entry once sat in the tools list."""
     src = inspect.getsource(fundamentals_analyst.create_fundamentals_analyst)
     assert src.count("        get_dividend_summary,\n") == 1
+
+
+# --- decision-layer contracts ------------------------------------------------
+
+from tradingagents.agents.managers import portfolio_manager, research_manager
+from tradingagents.agents.researchers import bear_researcher, bull_researcher
+from tradingagents.agents.trader import trader as trader_module
+
+
+def test_research_manager_contract_pinned():
+    """The RM prompt must keep: temporal integrity, rating scale, the bearish
+    calibration note, and explicit signal-weight accounting."""
+    src = inspect.getsource(research_manager)
+    for phrase in (
+        "Temporal integrity",
+        "Rating Scale",
+        "Calibration note",
+        "signal_weights",
+        "key_assumptions",
+    ):
+        assert phrase in src, f"research_manager lost contract phrase: {phrase}"
+
+
+def test_trader_contract_pinned():
+    """The Trader prompt/code must keep: verified-snapshot grounding, the
+    null-instead-of-guessing rule, and the long-only stop validation."""
+    src = inspect.getsource(trader_module)
+    for phrase in (
+        "do not estimate or recall a price",
+        "validate_trader_proposal",
+        "long-only",
+        "entry_price and stop_loss to null",
+    ):
+        assert phrase in src, f"trader lost contract phrase: {phrase}"
+
+
+def test_trader_rejects_non_protective_stop():
+    """A stop at/above entry offers no protection for a long position and
+    must be cleared to null (deterministic post-check)."""
+    from tradingagents.agents.schemas import TraderAction, TraderProposal
+
+    proposal = TraderProposal(
+        action=TraderAction.BUY,
+        reasoning="test",
+        entry_price=10.0,
+        stop_loss=11.5,  # above entry — a take-profit level, not a stop
+    )
+    fixed, note = trader_module.validate_trader_proposal(proposal)
+    assert fixed.stop_loss is None
+    assert note is not None and "rejected" in note
+
+
+def test_portfolio_manager_contract_pinned():
+    """The PM prompt must keep: rating scale, verified-snapshot grounding
+    with the tolerance rule, and honest data-source accounting."""
+    src = inspect.getsource(portfolio_manager)
+    for phrase in (
+        "Rating Scale",
+        "Verified Market Snapshot",
+        "25%",
+        "data_sources",
+        "Do not claim a source you did not consult",
+    ):
+        assert phrase in src, f"portfolio_manager lost contract phrase: {phrase}"
+
+
+# --- bull/bear argument-quality rules (batch 2) -------------------------------
+
+@pytest.mark.parametrize(
+    "module", [bull_researcher, bear_researcher], ids=lambda m: m.__name__
+)
+def test_researchers_carry_argument_quality_rules(module):
+    """Bull and bear must carry the good/bad example pairs and the four-layer
+    valuation framework injected in batch 2."""
+    src = inspect.getsource(module)
+    for phrase in (
+        "Argument quality rules",
+        "Scenario framing, not prophecy",
+        "You may write",
+        "Do not write",
+        "never to model memory",
+        "absolute (earnings/cash-flow based)",
+        "relative (vs peers)",
+        "historical percentile",
+        "market-implied expectations",
+    ):
+        assert phrase in src, f"{module.__name__} lost argument-quality phrase: {phrase}"
+
+
+def test_bull_and_bar_examples_are_distinct():
+    """The two sides must keep their own tailored examples (a copy-paste
+    accident would give both sides the same 'You may write' lines)."""
+    bull_src = inspect.getsource(bull_researcher)
+    bear_src = inspect.getsource(bear_researcher)
+    assert "order backlog grew 34% YoY" in bull_src
+    assert "backlog conversion slowed for two consecutive quarters" in bear_src
+    assert "order backlog grew 34% YoY" not in bear_src
+    assert "backlog conversion slowed for two consecutive quarters" not in bull_src
