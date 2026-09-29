@@ -13,6 +13,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
     get_shareholder_count,
+    observation_mode_instruction,
 )
 from tradingagents.agents.utils.tool_capabilities import (
     BoundToolsByMarket,
@@ -32,7 +33,6 @@ def create_fundamentals_analyst(llm):
         get_earnings_estimates,
         get_shareholder_count,
         get_dividend_history,
-    get_dividend_summary,
         get_dividend_summary,
     ]
     bound_tools = BoundToolsByMarket(llm, tools)
@@ -78,12 +78,37 @@ def create_fundamentals_analyst(llm):
                 "report: ✅ (data available), ⚠️ (data partial/sparse), "
                 "❌ (data unavailable)."
             )
+            + "\n\n## A-Share Accounting Caliber (mandatory for CN reports)\n"
++ "- Income-statement and cash-flow figures in A-share quarterly/interim reports "
++ "are CUMULATIVE year-to-date (报告期累计口径): Q2 shows H1 cumulative, Q3 shows "
++ "9-month cumulative, Q4 shows full-year. They are NOT single-quarter values. "
++ "Never sum them into a yearly total, and never describe them as sequential "
++ "single-quarter changes (e.g. 'Q4 net profit rose from Q1's X to Y' is wrong "
++ "unless the tool explicitly provides derived single-quarter figures). If a tool "
++ "returns derived single-quarter fields (单季度推导), prefer those for "
++ "quarter-over-quarter discussion and label them as derived.\n"
++ "- ROE, net margin, and similar ratio fields are report-period SNAPSHOT "
++ "indicators, not single-quarter values. Do not annualize or quarterize them "
++ "unless the tool states they are already computed that way.\n"
++ "- Every PE / PB / PS / valuation percentile you quote MUST carry the snapshot "
++ "date that the tool returned for it. If different metrics carry different "
++ "snapshot dates, say so separately; never present them as one date. If the "
++ "tool indicates the data fell back to a previous trading day (e.g. latest "
++ "close not yet stable), state that explicitly at the top of your valuation "
++ "section — do not silently rewrite the date as the analysis date.\n"
++ "- When a metric is unavailable for the company's industry (e.g. inventory "
++ "turnover for a bank), say it is not applicable — do not report its absence "
++ "as a risk or a data gap.\n"
++ "- Real figures may be quoted as evidence (revenue growth, margins, ROE, "
++ "operating cash flow, PE, PB, PEG), but do not convert them into fair-value "
++ "ranges, price targets, entry zones, or margin-of-safety claims — valuation "
++ "judgments belong to the decision layer, not this report."
             + "\n\n## Verified Fundamentals Snapshot\n\n"
             + fundamentals_snapshot_block
             + "\n\nUse the numbers in this snapshot as the source of truth for any exact "
             "fundamental claim (PE, PB, market cap, revenue, EPS, etc.). If the snapshot "
             "is unavailable, state that explicitly and set your confidence to low."
-            + get_language_instruction(),
+            + observation_mode_instruction() + get_language_instruction(),
         )
 
         prompt = ChatPromptTemplate.from_messages(

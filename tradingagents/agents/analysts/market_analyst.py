@@ -17,6 +17,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_sector_fund_flow,
     get_stock_data,
     get_verified_market_snapshot,
+    observation_mode_instruction,
     sanitize_company_name_in_report,
 )
 from tradingagents.agents.utils.prefetch import prefetch_for_market
@@ -152,7 +153,7 @@ Volume-Based Indicators:
                 "Add a data_availability marker per data dimension in your "
                 "report: ✅ (data available), ⚠️ (data partial/sparse), "
                 "❌ (data unavailable)."
-            ) + get_language_instruction()
+            ) + observation_mode_instruction() + get_language_instruction()
         )
 
         prompt = ChatPromptTemplate.from_messages(
