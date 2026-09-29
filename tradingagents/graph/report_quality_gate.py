@@ -10,8 +10,10 @@ Three checks, two severities:
 - ``critical`` — the report is empty or matches the fallback/blank-input
   blacklist (the LLM silently degraded, refused, or improvised with empty
   inputs instead of analysing). Layered degrade: route back to the analyst
-  for **one retry**; if still critical, accept the report but prepend a
-  warning banner so downstream agents and the audit trail see it.
+  for **one retry**, with the rejection reason injected into the retry's
+  placeholder message so a deterministic failure is not re-rolled
+  verbatim; if still critical, accept the report but prepend a warning
+  banner so downstream agents and the audit trail see it.
 - ``warning`` — the report is thin (< 50 words) or carries no conclusion
   keyword (pure data dump without any judgment). Accepted as-is with a
   warning banner; no retry (the content exists, it is just shallow).
@@ -124,14 +126,58 @@ def build_quality_banner(verdict: ReportQualityVerdict) -> str:
     )
 
 
+def build_retry_instruction(verdict: ReportQualityVerdict) -> str:
+    """Text appended to the placeholder when a critical report is retried.
+
+    Without it the retry sees the same generic "Proceed with your assigned
+    analysis…" placeholder and re-rolls the dice: when the failure is
+    deterministic (provider exception, refusal, empty output) the second
+    attempt reproduces it and the whole analyst run — tools included — was
+    wasted. Naming the reason and demanding a complete report gives the
+    retry something to correct.
+    """
+    return (
+        f"Note: your previous response was rejected and must be replaced "
+        f"(reason: {verdict.reason}). "
+        "You MUST now produce the complete, substantive analysis report as your "
+        "final response — an empty, refused, or placeholder answer will be "
+        "rejected again."
+    )
+
+
+def _append_retry_instruction(updates: dict[str, Any], verdict: ReportQualityVerdict) -> None:
+    """Rewrite the trailing placeholder HumanMessage in ``updates['messages']``.
+
+    ``create_msg_delete`` returns ``RemoveMessage`` ops followed by one
+    context-anchored placeholder (see its docstring, #888) — the anchor must
+    survive, so the rejection note is appended rather than substituted for
+    the whole message. No-ops if the shape is not what we expect, which
+    keeps the retry routing intact even if the clear node changes.
+    """
+    from langchain_core.messages import HumanMessage
+
+    messages = list(updates.get("messages") or [])
+    if not messages:
+        return
+    placeholder = messages[-1]
+    if not isinstance(placeholder, HumanMessage):
+        return
+    messages[-1] = placeholder.model_copy(
+        update={"content": f"{placeholder.content}\n\n{build_retry_instruction(verdict)}"}
+    )
+    updates["messages"] = messages
+
+
 def create_quality_gate_clear_node(spec: AnalystNodeSpec) -> Callable[[Mapping[str, Any]], dict[str, Any]]:
     """Wrap the message-clear node with the report quality gate.
 
     Runs after the analyst node wrote its report into state. On the first
-    critical verdict the node only bumps the retry counter — the router
-    sends the workflow back to the analyst for one fresh attempt. On any
-    later non-ok verdict the report is accepted with a warning banner
-    prepended, so downstream agents and the saved artifacts see the flag.
+    critical verdict the node bumps the retry counter and appends the
+    rejection reason to the placeholder message, so the retry has something
+    to correct — the router then sends the workflow back to the analyst for
+    one fresh attempt. On any later non-ok verdict the report is accepted
+    with a warning banner prepended, so downstream agents and the saved
+    artifacts see the flag.
     """
     from tradingagents.agents.utils.agent_utils import create_msg_delete
 
@@ -149,6 +195,7 @@ def create_quality_gate_clear_node(spec: AnalystNodeSpec) -> Callable[[Mapping[s
         if verdict.severity == QUALITY_CRITICAL and attempts < 1:
             retries[spec.key] = attempts + 1
             updates["report_quality_retries"] = retries
+            _append_retry_instruction(updates, verdict)
             logger.warning(
                 "Quality gate: %s report critical (%s) — scheduling one retry",
                 spec.key,
