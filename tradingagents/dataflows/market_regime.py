@@ -8,19 +8,27 @@ observation points) following the market-context dimensions of
 TradingAgents-CN's ``index_analyst``.
 
 The synthesized report is cached in-process and on disk (``data_cache_dir``)
-keyed by trading date. A 24-ticker batch therefore pays for ONE LLM call
-instead of 24, and every ticker is judged against the *same* market
+keyed by ``(trade_date, data_date)`` — the calendar date *and* the newest
+index date inside the digest. The data date matters because the local
+pipeline can refresh ``quant_core.db`` intraday: a run at 10:00 and a run at
+16:30 on the same calendar day see different data, and the second one must
+not reuse the first one's summary. A 24-ticker batch therefore pays for ONE
+LLM call instead of 24, and every ticker is judged against the *same* market
 context, which also makes cross-ticker comparison fairer.
 
-Fail-open everywhere: any data source or the LLM call may fail; the digest
-marks missing sections as unavailable and the orchestrator falls back to
-the raw digest text so downstream prompts always get something usable.
+Only a *successful* synthesis is cached. Fail-open everywhere: any data
+source or the LLM call may fail; the digest marks missing sections as
+unavailable and the orchestrator falls back to the raw digest text so
+downstream prompts always get something usable — but an unsynthesized
+digest never reaches the disk cache, otherwise one failed provider call
+would cost the whole day its regime report.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Mapping
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -38,6 +46,8 @@ _LOOKBACK_DAYS = 30
 
 _DIGEST_UNAVAILABLE = "DATA_UNAVAILABLE"
 
+# Keyed by "<trade_date>|<data_date>"; holds synthesized reports only, so a
+# failed synthesis never short-circuits a later call that could succeed.
 _PROCESS_CACHE: dict[str, str] = {}
 
 
@@ -121,6 +131,25 @@ def build_market_regime_digest(trade_date: str) -> dict[str, Any]:
     }
 
 
+def extract_data_date(digest: Mapping[str, Any]) -> str:
+    """Newest index date carried by ``digest``.
+
+    The pipeline refreshes ``quant_core.db`` on its own schedule (a run
+    before the refresh and a run after it share a calendar date but not
+    their data), so the cache has to key on this rather than on
+    ``trade_date`` alone. Falls back to ``trade_date`` when every index row
+    is unavailable — no better anchor exists then, and the digest itself
+    says so.
+    """
+    trade_date = str(digest.get("trade_date") or "")
+    dates = [
+        str(row["date"])
+        for row in digest.get("indices") or []
+        if row.get("available") and row.get("date")
+    ]
+    return max(dates) if dates else trade_date
+
+
 def _fmt_pct(value: float | None) -> str:
     return f"{value:+.2f}%" if value is not None else "N/A"
 
@@ -189,8 +218,13 @@ _REGIME_SYNTHESIS_PROMPT = """你是一位 A 股市场环境（regime）分析�
 约束：只描述市场整体环境，不得涉及任何个股买卖建议；不要编造摘要之外的数据；摘要中标记 {unavailable} 的维度直接说明缺失。{language}"""
 
 
-def synthesize_market_regime_report(digest_text: str, llm: Any) -> str:
+def synthesize_market_regime_report(digest_text: str, llm: Any) -> tuple[str, bool]:
     """One-shot LLM synthesis of the digest into a structured regime report.
+
+    Returns ``(report, synthesized)``. ``synthesized`` is False whenever the
+    LLM failed or came back empty and ``report`` is the raw digest — the
+    caller needs that flag to avoid caching an unsynthesized digest as if it
+    were a real regime report.
 
     Fail-open: any exception returns the raw digest so callers always have
     usable context.
@@ -208,16 +242,16 @@ def synthesize_market_regime_report(digest_text: str, llm: Any) -> str:
         content = content.strip()
         if not content:
             raise ValueError("empty regime synthesis")
-        return content
+        return content, True
     except Exception as exc:  # noqa: BLE001 — fail-open by design
         logger.warning("Market regime synthesis failed, using raw digest: %s", exc)
-        return digest_text
+        return digest_text, False
 
 
-def _disk_cache_path(data_cache_dir: str | None, trade_date: str) -> str | None:
+def _disk_cache_path(data_cache_dir: str | None, trade_date: str, data_date: str) -> str | None:
     if not data_cache_dir:
         return None
-    return os.path.join(data_cache_dir, f"market_regime_{trade_date}.md")
+    return os.path.join(data_cache_dir, f"market_regime_{trade_date}_{data_date}.md")
 
 
 def get_market_regime_report(
@@ -228,14 +262,23 @@ def get_market_regime_report(
 ) -> str:
     """Return the shared market regime report for ``trade_date``.
 
-    Resolution order: process cache → disk cache (``data_cache_dir``) →
-    build digest (+ optional LLM synthesis) → populate both caches.
+    The digest is always rebuilt (local SQLite reads only) because it is
+    what reveals the *data* date, which the caches key on. The expensive
+    part — the LLM synthesis — is skipped when either cache already holds a
+    synthesized report for ``(trade_date, data_date)``.
+
+    Neither cache is written unless the synthesis actually succeeded: an
+    unsynthesized digest is returned to the caller but never persisted, so
+    a single provider outage cannot cost the rest of the day its report.
     """
-    cache_key = str(trade_date)
+    digest = build_market_regime_digest(str(trade_date))
+    data_date = extract_data_date(digest)
+    cache_key = f"{trade_date}|{data_date}"
+
     if cache_key in _PROCESS_CACHE:
         return _PROCESS_CACHE[cache_key]
 
-    disk_path = _disk_cache_path(data_cache_dir, cache_key)
+    disk_path = _disk_cache_path(data_cache_dir, str(trade_date), data_date)
     if disk_path and os.path.exists(disk_path):
         try:
             with open(disk_path, encoding="utf-8") as fh:
@@ -246,8 +289,15 @@ def get_market_regime_report(
         except OSError as exc:
             logger.debug("Market regime disk cache unreadable: %s", exc)
 
-    digest_text = render_market_regime_digest(build_market_regime_digest(cache_key))
-    report = synthesize_market_regime_report(digest_text, llm) if llm is not None else digest_text
+    digest_text = render_market_regime_digest(digest)
+    if llm is None:
+        # Digest-only: cheap to rebuild, and caching it would starve a
+        # later call in the same process that does have an LLM.
+        return digest_text
+
+    report, synthesized = synthesize_market_regime_report(digest_text, llm)
+    if not synthesized:
+        return report
 
     _PROCESS_CACHE[cache_key] = report
     if disk_path:
