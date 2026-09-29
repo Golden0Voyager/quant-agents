@@ -88,6 +88,46 @@ from tradingagents.agents.utils.technical_indicators_tools import get_indicators
 logger = logging.getLogger(__name__)
 
 
+def opponent_argument_or_opening(text: str, opponent: str) -> str:
+    """Opponent's latest argument, or an explicit opening marker when empty.
+
+    Upstream #1176: the first speaker in each debate round receives an empty
+    opponent response; interpolating it into a "refute the opponent" prompt
+    makes the model fabricate the other side's position. Returning a clear
+    "has not spoken yet" marker instead lets it open with its own case.
+    """
+    text = (text or "").strip()
+    if text:
+        return text
+    return f"(The {opponent} has not spoken yet — open the debate with your own case.)"
+
+
+def observation_mode_instruction() -> str:
+    """Analyst-layer boundary rules (observation, not decision).
+
+    TradingAgents-CN parity: analysts produce research observations for a
+    downstream debate and trading layer, so trading vocabulary has no place in
+    an analyst report. Grounds the boundary in the fork's own architecture —
+    the Trader / Portfolio Manager layer owns every decision artifact.
+    """
+    return (
+        "\n\n## Observation Mode (analyst boundary)\n"
+        "You are an ANALYST, not a decision maker. Your report is one input to a "
+        "downstream debate and trading layer that owns every decision.\n"
+        "- Do NOT output buy/sell/hold/accumulate/trim recommendations, position "
+        "sizes, entry/exit plans, price targets, fair-value ranges, stop-losses, "
+        "take-profits, or expected-return percentages.\n"
+        "- You MAY state valuation levels, support/resistance zones, and "
+        "upside/downside drivers as research observations with the evidence "
+        "behind them — as long as they are not packaged as a plan.\n"
+        "- Every quantitative claim must come from tool output or the verified "
+        "snapshot in this prompt, never from model memory.\n"
+        "- Avoid unquantified directional language ('breakout confirmed', "
+        "'firmly above support'): attach the concrete number and its date, or "
+        "drop the claim."
+    )
+
+
 def get_language_instruction() -> str:
     """Return a prompt instruction for the configured output language.
 

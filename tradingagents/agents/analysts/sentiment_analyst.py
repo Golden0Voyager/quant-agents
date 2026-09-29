@@ -46,6 +46,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
     get_news,
+    observation_mode_instruction,
     sanitize_company_name_in_report,
 )
 from tradingagents.agents.utils.prefetch import prefetch_for_market
@@ -315,7 +316,7 @@ Fill the following fields:
   - **confidence**: low / medium / high, based on data quality and sample size.
   - **narrative**: Full source-by-source breakdown (news + Eastmoney hot rank + Guba sentiment + market hot keywords + social posts when present), divergences, dominant narrative themes, catalysts and risks, and a markdown summary table of key sentiment signals (direction, source, supporting evidence).
 
-{get_language_instruction()}"""
+{observation_mode_instruction()}{get_language_instruction()}"""
 
 
 # ---------------------------------------------------------------------------

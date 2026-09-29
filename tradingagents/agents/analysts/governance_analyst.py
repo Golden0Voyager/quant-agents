@@ -16,6 +16,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_restricted_release,
     get_south_flow,
     get_stock_repurchase,
+    observation_mode_instruction,
     sanitize_company_name_in_report,
 )
 from tradingagents.agents.utils.tool_capabilities import (
@@ -95,7 +96,7 @@ def create_governance_analyst(llm):
                 "Add a data_availability marker per data dimension in your "
                 "report: ✅ (data available), ⚠️ (data partial/sparse), "
                 "❌ (data unavailable)."
-            ) + get_language_instruction()
+            ) + observation_mode_instruction() + get_language_instruction()
         )
 
         prompt = ChatPromptTemplate.from_messages(

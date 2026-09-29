@@ -19,6 +19,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_sector_fund_flow,
     get_sector_valuation,
     get_us_macro,
+    observation_mode_instruction,
     sanitize_company_name_in_report,
 )
 from tradingagents.agents.utils.tool_capabilities import (
@@ -102,7 +103,7 @@ def create_industry_analyst(llm):
                 "Add a data_availability marker per data dimension in your "
                 "report: ✅ (data available), ⚠️ (data partial/sparse), "
                 "❌ (data unavailable)."
-            ) + get_language_instruction()
+            ) + observation_mode_instruction() + get_language_instruction()
         )
 
         prompt = ChatPromptTemplate.from_messages(
