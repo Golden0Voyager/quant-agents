@@ -102,6 +102,26 @@ def _lookup_rpm(
     return rpm_map.get(provider)
 
 
+def _coerce_max_tokens(value) -> int | None:
+    """Validate the ``max_tokens`` config value.
+
+    Accepts positive ints (or numeric strings); everything else raises:
+    booleans, non-integers, and non-positive values would silently produce
+    a bogus provider kwarg. None/empty means "leave the provider default".
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        raise ValueError("max_tokens must be an integer > 0, not a boolean")
+    try:
+        coerced = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"max_tokens must be an integer, got {value!r}") from None
+    if coerced <= 0:
+        raise ValueError(f"max_tokens must be > 0, got {coerced}")
+    return coerced
+
+
 class TradingAgentsGraph:
     """Main class that orchestrates the trading agents framework."""
 
@@ -209,6 +229,14 @@ class TradingAgentsGraph:
         temperature = self.config.get("temperature")
         if temperature is not None and temperature != "":
             kwargs["temperature"] = float(temperature)
+
+        # Optional output-token cap, cross-provider like temperature (Gemini
+        # receives it as max_output_tokens in its client). Bounds models whose
+        # reasoning/output is unbounded and hangs or trips a gateway idle
+        # timeout (e.g. some deepseek-v4-flash deployments). #1204 upstream.
+        max_tokens = _coerce_max_tokens(self.config.get("max_tokens"))
+        if max_tokens:
+            kwargs["max_tokens"] = max_tokens
 
         # Per-request HTTP timeout so a stalled socket fails fast into the
         # retry/fallback logic instead of hanging the run indefinitely.

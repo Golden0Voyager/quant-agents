@@ -489,6 +489,23 @@ _POLICIES: dict[str, ToolPolicy] = {
         impact="low",
         allowed_vendors=("eastmoney",),
     ),
+    # Global social post streams (Jev-screened when jev_post_gate_enabled).
+    # US/global-centric coverage: meaningful for HK/US/crypto tickers, thin
+    # for A-shares, so XSHG is excluded rather than counted as a coverage gap.
+    "fetch_stocktwits_messages": ToolPolicy(
+        applicable_markets=frozenset({"XHKG", "XNYS", "CRYPTO"}),
+        date_policy="calendar_window",
+        empty_semantics="coverage_gap",
+        impact="low",
+        allowed_vendors=("stocktwits",),
+    ),
+    "fetch_reddit_posts": ToolPolicy(
+        applicable_markets=frozenset({"XHKG", "XNYS", "CRYPTO"}),
+        date_policy="calendar_window",
+        empty_semantics="coverage_gap",
+        impact="low",
+        allowed_vendors=("reddit",),
+    ),
     "get_anomaly_reason": ToolPolicy(
         applicable_markets=frozenset({"XSHG"}),
         date_policy="latest_snapshot",

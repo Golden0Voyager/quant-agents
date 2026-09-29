@@ -38,6 +38,12 @@ class GoogleClient(BaseLLMClient):
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
 
+        # Gemini names the output cap ``max_output_tokens``; the unified
+        # config knob is ``max_tokens`` (same as the OpenAI-compatible side).
+        max_tokens = self.kwargs.get("max_tokens")
+        if max_tokens:
+            llm_kwargs["max_output_tokens"] = max_tokens
+
         # Unified api_key maps to provider-specific google_api_key
         google_api_key = self.kwargs.get("api_key") or self.kwargs.get("google_api_key")
         if google_api_key:

@@ -8,6 +8,7 @@ from .retry_utils import RetryConfig, with_llm_retry
 
 _PASSTHROUGH_KWARGS = (
     "timeout", "max_retries", "api_key", "reasoning_effort", "temperature",
+    "max_tokens",
     "callbacks", "http_client", "http_async_client",
 )
 

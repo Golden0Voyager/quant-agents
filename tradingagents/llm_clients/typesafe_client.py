@@ -54,6 +54,21 @@ _ANN_CRITERIA_FALSE = (
     "announcements carrying no new decision-relevant information"
 )
 
+_POST_QUESTION = (
+    "Is `post` about `state.company_name`: the company, its stock, its "
+    "products, or its outlook?"
+)
+
+_POST_CRITERIA_TRUE = (
+    "The post discusses the company itself: its stock, business, products, "
+    "or outlook."
+)
+
+_POST_CRITERIA_FALSE = (
+    "The post names the company only in passing or in a list of tickers, is "
+    "spam or promotion, or is about a different company or topic entirely."
+)
+
 
 class TypeSafeNewsGate:
     def __init__(self, config: dict, *, config_prefix: str = "jev_news_gate"):
@@ -128,4 +143,55 @@ class TypeSafeNewsGate:
             )
             return None
         scores.extend([1.0] * (len(articles) - len(judged)))
+        return scores
+
+    def score_posts(
+        self, posts: list[str], context: dict
+    ) -> list[float] | None:
+        """Score raw social posts for whether they are about the instrument.
+
+        Mirrors :meth:`score_articles` (one batched request, per-post ``noul``
+        question, fail-open None) but the state carries the raw post text —
+        social posts have no title/publisher metadata. Returns one ``noul``
+        probability per post; callers drop posts that fall below their
+        relevance threshold.
+        """
+        if not self.available or not posts:
+            return None
+        judged = posts[: self._max_articles]
+        trunc = _BODY_TRUNC
+        questions: dict[str, dict[str, Any]] = {
+            f"post_{i}": {
+                "type": "noul",
+                "instructions": {
+                    "post": p[:trunc],
+                    "question": _POST_QUESTION,
+                },
+                "criteria": {"true": _POST_CRITERIA_TRUE, "false": _POST_CRITERIA_FALSE},
+            }
+            for i, p in enumerate(judged)
+        }
+        try:
+            resp = requests.post(
+                _API_URL,
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                json={"model": self._model, "state": context, "questions": questions},
+                timeout=self._timeout,
+            )
+            resp.raise_for_status()
+            answers = resp.json().get("answers", {})
+            scores = [
+                (answers.get(f"post_{i}") or {}).get("noul", 1.0)
+                for i in range(len(judged))
+            ]
+        except Exception as exc:  # noqa: BLE001 — 门控故障绝不外抛
+            status = getattr(locals().get("resp", None), "status_code", None)
+            logger.warning(
+                "Jev post gate scoring failed (status=%s): %s: %s",
+                status,
+                type(exc).__name__,
+                exc,
+            )
+            return None
+        scores.extend([1.0] * (len(posts) - len(judged)))
         return scores
