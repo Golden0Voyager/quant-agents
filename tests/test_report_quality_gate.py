@@ -94,6 +94,12 @@ class ClassifyReportTests(unittest.TestCase):
 
 @pytest.mark.unit
 class QualityGateClearNodeTests(unittest.TestCase):
+    # what create_msg_delete() produces for the state built by _state()
+    _UNMODIFIED_PLACEHOLDER = (
+        "Proceed with your assigned analysis for this workflow. "
+        "test context The analysis date is 2026-09-29."
+    )
+
     def _state(self, report: str, retries: dict | None = None, flags: dict | None = None):
         return {
             "messages": [HumanMessage(content="q"), AIMessage(content=report)],
@@ -104,6 +110,12 @@ class QualityGateClearNodeTests(unittest.TestCase):
             "report_quality_flags": flags or {},
         }
 
+    @staticmethod
+    def _placeholder(updates) -> HumanMessage:
+        messages = updates["messages"]
+        assert isinstance(messages[-1], HumanMessage), "last message must be the placeholder"
+        return messages[-1]
+
     def test_first_critical_bumps_retry_without_banner(self):
         node = create_quality_gate_clear_node(MARKET_SPEC)
         updates = node(self._state("输入为空白，无法分析。"))
@@ -113,12 +125,49 @@ class QualityGateClearNodeTests(unittest.TestCase):
         # messages still cleared
         self.assertTrue(updates["messages"])
 
+    def test_retry_placeholder_carries_reason_and_instruction(self):
+        node = create_quality_gate_clear_node(MARKET_SPEC)
+        updates = node(self._state("输入为空白，无法分析。"))
+        content = self._placeholder(updates).content
+        self.assertIn("rejected", content)
+        self.assertIn("fallback text", content)  # the verdict reason is quoted
+        self.assertIn("complete, substantive analysis report", content)
+
+    def test_retry_placeholder_keeps_instrument_anchor(self):
+        """#888: the anchor must survive, we only append to it."""
+        node = create_quality_gate_clear_node(MARKET_SPEC)
+        updates = node(self._state("输入为空白，无法分析。"))
+        content = self._placeholder(updates).content
+        self.assertIn("test context", content)
+        self.assertIn("2026-09-29", content)
+        self.assertTrue(
+            content.startswith("Proceed with your assigned analysis"),
+            content,
+        )
+
+    def test_empty_report_reason_reaches_the_retry(self):
+        node = create_quality_gate_clear_node(MARKET_SPEC)
+        updates = node(self._state(""))
+        content = self._placeholder(updates).content
+        self.assertIn("empty report", content)
+
     def test_second_critical_accepts_with_banner(self):
         node = create_quality_gate_clear_node(MARKET_SPEC)
         updates = node(self._state("输入为空白，无法分析。", retries={"market": 1}))
         self.assertEqual(updates["report_quality_retries"], {"market": 2})
         self.assertEqual(updates["report_quality_flags"]["market"], QUALITY_CRITICAL)
         self.assertIn("Report quality: critical", updates["market_report"])
+
+    def test_non_retry_paths_leave_placeholder_untouched(self):
+        node = create_quality_gate_clear_node(MARKET_SPEC)
+        plain = self._placeholder(node(self._state(GOOD_ZH_REPORT))).content
+        self.assertEqual(plain, self._UNMODIFIED_PLACEHOLDER)
+        accepted = self._placeholder(
+            node(self._state("输入为空白。", retries={"market": 1}))
+        ).content
+        self.assertEqual(accepted, self._UNMODIFIED_PLACEHOLDER)
+        warned = self._placeholder(node(self._state("结论：偏强。"))).content
+        self.assertEqual(warned, self._UNMODIFIED_PLACEHOLDER)
 
     def test_warning_accepts_with_banner_and_no_retry(self):
         node = create_quality_gate_clear_node(MARKET_SPEC)
