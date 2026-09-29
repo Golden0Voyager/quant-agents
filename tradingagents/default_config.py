@@ -260,10 +260,13 @@ _BASE_CONFIG = {
     # US stocks / crypto (AAPL, BTC-USD, …) route to quant_db_global first —
     # the local quant_core.db global_assets_bars archive — with yfinance as
     # online fallback when the archive is missing or stale.
+    # HK tickers (.HK) fall through the same chain to akshare_hk (Sina
+    # daily bars): yfinance's cookie/crumb handshake is unreachable from
+    # this network, so the China-direct Sina source is the working fallback.
     # 2026-05-20: 优先依赖 AkShare 作为 A 股外部数据源，yfinance 仅作为最后兜底。
     # 如需完全禁用 yfinance fallback，可设置环境变量 DISABLE_YFINANCE_FALLBACK=1。
     "data_vendors": {
-        "core_stock_apis": "smartmoney_db,quant_db_global,akshare,yfinance",
+        "core_stock_apis": "smartmoney_db,quant_db_global,akshare,yfinance,akshare_hk",
         # hithink (同花顺官方 API) sits between the local DB and akshare for the
         # methods it implements (financial statements / financial indicators);
         # methods it does not implement filter it out at chain-build time.

@@ -297,6 +297,68 @@ class TestGetStockData(TestCase):
 
 
 # ---------------------------------------------------------------------------
+# get_hk_stock_data
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+class TestGetHkStockData(TestCase):
+    def setUp(self):
+        self.fake_df = pd.DataFrame({
+            "date": ["2026-09-24", "2026-09-25", "2026-09-28"],
+            "open": [26.18, 26.20, 25.98],
+            "high": [26.50, 26.20, 26.30],
+            "low": [25.90, 25.36, 25.54],
+            "close": [26.10, 25.90, 25.86],
+            "volume": [78_353_485, 78_353_485, 110_319_222],
+            "amount": [2.0e9, 2.0e9, 2.8e9],
+        })
+
+    def test_basic_returns_csv_with_header(self):
+        from tradingagents.dataflows import akshare_vendor
+        with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
+            mock_ak.stock_hk_daily.return_value = self.fake_df
+            result = akshare_vendor.get_hk_stock_data("1810.HK", "2026-09-24", "2026-09-28")
+        # Sina expects the 5-digit zero-padded code.
+        assert mock_ak.stock_hk_daily.call_args.kwargs["symbol"] == "01810"
+        assert mock_ak.stock_hk_daily.call_args.kwargs["adjust"] == "qfq"
+        assert "Stock data for 1810.HK" in result
+        assert "25.86" in result
+
+    def test_window_filters_full_history(self):
+        from tradingagents.dataflows import akshare_vendor
+        with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
+            mock_ak.stock_hk_daily.return_value = self.fake_df
+            result = akshare_vendor.get_hk_stock_data("1810.HK", "2026-09-25", "2026-09-28")
+        # 2026-09-24 falls outside the window and must be dropped.
+        assert "2026-09-24" not in result.split("\n\n", 1)[1]
+        assert "2026-09-25" in result
+        assert "Total records: 2" in result
+
+    def test_empty_after_window_raises_no_market_data(self):
+        from tradingagents.dataflows import akshare_vendor
+        with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
+            mock_ak.stock_hk_daily.return_value = self.fake_df
+            with pytest.raises(NoMarketDataError, match="1810.HK"):
+                akshare_vendor.get_hk_stock_data("1810.HK", "2025-01-01", "2025-01-31")
+
+    def test_non_hk_ticker_bails_before_network(self):
+        from tradingagents.dataflows import akshare_vendor
+        with (
+            patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak,
+            pytest.raises(NoMarketDataError, match="AAPL"),
+        ):
+            akshare_vendor.get_hk_stock_data("AAPL", "2026-09-24", "2026-09-28")
+        mock_ak.stock_hk_daily.assert_not_called()
+
+    def test_empty_df_raises_no_market_data(self):
+        from tradingagents.dataflows import akshare_vendor
+        with patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak:
+            mock_ak.stock_hk_daily.return_value = pd.DataFrame()
+            with pytest.raises(NoMarketDataError, match="1810.HK"):
+                akshare_vendor.get_hk_stock_data("1810.HK", "2026-09-24", "2026-09-28")
+
+
+# ---------------------------------------------------------------------------
 # get_fundamentals
 # ---------------------------------------------------------------------------
 

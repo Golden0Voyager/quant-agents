@@ -73,7 +73,7 @@ class DefaultConfigTests(unittest.TestCase):
         self.assertIsNot(cfg1["data_vendors"], cfg2["data_vendors"])
 
         cfg1["data_vendors"]["core_stock_apis"] = "changed"
-        self.assertEqual(cfg2["data_vendors"]["core_stock_apis"], "smartmoney_db,quant_db_global,akshare,yfinance")
+        self.assertEqual(cfg2["data_vendors"]["core_stock_apis"], "smartmoney_db,quant_db_global,akshare,yfinance,akshare_hk")
 
     def test_default_config_is_independent_of_import_reference(self):
         """Mutating a returned config must not affect the next call."""

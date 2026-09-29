@@ -50,6 +50,7 @@ _POLICIES: dict[str, ToolPolicy] = {
             "alpha_vantage",
             "yfinance",
             "akshare",
+            "akshare_hk",
         ),
     ),
     # Cross-market fundamentals and indicators keep the full market set: the
