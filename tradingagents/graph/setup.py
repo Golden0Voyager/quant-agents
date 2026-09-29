@@ -10,6 +10,7 @@ from tradingagents.agents.utils.agent_states import AgentState
 
 from .analyst_execution import build_analyst_execution_plan
 from .conditional_logic import ConditionalLogic
+from .report_quality_gate import create_quality_gate_clear_node, make_quality_gate_router
 
 
 class GraphSetup:
@@ -100,7 +101,7 @@ class GraphSetup:
         # graph topology therefore remains static across markets.
         for spec in plan.specs:
             workflow.add_node(spec.agent_node, analyst_factories[spec.key]())
-            workflow.add_node(spec.clear_node, create_msg_delete())
+            workflow.add_node(spec.clear_node, create_quality_gate_clear_node(spec))
             workflow.add_node(spec.tool_node, self.tool_nodes[spec.key])
 
         # Add other nodes
@@ -131,11 +132,18 @@ class GraphSetup:
             )
             workflow.add_edge(current_tools, current_analyst)
 
-            # Connect to next analyst or to Bull Researcher if this is the last analyst
-            if i < len(plan.specs) - 1:
-                workflow.add_edge(current_clear, plan.specs[i + 1].agent_node)
-            else:
-                workflow.add_edge(current_clear, "Bull Researcher")
+            # Connect to next analyst or to Bull Researcher if this is the last analyst.
+            # The clear node's static edge becomes a conditional edge so the
+            # report quality gate can route back to the analyst for one retry
+            # when its report is critical (empty / fallback text).
+            next_node = (
+                plan.specs[i + 1].agent_node if i < len(plan.specs) - 1 else "Bull Researcher"
+            )
+            workflow.add_conditional_edges(
+                current_clear,
+                make_quality_gate_router(spec, next_node),
+                [spec.agent_node, next_node],
+            )
 
         # Add remaining edges
         workflow.add_conditional_edges(

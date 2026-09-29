@@ -184,9 +184,16 @@ def build_data_quality_summary(
     specs: list[AnalystNodeSpec],
 ) -> str:
     """Build a data quality summary block from all analyst reports in state."""
+    quality_flags = state.get("report_quality_flags") or {}
+    show_generation = bool(quality_flags)
+
     lines: list[str] = ["## Data Quality Summary", ""]
-    lines.append("| Analyst | Quality |")
-    lines.append("|---------|---------|")
+    if show_generation:
+        lines.append("| Analyst | Quality | Generation |")
+        lines.append("|---------|---------|------------|")
+    else:
+        lines.append("| Analyst | Quality |")
+        lines.append("|---------|---------|")
 
     unreliable_count = 0
     for spec in specs:
@@ -194,7 +201,12 @@ def build_data_quality_summary(
         quality = validate_report_quality(spec.report_key, report_text)
         label = spec.agent_node
         emoji = {"reliable": "✅", "no_data": "❌", "sparse": "⚠️"}.get(quality, "❓")
-        lines.append(f"| {label} | {emoji} {quality} |")
+        if show_generation:
+            generation = quality_flags.get(spec.key, "—")
+            gen_emoji = {"ok": "✅", "warning": "⚠️", "critical": "❌"}.get(generation, "—")
+            lines.append(f"| {label} | {emoji} {quality} | {gen_emoji} {generation} |")
+        else:
+            lines.append(f"| {label} | {emoji} {quality} |")
         if quality != "reliable":
             unreliable_count += 1
 
