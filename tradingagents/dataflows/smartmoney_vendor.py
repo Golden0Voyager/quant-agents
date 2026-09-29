@@ -828,6 +828,39 @@ def get_index_daily(
 # Market breadth
 # ===========================================================================
 
+def get_market_breadth(trade_date: str) -> dict | None:
+    """Fetch the latest market-breadth snapshot on or before ``trade_date``.
+
+    Reads the ``market_breadth`` table (legu 乐咕口径, refreshed by the local
+    data pipeline) and returns the most recent row as a dict with::
+
+        date, up_count, down_count, flat_count,
+        limit_up, limit_down, real_limit_up, real_limit_down,
+        high20, low20, high60, low60, high120, low120,
+        below_net_asset_ratio, activity_ratio
+
+    Returns None when the table is unreachable or empty — callers render an
+    "unavailable" marker rather than fabricating breadth numbers.
+    """
+    df = _df_from_sql(
+        """
+        SELECT date, up_count, down_count, flat_count,
+               limit_up, limit_down, real_limit_up, real_limit_down,
+               high20, low20, high60, low60, high120, low120,
+               below_net_asset_ratio, activity_ratio
+        FROM market_breadth
+        WHERE date <= ?
+        ORDER BY date DESC
+        LIMIT 1
+        """,
+        (trade_date,),
+    )
+    if df is None or df.empty:
+        return None
+    row = df.iloc[0].to_dict()
+    return {k: (None if pd.isna(v) else v) for k, v in row.items()}
+
+
 def get_limit_up_down(trade_date: str) -> str:
     """Fetch market-wide limit-up/limit-down stats for a trading date.
 

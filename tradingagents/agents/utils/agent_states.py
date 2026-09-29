@@ -91,6 +91,9 @@ class AgentState(MessagesState):
     holdings_context: Annotated[dict, "Current holdings for position-aware analysis"]
     transactions_context: Annotated[list, "Transaction history for trade-aware analysis"]
     data_quality_summary: Annotated[str, "Report of data availability and reliability per analyst"]
+    market_regime_report: Annotated[
+        str, "Shared whole-market regime report (A-share), computed once per trading date"
+    ]
     structured_fallback_agents: Annotated[
         list[str], operator.add
     ]
