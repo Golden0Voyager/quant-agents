@@ -1595,7 +1595,17 @@ def get_margin_trading(
     )
 
     if df is None or df.empty:
-        raise RuntimeError(f"No margin-trading data in quant_core.db for {symbol}")
+        # No rows for this symbol is a no-data condition, not a runtime
+        # failure: raising NoMarketDataError lets route_to_vendor fall back
+        # to online vendors and, when none serve it, degrade to a NO_DATA
+        # sentinel. A bare RuntimeError here instead escaped the router
+        # (governance_risk is not an optional category) and aborted the
+        # whole ticker run — observed on 605299.SS (2026-09-28 batch).
+        raise NoMarketDataError(
+            symbol,
+            canonical=code,
+            detail=f"no margin_trading rows in quant_core.db for {symbol}",
+        )
 
     _assert_local_data_not_stale("margin_trading", symbol, df, "Date", curr_date)
 

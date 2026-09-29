@@ -510,14 +510,15 @@ class GetMarginTradingTests(unittest.TestCase):
         finally:
             os.unlink(db_path)
 
-    def test_raises_on_no_data(self):
+    def test_raises_no_market_data_on_empty(self):
+        from tradingagents.dataflows.errors import NoMarketDataError
         from tradingagents.dataflows.smartmoney_vendor import get_margin_trading
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
         try:
             _create_full_test_db(db_path)
-            with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
+            with _PatchedVendor(db_path), self.assertRaises(NoMarketDataError):
                 get_margin_trading("999999.SS")
         finally:
             os.unlink(db_path)
@@ -1931,13 +1932,14 @@ class CurrDateFilteringTests(unittest.TestCase):
             os.unlink(db_path)
 
     def test_get_margin_trading_raises_when_all_future(self):
+        from tradingagents.dataflows.errors import NoMarketDataError
         from tradingagents.dataflows.smartmoney_vendor import get_margin_trading
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
         try:
             _create_full_test_db(db_path)
-            with _PatchedVendor(db_path), self.assertRaises(RuntimeError):
+            with _PatchedVendor(db_path), self.assertRaises(NoMarketDataError):
                 get_margin_trading("600519.SS", curr_date="2026-06-18")
         finally:
             os.unlink(db_path)
