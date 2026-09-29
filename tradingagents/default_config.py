@@ -19,6 +19,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_CHECKPOINT_ENABLED":   "checkpoint_enabled",
     "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
     "TRADINGAGENTS_TEMPERATURE":          "temperature",
+    "TRADINGAGENTS_MAX_TOKENS":           "max_tokens",
     "TRADINGAGENTS_LLM_RETRY_ENABLED":    "llm_retry_enabled",
     "TRADINGAGENTS_LLM_RETRY_MAX_RETRIES": "llm_retry_max_retries",
     "TRADINGAGENTS_LLM_RETRY_BASE_DELAY": "llm_retry_base_delay",
@@ -43,6 +44,10 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_JEV_ANN_GATE_FETCH_TIMEOUT":  "jev_ann_gate_fetch_timeout",
     "TRADINGAGENTS_JEV_ANN_GATE_MAX_WORKERS":    "jev_ann_gate_max_workers",
     "TRADINGAGENTS_JEV_MODEL":                   "jev_model",
+    "TRADINGAGENTS_JEV_POST_GATE_ENABLED":       "jev_post_gate_enabled",
+    "TRADINGAGENTS_JEV_POST_GATE_SHADOW":        "jev_post_gate_shadow",
+    "TRADINGAGENTS_JEV_POST_GATE_THRESHOLD":     "jev_post_gate_threshold",
+    "TRADINGAGENTS_SOCIAL_POSTS_ENABLED":        "social_posts_enabled",
     "INPUT_TOKEN_PRICE_PER_1M":           "input_token_price_per_1m",
     "OUTPUT_TOKEN_PRICE_PER_1M":          "output_token_price_per_1m",
 }
@@ -55,6 +60,8 @@ _ENV_OVERRIDES = {
 _ENV_TYPES = {
     "benchmark_ticker": str,
     "temperature": float,
+    "max_tokens": int,
+    "jev_post_gate_threshold": float,
     "input_token_price_per_1m": float,
     "output_token_price_per_1m": float,
 }
@@ -147,6 +154,11 @@ _BASE_CONFIG = {
     # variation on models that honor it; reasoning models largely ignore it
     # and no setting makes LLM output bit-identical across runs (see README).
     "temperature": None,
+    # Optional cap on output tokens forwarded to every provider (Gemini takes
+    # it as max_output_tokens). None leaves each provider at its default. Set
+    # it to bound a model whose reasoning/output is unbounded and hangs or
+    # trips a gateway idle timeout (e.g. some deepseek-v4-flash deployments).
+    "max_tokens": None,
     # LLM retry/backoff for transient provider errors (rate limits, timeouts,
     # 5xx). ``llm_retry_enabled`` can be set to false to disable retries.
     "llm_retry_enabled": True,
@@ -333,6 +345,19 @@ _BASE_CONFIG = {
     "jev_ann_gate_timeout": 15,           # Jev 评分 HTTP 超时（秒）
     "jev_ann_gate_fetch_timeout": 15,     # 正文抓取 HTTP 超时（秒）
     "jev_ann_gate_max_workers": 5,        # 并发抓取数
+    # ── Jev 社交帖子门控（StockTwits / Reddit，上游 #1376 对齐）──
+    # 用 TypeSafe Jev 逐帖判断「是否真关于该公司」，明显无关的帖子在进 prompt
+    # 前丢弃，块首给出保留统计。shadow 模式只记录不丢弃，用于校准阈值。
+    # 注意：这只在 social_posts_enabled 开启时对情绪分析师生效（见下）。
+    "jev_post_gate_enabled": False,       # 总开关（默认关闭）
+    "jev_post_gate_shadow": True,         # shadow：打分+日志，渲染与现状一致
+    "jev_post_gate_threshold": 0.3,       # noul ≥ 此值保留（上游 #1376 同款 0.3）
+    "jev_post_gate_keep_floor": 5,        # 正式模式下帖子数 ≤ 此值不送判
+    "jev_post_gate_max_articles": 30,     # 送判上限，超出部分按 kept 处理
+    # 可选的全局社交帖子源（StockTwits / Reddit）。2026-Q3 曾因端点不稳被移除，
+    # 现以默认关闭的可选项恢复：抓取失败优雅降级，帖子经 Jev 门控（见上）。
+    # 仅对覆盖真实的市场生效（XHKG / XNYS / CRYPTO；A 股仍为 DATA_NOT_APPLICABLE）。
+    "social_posts_enabled": False,
     # Portfolio / holdings configuration
     "portfolio": {
         "data_path": os.path.expanduser("~/Code/quant_data/tradingagents_portfolio.json"),
