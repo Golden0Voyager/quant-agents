@@ -94,3 +94,9 @@ class AgentState(MessagesState):
     structured_fallback_agents: Annotated[
         list[str], operator.add
     ]
+    report_quality_retries: Annotated[
+        dict[str, int], "Per-analyst retry counters written by the report quality gate"
+    ]
+    report_quality_flags: Annotated[
+        dict[str, str], "Per-analyst quality gate verdicts (ok / warning / critical)"
+    ]
