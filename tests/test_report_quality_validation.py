@@ -24,15 +24,30 @@ class TestValidateReportQuality:
         )
         assert validate_report_quality("market_report", report) == "reliable"
 
-    def test_empty_report_marked_no_data(self):
-        assert validate_report_quality("market_report", "") == "no_data"
+    def test_empty_report_marked_empty(self):
+        assert validate_report_quality("market_report", "") == "empty"
 
-    def test_report_with_no_data_sentinel_marked_no_data(self):
+    def test_report_with_only_no_data_sentinel_marked_empty(self):
         report = (
             "## Market Analysis\n"
             "NO_DATA_AVAILABLE: No market data found for 'FAKE'.\n"
         )
-        assert validate_report_quality("market_report", report) == "no_data"
+        assert validate_report_quality("market_report", report) == "empty"
+
+    def test_substantive_report_with_sentinel_marked_partial(self):
+        report = (
+            "## Market Analysis\n"
+            "The stock showed strong momentum with volume increasing 20%.\n"
+            "Price action broke above the 50-day moving average on heavy\n"
+            "volume which confirms the bullish breakout. Support sits at\n"
+            "the 200-day MA while resistance is at the recent high. RSI\n"
+            "is trending higher and MACD has crossed bullish. The overall\n"
+            "trend remains positive with breadth supporting further upside\n"
+            "in the near term. Traders should watch for a pullback to\n"
+            "support levels before adding positions.\n"
+            "Note: insider transactions DATA_UNAVAILABLE for this ticker.\n"
+        )
+        assert validate_report_quality("market_report", report) == "partial"
 
     def test_very_short_report_marked_sparse(self):
         assert validate_report_quality("news_report", "Very little data.") == "sparse"
@@ -80,6 +95,23 @@ class TestBuildDataQualitySummary:
         specs = list(ANALYST_NODE_SPECS.values())
         summary = build_data_quality_summary(state, specs)
         assert "❌" in summary or "no_data" in summary.lower()
+
+    def test_summary_distinguishes_empty_from_partial(self):
+        reliable = "word " * 51
+        partial = reliable + " Note: field DATA_UNAVAILABLE here."
+        state = {
+            "market_report": "",
+            "sentiment_report": partial,
+            "news_report": reliable,
+            "fundamentals_report": reliable,
+            "governance_report": reliable,
+            "industry_report": reliable,
+        }
+        specs = list(ANALYST_NODE_SPECS.values())
+        summary = build_data_quality_summary(state, specs)
+        assert "❌ empty" in summary
+        assert "⚠️ partial" in summary
+        assert "near-zero weight" in summary
 
     def test_all_reliable_shows_positive_message(self):
         """When every analyst report is reliable (>= 50 words, no sentinel),

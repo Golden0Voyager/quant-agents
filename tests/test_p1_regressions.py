@@ -182,15 +182,23 @@ class TestAshareExplicitOrderRespected:
 class TestDataUnavailableSentinel:
     """f. validate_report_quality treats both sentinels as unreliable."""
 
-    def test_no_data_available_is_unreliable(self):
+    def test_no_data_available_short_report_is_empty(self):
         text = "Some words here. NO_DATA_AVAILABLE for this symbol. " * 5
-        assert validate_report_quality("market_report", text) == "no_data"
+        assert validate_report_quality("market_report", text) == "empty"
 
-    def test_data_unavailable_is_unreliable(self):
+    def test_data_unavailable_short_report_is_empty(self):
         text = (
             "The macro indicator returned DATA_UNAVAILABLE: not available. " * 5
         )
-        assert validate_report_quality("news_report", text) == "no_data"
+        assert validate_report_quality("news_report", text) == "empty"
+
+    def test_sentinel_inside_substantive_report_is_partial(self):
+        body = (
+            "Revenue grew steadily across all segments this quarter with "
+            "margins expanding and cash flow turning positive while the "
+            "balance sheet deleveraged further and guidance was raised. "
+        )
+        assert validate_report_quality("news_report", body * 3 + "DATA_UNAVAILABLE: x") == "partial"
 
 
 @pytest.mark.unit

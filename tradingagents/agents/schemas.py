@@ -92,8 +92,10 @@ class SignalWeight(BaseModel):
         description=(
             "How much this dimension influenced the final recommendation, "
             "0.0-1.0. Weights across all listed dimensions should roughly "
-            "sum to 1. Give low weight to dimensions whose data was flagged "
-            "missing or stale."
+            "sum to 1. Only dimensions whose report was flagged empty "
+            "(wholly missing data) deserve near-zero weight; partial reports "
+            "(some fields unavailable) keep normal weight for the evidence "
+            "that is present — discount just the missing fields."
         ),
     )
     note: str = Field(

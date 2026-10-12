@@ -958,7 +958,17 @@ def get_fund_flow(
     prefix = to_akshare_symbol(symbol, "lower_prefix")[:2]  # "sh" or "sz"
 
     with _akshare_task_context(f"💰 {symbol} 资金流向"), no_proxy():
-        df = _safe_call(ak.stock_individual_fund_flow, stock=code, market=prefix)
+        # Eastmoney's push2his endpoint rate-limits per IP, and batch runs
+        # hammer it across many tickers in quick succession. The default
+        # _safe_call backoff (1s+2s+4s = 7s total) is often not enough to
+        # ride out the throttle — give this call a patient 4-retry / 30s
+        # budget so one flapping endpoint doesn't blank fund flow for the
+        # whole batch.
+        df = _akshare_retry(
+            lambda: ak.stock_individual_fund_flow(stock=code, market=prefix),
+            max_retries=4,
+            base_delay=2.0,
+        )
 
     df = _filter_df_by_date(df, "日期", curr_date)
 

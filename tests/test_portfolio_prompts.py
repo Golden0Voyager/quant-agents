@@ -165,6 +165,57 @@ class BuildRiskPromptExtended(unittest.TestCase):
 
 
 @pytest.mark.unit
+class PnlReconciliationTests(unittest.TestCase):
+    """Stale pnl_pct is recomputed from avg_cost/market_price (>0.5pp drift)."""
+
+    def _portfolio(self, **holding_kwargs):
+        return Portfolio(holdings={
+            "AAPL": Holding(ticker="AAPL", shares=100, **holding_kwargs),
+        })
+
+    def test_pm_prompt_recomputes_stale_pnl(self):
+        # Stored +4.00% but price says 165/150 = +10.00% — recomputed wins.
+        p = self._portfolio(avg_cost=150.0, market_price=165.0, pnl_pct=0.04)
+        result = build_pm_prompt("AAPL", p)
+        self.assertIn("+10.00%", result)
+        self.assertIn("已按现价/成本重算", result)
+        self.assertNotIn("+4.00%", result)
+
+    def test_pm_prompt_keeps_consistent_pnl_without_flag(self):
+        p = self._portfolio(avg_cost=150.0, market_price=165.0, pnl_pct=0.10)
+        result = build_pm_prompt("AAPL", p)
+        self.assertIn("+10.00%", result)
+        self.assertNotIn("重算", result)
+
+    def test_pm_prompt_computes_pnl_when_field_missing(self):
+        p = self._portfolio(avg_cost=150.0, market_price=165.0)
+        result = build_pm_prompt("AAPL", p)
+        self.assertIn("+10.00%", result)
+
+    def test_pm_prompt_falls_back_to_stored_pnl_without_price(self):
+        p = self._portfolio(avg_cost=150.0, pnl_pct=0.04)
+        result = build_pm_prompt("AAPL", p)
+        self.assertIn("+4.00%", result)
+        self.assertNotIn("重算", result)
+
+    def test_risk_prompt_recomputes_stale_pnl(self):
+        # Stored -10.00% but price says 119/150 ≈ -20.67% — recomputed wins
+        # and the >20% drawdown warning now fires off the true number.
+        p = self._portfolio(avg_cost=150.0, market_price=119.0, pnl_pct=-0.10)
+        result = build_risk_prompt("AAPL", p)
+        self.assertIn("-20.67%", result)
+        self.assertIn("已按现价/成本重算", result)
+        self.assertIn("严格止损", result)
+
+    def test_risk_prompt_no_warning_when_recomputed_above_threshold(self):
+        # Stored -25.00% (would warn) but price says -15.00% (no warning).
+        p = self._portfolio(avg_cost=150.0, market_price=127.5, pnl_pct=-0.25)
+        result = build_risk_prompt("AAPL", p)
+        self.assertIn("-15.00%", result)
+        self.assertNotIn("严格止损", result)
+
+
+@pytest.mark.unit
 class BuildTraderPromptExtended(unittest.TestCase):
     def test_empty_when_no_holding(self):
         assert build_trader_prompt("UNKNOWN", None) == ""

@@ -88,6 +88,128 @@ def _enforce_snapshot_tolerance(
     return decision, note
 
 
+# Bullish/neutral/bearish buckets of the 5-tier rating scale and the
+# Trader's 3-tier action scale, used to flag direction conflicts.
+_RATING_DIRECTION = {
+    "buy": "bullish",
+    "overweight": "bullish",
+    "hold": "neutral",
+    "underweight": "bearish",
+    "sell": "bearish",
+}
+_ACTION_DIRECTION = {"buy": "bullish", "hold": "neutral", "sell": "bearish"}
+
+# Treat target and stop as "equal" when within 0.1% — a target a hair above
+# the stop is still geometrically meaningless.
+_PRICE_EQUAL_TOLERANCE = 0.001
+# Risk/reward below this is flagged in the note: cut position size instead of
+# tightening the stop (mirrors the Trader prompt's 1.5x-ATR guidance).
+_MIN_RISK_REWARD = 1.5
+
+_TRADER_ACTION_RE = re.compile(r"FINAL TRANSACTION PROPOSAL:\s*\*\*([A-Za-z]+)\*\*")
+
+
+def _extract_trader_action(trader_plan: str | None) -> str | None:
+    """Pull the Trader's FINAL TRANSACTION PROPOSAL action from the rendered plan."""
+    if not trader_plan:
+        return None
+    match = _TRADER_ACTION_RE.search(trader_plan)
+    return match.group(1).lower() if match else None
+
+
+def _enforce_decision_consistency(
+    decision: PortfolioDecision, trader_plan: str | None
+) -> tuple[PortfolioDecision, str | None]:
+    """Deterministic backstops on the PM's numeric decision fields.
+
+    - ``price_target`` at or below ``stop_loss`` (within 0.1%) is nulled:
+      a target below the stop is geometrically meaningless and showed up in
+      batch audits as a copied-over number.
+    - When entry/stop/target are coherent (long setup), risk/reward is
+      recomputed in code and appended as a note, so the figure on record is
+      arithmetic rather than model recall. R/R below 1.5 flags that position
+      size — not the stop — should be cut.
+    - A rating whose direction contradicts the Trader's action gets an
+      advisory note (the rating itself is kept: the PM may legitimately
+      override the Trader, but the override must be visible).
+
+    Returns the (possibly mutated) decision plus a combined markdown note, or
+    ``None`` when nothing needed attention.
+    """
+    notes: list[str] = []
+
+    target, entry, stop = decision.price_target, decision.entry_price, decision.stop_loss
+
+    if (
+        target is not None
+        and stop is not None
+        and stop > 0
+        and target <= stop * (1 + _PRICE_EQUAL_TOLERANCE)
+    ):
+        logger.warning(
+            "PM stripped price_target=%s: at or below stop_loss=%s",
+            target, stop,
+        )
+        decision.price_target = None
+        notes.append(
+            f"**Note**: price target {target} removed: it sat at or below "
+            f"the stop-loss {stop}, which is geometrically meaningless."
+        )
+
+    if (
+        entry is not None
+        and stop is not None
+        and decision.price_target is not None
+        and entry > stop
+        and decision.price_target > entry
+    ):
+        rr = (decision.price_target - entry) / (entry - stop)
+        rr_note = f"**Note**: code-computed risk/reward = {rr:.2f}"
+        if rr < _MIN_RISK_REWARD:
+            rr_note += (
+                " — below 1.5, so prefer cutting position size rather than "
+                "tightening the stop."
+            )
+        notes.append(rr_note + ".")
+
+    action = _extract_trader_action(trader_plan)
+    rating_dir = _RATING_DIRECTION.get(decision.rating.value.lower())
+    action_dir = _ACTION_DIRECTION.get(action) if action else None
+    if (
+        rating_dir
+        and action_dir
+        and rating_dir != "neutral"
+        and action_dir != "neutral"
+        and rating_dir != action_dir
+    ):
+        notes.append(
+            f"**Note**: rating {decision.rating.value} contradicts the Trader's "
+            f"{action.upper()} action; make sure the override is deliberate and "
+            f"justified in the thesis."
+        )
+
+    if not notes:
+        return decision, None
+    return decision, " ".join(notes)
+
+
+def _validate_pm_decision(
+    decision: PortfolioDecision, snapshot_close: float | None, trader_plan: str | None
+) -> tuple[PortfolioDecision, str | None]:
+    """Compose all deterministic PM post-checks, merging their notes.
+
+    Order matters: snapshot tolerance strips miscalibrated entry/stop first,
+    then decision consistency evaluates the surviving numbers (and nulls an
+    incoherent target). Notes from both checks are concatenated.
+    """
+    decision, tolerance_note = _enforce_snapshot_tolerance(decision, snapshot_close)
+    decision, consistency_note = _enforce_decision_consistency(decision, trader_plan)
+    notes = [n for n in (tolerance_note, consistency_note) if n]
+    if not notes:
+        return decision, None
+    return decision, " ".join(notes)
+
+
 def create_portfolio_manager(llm):
     structured_llm = bind_structured(llm, PortfolioDecision, "Portfolio Manager")
 
@@ -199,6 +321,7 @@ def create_portfolio_manager(llm):
 - Extract the entry price, stop-loss, and position sizing from the Trader's transaction proposal above and populate the corresponding fields in your decision.
 - The Trader is required to quote entry and stop-loss from the snapshot below. If the Trader's quoted value differs from the snapshot's latest Close by more than ~25% in either direction, OR the snapshot is unavailable, leave entry_price and stop_loss as null rather than copying the suspect number. This rule is also enforced in code: any entry_price or stop_loss you return that deviates from the verified Close by more than 25% will be automatically stripped from the decision. Do not estimate, extrapolate, or recall a price from training data, gross-margin ratios, or any other fundamental number.
 - If the Trader's proposal lacks any of these values, leave that field empty rather than estimating or inventing a number.
+- price_target, when you set one, must sit clearly above both entry_price and stop_loss; a target at or below the stop is geometrically meaningless and will be automatically removed in code. When entry, stop, and target are all present and coherent, risk/reward is recomputed in code and attached to the decision.
 - Position sizing may be a string (e.g. ``5% of portfolio``, ``1,000 shares``) and is not bound by the snapshot.
 - Provide a `confidence` level (low/medium/high). If the verified market snapshot or verified fundamentals snapshot is unavailable, or the evidence is mixed, set confidence to `low` or null.
 - Populate `data_sources` with the sources you actually used, e.g. ``market_snapshot``, ``fundamentals_snapshot``, ``trader_proposal``, ``risk_debate``. Do not claim a source you did not consult.
@@ -210,8 +333,8 @@ def create_portfolio_manager(llm):
             prompt,
             render_pm_decision,
             "Portfolio Manager",
-            validate=lambda decision: _enforce_snapshot_tolerance(
-                decision, snapshot_close
+            validate=lambda decision: _validate_pm_decision(
+                decision, snapshot_close, trader_plan
             ),
         )
 

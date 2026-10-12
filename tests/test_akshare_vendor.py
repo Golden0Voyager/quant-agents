@@ -785,6 +785,42 @@ class TestGetFundFlow(TestCase):
             with pytest.raises(NoMarketDataError, match="600519.SS"):
                 akshare_vendor.get_fund_flow("600519.SS")
 
+    def test_remote_disconnected_is_retried_then_succeeds(self):
+        """P1-1 regression: Eastmoney flapping with RemoteDisconnected must not
+        blank fund flow when a later attempt gets through."""
+        import http.client
+
+        from tradingagents.dataflows import akshare_vendor
+        with (
+            patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak,
+            patch("tradingagents.dataflows.akshare_common.time.sleep"),
+        ):
+            mock_ak.stock_individual_fund_flow.side_effect = [
+                http.client.RemoteDisconnected("Remote end closed connection"),
+                self.flow_df,
+            ]
+            result = akshare_vendor.get_fund_flow("600519.SS")
+        assert "Fund Flow" in result
+        assert mock_ak.stock_individual_fund_flow.call_count == 2
+
+    def test_persistent_disconnect_raises_after_patient_retry_budget(self):
+        """After the full 4-retry budget the error propagates so the router
+        can fall back to the next vendor instead of blocking."""
+        import http.client
+
+        from tradingagents.dataflows import akshare_vendor
+        with (
+            patch("tradingagents.dataflows.akshare_vendor.ak") as mock_ak,
+            patch("tradingagents.dataflows.akshare_common.time.sleep"),
+        ):
+            mock_ak.stock_individual_fund_flow.side_effect = http.client.RemoteDisconnected(
+                "Remote end closed connection"
+            )
+            with pytest.raises(http.client.RemoteDisconnected):
+                akshare_vendor.get_fund_flow("600519.SS")
+        # 1 initial + 4 retries
+        assert mock_ak.stock_individual_fund_flow.call_count == 5
+
 
 # ---------------------------------------------------------------------------
 # curr_date filtering
