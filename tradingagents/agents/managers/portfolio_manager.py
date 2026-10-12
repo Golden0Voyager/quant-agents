@@ -173,20 +173,21 @@ def _enforce_decision_consistency(
         notes.append(rr_note + ".")
 
     action = _extract_trader_action(trader_plan)
-    rating_dir = _RATING_DIRECTION.get(decision.rating.value.lower())
-    action_dir = _ACTION_DIRECTION.get(action) if action else None
-    if (
-        rating_dir
-        and action_dir
-        and rating_dir != "neutral"
-        and action_dir != "neutral"
-        and rating_dir != action_dir
-    ):
-        notes.append(
-            f"**Note**: rating {decision.rating.value} contradicts the Trader's "
-            f"{action.upper()} action; make sure the override is deliberate and "
-            f"justified in the thesis."
-        )
+    if action is not None:
+        rating_dir = _RATING_DIRECTION.get(decision.rating.value.lower())
+        action_dir = _ACTION_DIRECTION.get(action)
+        if (
+            rating_dir
+            and action_dir
+            and rating_dir != "neutral"
+            and action_dir != "neutral"
+            and rating_dir != action_dir
+        ):
+            notes.append(
+                f"**Note**: rating {decision.rating.value} contradicts the Trader's "
+                f"{action.upper()} action; make sure the override is deliberate and "
+                f"justified in the thesis."
+            )
 
     if not notes:
         return decision, None
