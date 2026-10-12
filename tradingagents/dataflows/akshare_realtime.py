@@ -7,7 +7,6 @@ freshly fetched market data.
 from __future__ import annotations
 
 import logging
-import os
 import time
 from collections.abc import Callable
 from datetime import datetime
@@ -15,6 +14,7 @@ from typing import Any
 
 import akshare as ak
 
+from . import xq_token as xq_token_mod
 from .akshare_common import (
     is_a_share_ticker,
     no_proxy,
@@ -80,7 +80,18 @@ def fetch_realtime_snapshot(
 
     bare = to_akshare_symbol(ticker, "bare")
     prefixed = to_akshare_symbol(ticker, "upper_prefix")
-    token = xq_token or os.getenv("XUEQIU_TOKEN") or os.getenv("XQ_TOKEN")
+    # Explicit argument wins; otherwise the (normalized) env token, but a
+    # token already proven dead this process is skipped without burning
+    # retry budget on it again.
+    token = xq_token_mod.normalize_xq_token(xq_token) if xq_token else xq_token_mod.current_env_token()
+    if token and xq_token_mod.is_known_bad(token):
+        logger.info("skipping known-dead XUEQIU_TOKEN for %s; using Eastmoney fallback", ticker)
+        token = None
+    if not token and not xq_token:
+        logger.info(
+            "XUEQIU_TOKEN 未配置，跳过雪球实时源（东财兜底仍可用）。"
+            "配置方式：uv run python scripts/update_xq_token.py \"<xq_a_token>\""
+        )
 
     snap: dict[str, Any] = {
         "ticker": ticker.upper(),
@@ -98,6 +109,11 @@ def fetch_realtime_snapshot(
             df = _with_retry(
                 lambda: ak.stock_individual_spot_xq(symbol=prefixed, token=token)
             )
+            if df is None:
+                # Distinguish "expired token" from a transient blip once,
+                # remember dead tokens for the process, and surface the
+                # exact recovery command to the operator.
+                xq_token_mod.handle_possible_expiry(token)
             if df is not None and not df.empty:
                 d = dict(zip(df["item"], df["value"], strict=False))
                 # Xueqiu uses 现价/资产净值·总市值/名称 — not 最新/总市值/股票简称.

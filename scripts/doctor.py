@@ -136,6 +136,33 @@ def check_akshare_network() -> None:
         _report("fail", "akshare 网络连通", f"{type(exc).__name__}: {exc}")
 
 
+def check_xueqiu_token() -> None:
+    """XUEQIU_TOKEN is optional — without it the realtime snapshot silently
+    falls back to Eastmoney. When set, though, an expired token is a silent
+    degradation the operator should know about, so probe it live."""
+    from tradingagents.dataflows import xq_token
+
+    token = xq_token.current_env_token()
+    if not token:
+        _report("warn", "雪球 XUEQIU_TOKEN", "未配置（可选）；实时快照将仅用东财兜底源")
+        return
+    try:
+        result = xq_token._probe(token)  # noqa: SLF001 - doctor is the diagnostics entry
+    except Exception as exc:  # noqa: BLE001 - doctor reports, never raises
+        _report("warn", "雪球 XUEQIU_TOKEN", f"探测异常 {type(exc).__name__}: {exc}")
+        return
+    if result == "ok":
+        _report("ok", "雪球 XUEQIU_TOKEN", f"{token[:6]}…{token[-4:]} 实测有效")
+    elif result == "auth":
+        _report(
+            "warn",
+            "雪球 XUEQIU_TOKEN",
+            "已失效（400016 要求登录态）；运行 uv run python scripts/update_xq_token.py \"<新token>\" 更新",
+        )
+    else:
+        _report("warn", "雪球 XUEQIU_TOKEN", "探测不确定（网络层失败），暂无法判断有效性")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--network", action="store_true", help="额外探测 akshare 网络连通性")
@@ -150,6 +177,7 @@ def main() -> int:
     check_pricing_yaml()
     if args.network:
         check_akshare_network()
+        check_xueqiu_token()
 
     print()
     if _failures:
