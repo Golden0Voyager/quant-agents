@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
+import urllib.request
 from datetime import UTC, datetime
 from typing import Any
 
@@ -35,6 +37,27 @@ _DEFAULT_COLUMN_MAP = {
 }
 
 
+def _gws_subprocess_env() -> dict[str, str]:
+    """Environment for the gws subprocess.
+
+    gws (Rust/reqwest) reads proxy config ONLY from HTTP(S)_PROXY env vars —
+    unlike Python's requests it does not consult the macOS system proxy.
+    The TUI is often launched from a shell without those vars exported, in
+    which case every googleapis.com call times out (connection blocked).
+    Fall back to the macOS system proxy (e.g. Clash at 127.0.0.1:7897) when
+    the environment has no explicit proxy settings.
+    """
+    env = os.environ.copy()
+    if any(k in env for k in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy")):
+        return env
+    for scheme, key in (("http", "HTTP_PROXY"), ("https", "HTTPS_PROXY")):
+        proxy = urllib.request.getproxies().get(scheme)
+        if proxy:
+            env[key] = proxy
+            env[key.lower()] = proxy
+    return env
+
+
 def _run_gws_command(sheet_id: str, range_str: str) -> list[list[str]]:
     """Run gws CLI to read sheet values.
 
@@ -50,7 +73,7 @@ def _run_gws_command(sheet_id: str, range_str: str) -> list[list[str]]:
         json.dumps({"spreadsheetId": sheet_id, "range": range_str}),
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, env=_gws_subprocess_env())
     except FileNotFoundError as exc:
         raise RuntimeError(
             "gws CLI not found. Please install Google Workspace CLI: "
@@ -58,7 +81,18 @@ def _run_gws_command(sheet_id: str, range_str: str) -> list[list[str]]:
         ) from exc
     except subprocess.CalledProcessError as exc:
         logger.error("gws CLI failed: %s", exc.stderr)
-        raise RuntimeError(f"gws CLI failed: {exc.stderr}") from exc
+        # gws writes the actual API error JSON to stdout in some failure
+        # modes (only the keyring notice lands on stderr) — scan both.
+        output = f"{exc.stderr or ''}\n{getattr(exc, 'stdout', '') or ''}"
+        hint = ""
+        if "Failed to decrypt credentials" in output:
+            hint = (
+                "\n凭据无法解密（keyring 中的密钥与 credentials.enc 不匹配）。"
+                "请重新认证：gws auth logout && gws auth login"
+            )
+        elif "timed out" in output or "Connect" in output:
+            hint = "\n连接 googleapis.com 超时：TUI 进程缺少代理环境变量时 gws 无法穿墙，已自动注入系统代理；若仍失败请检查代理。"
+        raise RuntimeError(f"gws CLI failed: {output.strip()}{hint}") from exc
 
     try:
         data = json.loads(result.stdout)

@@ -33,6 +33,34 @@ class RunGwsCommandTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             _run_gws_command("sheet123", "range")
 
+    @patch("tradingagents.portfolio.sync.subprocess.run")
+    def test_decrypt_failure_gets_reauth_hint(self, mock_run):
+        import subprocess as sp
+
+        mock_run.side_effect = sp.CalledProcessError(
+            1, "gws", stderr="Authentication failed: Failed to decrypt credentials"
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            _run_gws_command("sheet123", "range")
+        self.assertIn("gws auth logout", str(ctx.exception))
+
+    def test_subprocess_env_injects_system_proxy_when_env_missing(self):
+        from tradingagents.portfolio.sync import _gws_subprocess_env
+
+        with patch.dict("os.environ", {}, clear=True), patch(
+            "urllib.request.getproxies", return_value={"https": "http://127.0.0.1:7897"}
+        ):
+            env = _gws_subprocess_env()
+        self.assertEqual(env["HTTPS_PROXY"], "http://127.0.0.1:7897")
+        self.assertEqual(env["https_proxy"], "http://127.0.0.1:7897")
+
+    def test_subprocess_env_keeps_explicit_proxy(self):
+        from tradingagents.portfolio.sync import _gws_subprocess_env
+
+        with patch.dict("os.environ", {"HTTPS_PROXY": "http://10.0.0.1:8080"}, clear=True):
+            env = _gws_subprocess_env()
+        self.assertEqual(env["HTTPS_PROXY"], "http://10.0.0.1:8080")
+
 
 @pytest.mark.unit
 class PortfolioSyncInitTests(unittest.TestCase):

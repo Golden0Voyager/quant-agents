@@ -12,6 +12,7 @@ import subprocess
 from datetime import date
 
 from tradingagents.portfolio.models import Transaction
+from tradingagents.portfolio.sync import _gws_subprocess_env
 from tradingagents.portfolio.validators import parse_number
 
 logger = logging.getLogger(__name__)
@@ -77,7 +78,7 @@ def _run_gws_command(sheet_id: str, range_str: str) -> list[list[str]] | None:
         json.dumps({"spreadsheetId": sheet_id, "range": range_str}),
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, env=_gws_subprocess_env())
     except FileNotFoundError as exc:
         raise RuntimeError(
             "gws CLI not found. Please install Google Workspace CLI: "
@@ -85,7 +86,16 @@ def _run_gws_command(sheet_id: str, range_str: str) -> list[list[str]] | None:
         ) from exc
     except subprocess.CalledProcessError as exc:
         logger.error("gws CLI failed: %s", exc.stderr)
-        raise RuntimeError(f"gws CLI failed: {exc.stderr}") from exc
+        stderr = exc.stderr or ""
+        hint = ""
+        if "Failed to decrypt credentials" in stderr:
+            hint = (
+                "\n凭据无法解密（keyring 中的密钥与 credentials.enc 不匹配）。"
+                "请重新认证：gws auth logout && gws auth login"
+            )
+        elif "timed out" in stderr or "Connect" in stderr:
+            hint = "\n连接 googleapis.com 超时：TUI 进程缺少代理环境变量时 gws 无法穿墙，已自动注入系统代理；若仍失败请检查代理。"
+        raise RuntimeError(f"gws CLI failed: {stderr}{hint}") from exc
 
     try:
         data = json.loads(result.stdout)
