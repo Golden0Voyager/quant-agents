@@ -157,6 +157,8 @@ class MetricsExtractor:
             r"\|\s*(?:TTM)?市盈率\s*\|\s*(?:约|约为|about)?\s*([\d.]+)\s*(?:倍|x)\s*\|",
             # 英文格式
             r"P/E\s*[\(（]\s*TTM\s*[\)）][:：\s]*(?:about)?\s*([\d.]+)\s*(?:x|倍)",
+            # 紧凑英文: PE(TTM) 24.34 倍 / PE(TTM) 9.76x
+            r"PE\s*[\(（]\s*TTM\s*[\)）]\s*[:：]?\s*(?:约|约为|about)?\s*([\d.]+)\s*(?:倍|x)",
         ],
         "pe_forward": [
             r"(?:预期|远期)市盈率[:：\s]*(?:约|约为|about)?\s*([\d.]+)\s*(?:倍|x)",
@@ -173,7 +175,10 @@ class MetricsExtractor:
         ],
         "eps_expected": [
             r"(?:机构预测|预期|预计|expected)\s*(?:2026年)?\s*EPS[:：\s]*(?:约|约为|about)?\s*([\d.]+(?:\s*-\s*[\d.]+)?)",
+            r"预测\s*EPS[:：\s]*(?:仅|约|约为|about)?\s*([\d.]+(?:\s*-\s*[\d.]+)?)",
             r"\|\s*预期EPS\s*\|\s*(?:约|约为|about)?\s*([\d.]+(?:\s*-\s*[\d.]+)?)\s*\|",
+            # 研报口径: "2026E EPS 在 2.85（东吴 08/19）…"、"下调了2026E EPS至2.85"
+            r"2026E\s*EPS\s*[^0-9%]{0,8}(\d+\.\d+)",
         ],
         "price": [
             r"当前股价[:：\s]*[\(（]?([\d.]+)[\)）]?",
@@ -829,6 +834,835 @@ def check_pm_summary_consistency(batch_dir: str | Path) -> list[AuditIssue]:
 
 
 # =============================================================================
+# 决策层规则（docs/decision_layer_quality_report.md 第六节）
+# =============================================================================
+#
+# 数据层规则（ValidationRules）校验"数字本身是否正确"；本节规则覆盖
+# "原始数据正确但决策仍然出错"的缺陷：
+#   ARITH-*    显式算式重算（PB/PEG/翻倍声称）
+#   PERSIST-*  持仓浮盈恒等式与快照时点对齐
+#   DECISION-* 决策字段关系（目标价 vs 止损、action vs rating、估值锚）
+#   SCOPE-*    降权来源仍贡献执行参数 / no_data 标记与内容规模不符
+#   TIME-*     分析基准日之后的事件进入证据链（时间穿越）
+#   DERIVED-*  PE 反推 EPS 与卖方预测偏离（估值分位失真）
+#   RATIO-*    赔率与仓位联动 / 滑点未量化
+#   SNAPSHOT-* 结构化降级状态未传播到汇总层
+
+_FULL_DATE_RE = re.compile(r"(20\d{2})[-/年.](\d{1,2})[-/月.](\d{1,2})")
+_DIVISION_CLAIM_RE = re.compile(
+    r"(?P<a>[\d,]+(?:\.\d+)?)\s*(?:/|÷|除以)\s*(?P<b>[\d,]+(?:\.\d+)?)"
+    r"\s*(?:≈|~=|约为?)\s*(?P<c>[\d,]+(?:\.\d+)?)"
+)
+_PEG_LINE_RE = re.compile(r"PEG\s*[:：]?\s*[^0-9+\-]{0,8}([+-]?\d+(?:\.\d+)?)", re.IGNORECASE)
+_PE_TTM_LINE_RE = re.compile(
+    r"(?:PE|P/E)\s*(?:[（(]\s*TTM\s*[)）])?[^\d%]{0,8}(\d+(?:\.\d+)?)\s*(?:倍|x)", re.IGNORECASE
+)
+_GROWTH_LINE_RE = re.compile(r"(?:同比|增长|增速)[^%+\-*\d]{0,10}\+?\s*(\d+(?:\.\d+)?)\s*%")
+_DOUBLING_TARGET_RE = re.compile(r"(?:看向|望|目标|向|至|到|空间|上行).*?(?:翻倍)|(?:翻倍).*?(?:空间|上行|目标)")
+_COST_PRICE_PNL_RE = re.compile(
+    r"成本价?[：:]?\s*([\d.]+)[^\n]{0,40}?现价[：:]?\s*([\d.]+)[^\n]{0,40}?(浮亏|浮盈|盈亏率)[：:]?\s*([+-]?[\d.]+)\s*%"
+)
+_PM_TARGET_RE = re.compile(r"\*\*Price Target(?:\*\*)?[:：]?\s*\*?\*?\s*([0-9]+(?:\.[0-9]+)?)")
+_PM_STOP_RE = re.compile(r"\*\*Stop(?:\*\*)?[:：]?\s*\*?\*?\s*([0-9]+(?:\.[0-9]+)?)")
+_PM_ENTRY_RE = re.compile(r"\*\*Entry(?:\*\*)?[:：]?\s*\*?\*?\s*([0-9]+(?:\.[0-9]+)?)")
+_PM_RATING_RE = re.compile(r"\*\*Rating(?:\*\*)?[:：]?\s*\*?\*?\s*([A-Za-z一-鿿]+)")
+_TRADER_ACTION_RE = re.compile(r"FINAL TRANSACTION PROPOSAL:\s*\*\*([A-Za-z]+)\*\*")
+_CLOSE_PRICE_RE = re.compile(r"收盘价[：:]?\s*\*?\*?\s*([0-9]+(?:\.[0-9]+)?)")
+_TECH_LEVEL_MARKERS = ("SMA", "EMA", "MA", "日均线", "均线", "布林上轨", "布林中轨", "布林下轨", "筹码上沿", "筹码下沿", "筹码平均成本", "平均成本")
+_ANALYST_LABELS = {
+    "market": ("市场分析师", "Market Analyst"),
+    "sentiment": ("情绪分析师", "Sentiment Analyst"),
+    "news": ("新闻分析师", "News Analyst"),
+    "fundamentals": ("基本面分析师", "Fundamentals Analyst"),
+    "governance": ("治理分析师", "Governance Analyst"),
+    "industry": ("行业分析师", "Industry Analyst"),
+}
+
+
+def _f(raw) -> float | None:
+    try:
+        return float(str(raw).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_iso(raw) -> "datetime | None":
+    try:
+        return datetime.fromisoformat(str(raw)[:10])
+    except ValueError:
+        return None
+
+
+def _parse_full_date_match(m: re.Match) -> "datetime | None":
+    try:
+        return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return None
+
+
+def _load_summary_rows(batch_dir: Path) -> dict[str, dict]:
+    """读取 batch_summary.json，按裸代码索引行。"""
+    summary_path = batch_dir / "batch_summary.json"
+    if not summary_path.exists():
+        return {}
+    try:
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    rows = payload.get("rows") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        return {}
+    out = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        code = _parse_ticker_dir_name(str(row.get("ticker") or ""))
+        if code:
+            out[code] = row
+    return out
+
+
+class DecisionLayerRules:
+    """决策层审计规则集合。静态方法均可独立调用，便于单测。"""
+
+    # ---------- ARITH：显式算式重算 ----------
+
+    @staticmethod
+    def check_arith_divisions(text: str, ticker: str, file_path: str) -> list[AuditIssue]:
+        """ARITH-001 (CRITICAL): 形如 `A / B ≈ C` 的显式算式重算，误差 > 1% 即报。"""
+        issues: list[AuditIssue] = []
+        for m in _DIVISION_CLAIM_RE.finditer(text):
+            raw = m.group(0)
+            # 只认带小数点或千分位的算式声称，避免误抓日期/分数
+            if "." not in raw and "," not in raw:
+                continue
+            a, b, c = _f(m.group("a")), _f(m.group("b")), _f(m.group("c"))
+            if a is None or b in (None, 0.0) or c in (None, 0.0):
+                continue
+            calc = a / b
+            # 比值写法（≈0.25）与百分比写法（≈25.21，省去 ×100%）都合法
+            dev = min(
+                abs(calc - c) / abs(c),
+                abs(calc * 100 - c) / abs(c),
+            )
+            if dev > 0.01:
+                issues.append(AuditIssue(
+                    severity="CRITICAL",
+                    rule_id="ARITH-001",
+                    message=f"显式算式不成立：{m.group('a')} / {m.group('b')} ≈ {calc:.4g}（或 {calc * 100:.4g}%），"
+                            f"报告写 {m.group('c')}（误差 {dev:.1%}）",
+                    ticker=ticker,
+                    file_path=file_path,
+                    expected=f"{m.group('a')} / {m.group('b')} = {calc:.4g}",
+                    actual=f"报告写 {m.group('c')}",
+                    suggestion="派生量（PB/PE/股本等）必须由代码从基础量重算，禁止 LLM 直接填写",
+                ))
+            if len(issues) >= 5:
+                break
+        return issues
+
+    @staticmethod
+    def check_arith_peg(text: str, ticker: str, file_path: str) -> list[AuditIssue]:
+        """ARITH-002 (CRITICAL): PEG ≈ PE(TTM) / 同段落同比增速，容差 0.05。
+
+        ARITH-003 (WARNING): PEG ≤ 0 与 PE > 0 同文出现（未解释的口径冲突）。
+        """
+        issues: list[AuditIssue] = []
+        lines = text.splitlines()
+        pe_values: list[float] = []
+        peg_nonpositive = False
+        pe_positive = False
+        for i, line in enumerate(lines):
+            for m in _PE_TTM_LINE_RE.finditer(line):
+                v = _f(m.group(1))
+                if v is not None:
+                    pe_values.append(v)
+                    if v > 0:
+                        pe_positive = True
+            pm = _PEG_LINE_RE.search(line)
+            if not pm:
+                continue
+            peg = _f(pm.group(1))
+            if peg is None:
+                continue
+            if peg <= 0:
+                peg_nonpositive = True
+            window = "\n".join(lines[max(0, i - 2):i + 3])
+            pe_m = _PE_TTM_LINE_RE.search(window)
+            g_m = _GROWTH_LINE_RE.search(window)
+            if pe_m is None or g_m is None or peg <= 0:
+                continue
+            pe, growth = _f(pe_m.group(1)), _f(g_m.group(1))
+            if pe in (None, 0.0) or growth in (None, 0.0):
+                continue
+            expected = pe / growth
+            if abs(expected - peg) > 0.05:
+                issues.append(AuditIssue(
+                    severity="CRITICAL",
+                    rule_id="ARITH-002",
+                    message=f"PEG 算术错误：PE(TTM) {pe} / 增速 {growth}% = {expected:.2f}，"
+                            f"报告写 PEG {peg}",
+                    ticker=ticker,
+                    file_path=file_path,
+                    expected=f"PEG ≈ {expected:.2f}",
+                    actual=f"PEG = {peg}",
+                    suggestion="PEG 由代码按 PE(TTM)/净利润同比增速重算",
+                ))
+            if len(issues) >= 1:
+                break
+        if peg_nonpositive and pe_positive and not any(i.rule_id == "ARITH-002" for i in issues):
+            issues.append(AuditIssue(
+                severity="WARNING",
+                rule_id="ARITH-003",
+                message="PEG ≤ 0 与 PE > 0 同时出现：若 TTM 净利为负则 PE 本身无效，"
+                        "若 PE 有效则 PEG 不应为负，存在未解释的口径冲突",
+                ticker=ticker,
+                file_path=file_path,
+                suggestion="核实 TTM 净利润符号；PE 与 PEG 必须基于同一口径",
+            ))
+        return issues
+
+    @staticmethod
+    def check_arith_doubling(text: str, ticker: str, file_path: str,
+                             base_price: float | None) -> list[AuditIssue]:
+        """ARITH-004 (WARNING): "翻倍"级空间声称与可推导的实际涨幅不符（< 80%）。"""
+        if base_price in (None, 0.0):
+            return []
+        issues: list[AuditIssue] = []
+        for line in text.splitlines():
+            if "翻倍" not in line or not _DOUBLING_TARGET_RE.search(line):
+                continue
+            prices = [
+                float(n) for n in re.findall(r"(?<![\d.])(\d+\.\d+)(?!\d)", line)
+                if 0.01 < float(n) < 100000
+            ]
+            # 整数目标价（"107元"）也算价格
+            for n in re.findall(r"(?<![\d.])(\d+(?:\.\d+)?)\s*元", line):
+                v = float(n)
+                if 0.01 < v < 100000 and v not in prices:
+                    prices.append(v)
+            # 只保留与基准价同量级的价格（排除 RSI/百分比/净流入金额等数字），
+            # 涨幅以基准价为起点计算——"翻倍空间"指当前价 → 目标价
+            prices = [p for p in prices if base_price * 0.2 <= p <= base_price * 5]
+            if len(prices) < 2 or max(prices) <= base_price * 1.05:
+                continue
+            gain = max(prices) / base_price - 1
+            if 0.20 <= gain < 0.80:
+                issues.append(AuditIssue(
+                    severity="WARNING",
+                    rule_id="ARITH-004",
+                    message=f"\"翻倍\"空间声称与实际涨幅不符：区间内最大涨幅 {gain:.1%}，未达到翻倍",
+                    ticker=ticker,
+                    file_path=file_path,
+                    expected="声称翻倍 → 涨幅应 ≥ 80%（容差）",
+                    actual=f"可推导涨幅 {gain:.1%}",
+                    suggestion="价格百分比声称须与同段落实际涨跌幅核对",
+                ))
+            if len(issues) >= 3:
+                break
+        return issues
+
+    # ---------- PERSIST：持仓浮盈与快照时点 ----------
+
+    @staticmethod
+    def _holding_triples(text: str) -> list[tuple[float, float, float, str]]:
+        """同行内 成本 + 现价 + 浮亏/浮盈/盈亏率 三元组 → (cost, price, claimed_pct, keyword)。"""
+        triples = []
+        for line in text.splitlines():
+            m = _COST_PRICE_PNL_RE.search(line)
+            if not m:
+                continue
+            cost, price, claimed = _f(m.group(1)), _f(m.group(2)), _f(m.group(4))
+            if cost in (None, 0.0) or price is None or claimed is None:
+                continue
+            triples.append((cost, price, claimed, m.group(3)))
+        return triples
+
+    @classmethod
+    def check_persist_pnl(cls, text: str, ticker: str, file_path: str) -> list[AuditIssue]:
+        """PERSIST-001 (CRITICAL): unrealized_pnl_pct ≈ (现价/成本 − 1)，容差 0.5pp。"""
+        issues: list[AuditIssue] = []
+        for cost, price, claimed, keyword in cls._holding_triples(text):
+            if keyword == "浮亏":
+                claimed = -abs(claimed)
+            elif keyword == "浮盈":
+                claimed = abs(claimed)
+            actual = (price / cost - 1) * 100
+            if abs(claimed - actual) > 0.5:
+                issues.append(AuditIssue(
+                    severity="CRITICAL",
+                    rule_id="PERSIST-001",
+                    message=f"浮盈浮亏计算错误：成本 {cost} / 现价 {price} → 实际 {actual:+.2f}%，"
+                            f"报告写 {claimed:+.2f}%（误差 {abs(claimed - actual):.1f}pp）",
+                    ticker=ticker,
+                    file_path=file_path,
+                    expected=f"{actual:+.2f}%",
+                    actual=f"{claimed:+.2f}%",
+                    suggestion="浮盈浮亏必须由代码从 avg_cost / last_price 重算，禁止直接使用同步字段",
+                ))
+            if len(issues) >= 5:
+                break
+        return issues
+
+    @classmethod
+    def check_persist_snapshot(cls, texts: dict[str, str], ticker: str) -> list[AuditIssue]:
+        """PERSIST-002 (WARNING): 持仓快照现价与验证快照收盘价不一致（时点错配）。"""
+        closes = [
+            _f(m.group(1))
+            for text in texts.values()
+            for m in _CLOSE_PRICE_RE.finditer(text)
+        ]
+        closes = [c for c in closes if c]
+        if not closes:
+            return []
+        close = max(set(closes), key=closes.count)
+        issues: list[AuditIssue] = []
+        for path, text in texts.items():
+            for _cost, price, _claimed, _kw in cls._holding_triples(text):
+                if price and abs(price - close) / close > 0.02:
+                    issues.append(AuditIssue(
+                        severity="WARNING",
+                        rule_id="PERSIST-002",
+                        message=f"持仓快照现价 {price} 与验证快照收盘价 {close} 偏差 "
+                                f"{abs(price - close) / close:.1%}，存在时点错配",
+                        ticker=ticker,
+                        file_path=path,
+                        expected=f"持仓现价应接近验证快照收盘 {close}",
+                        actual=f"持仓现价 {price}",
+                        suggestion="持仓模块应使用与验证快照同一交易日的收盘价",
+                    ))
+                    if len(issues) >= 3:
+                        return issues
+        return issues
+
+    # ---------- DECISION：字段关系 ----------
+
+    @staticmethod
+    def _pm_fields(texts: dict[str, str]) -> dict[str, float | str | None]:
+        out: dict[str, float | str | None] = {}
+        decision_text = ""
+        for path, text in texts.items():
+            if path.endswith("decision.md"):
+                decision_text = text
+                break
+        for key, pat in (("target", _PM_TARGET_RE), ("stop", _PM_STOP_RE), ("entry", _PM_ENTRY_RE)):
+            m = pat.search(decision_text)
+            out[key] = _f(m.group(1)) if m else None
+        m = _PM_RATING_RE.search(decision_text)
+        out["rating"] = m.group(1).strip() if m else None
+        return out
+
+    @staticmethod
+    def check_decision_fields(texts: dict[str, str], ticker: str,
+                              summary_row: dict | None) -> list[AuditIssue]:
+        """DECISION-001 (CRITICAL): price_target == stop_loss 或 price_target < stop_loss。"""
+        fields = DecisionLayerRules._pm_fields(texts)
+        target = fields.get("target")
+        stop = fields.get("stop")
+        if summary_row:
+            if target is None:
+                target = _f(summary_row.get("target"))
+            if stop is None:
+                stop = _f(summary_row.get("stop"))
+        if target is None or stop is None:
+            return []
+        decision_path = next((p for p in texts if p.endswith("decision.md")), "")
+        if abs(target - stop) / max(stop, 1e-9) <= 0.001:
+            return [AuditIssue(
+                severity="CRITICAL",
+                rule_id="DECISION-001",
+                message=f"price_target（{target}）等于 stop_loss（{stop}），对多头仓位零信息量",
+                ticker=ticker,
+                file_path=decision_path,
+                suggestion="目标价必须高于止损价；检查目标价是否被误填为技术位",
+            )]
+        if target < stop:
+            return [AuditIssue(
+                severity="CRITICAL",
+                rule_id="DECISION-001",
+                message=f"price_target（{target}）低于 stop_loss（{stop}），字段关系矛盾",
+                ticker=ticker,
+                file_path=decision_path,
+                expected=f"price_target > stop_loss ({stop})",
+                actual=f"price_target = {target}",
+                suggestion="检查目标价与止损价是否被写反，或目标价缺估值锚",
+            )]
+        return []
+
+    @staticmethod
+    def check_action_rating(texts: dict[str, str], ticker: str,
+                            summary_row: dict | None) -> list[AuditIssue]:
+        """DECISION-002 (CRITICAL): Trader action 与 PM rating 方向/执行语义冲突。
+
+        执行语义：Buy=加仓/开仓，Hold=维持，Underweight=减仓，Sell=清仓。
+        action=Sell + rating=Underweight（清仓 vs 减半）同样会触发——下游若按
+        action 自动执行将多卖出一半仓位。
+        """
+        action = None
+        for path, text in texts.items():
+            if path.endswith("trader.md"):
+                m = _TRADER_ACTION_RE.search(text)
+                if m:
+                    action = m.group(1).capitalize()
+                break
+        rating = DecisionLayerRules._pm_fields(texts).get("rating")
+        if summary_row and not rating:
+            rating = str(summary_row.get("rating") or "").strip()
+        if action not in ("Buy", "Hold", "Sell") or not rating:
+            return []
+        rating_norm = (rating or "").capitalize()
+        action_dir = {"Buy": 1, "Hold": 0, "Sell": -1}[action]
+        rating_dir = {"Buy": 1, "Overweight": 1, "Hold": 0,
+                      "Underweight": -1, "Sell": -1}.get(rating_norm)
+        if rating_dir is None:
+            return []
+        decision_path = next((p for p in texts if p.endswith("decision.md")), "")
+        if action_dir != rating_dir:
+            return [AuditIssue(
+                severity="CRITICAL",
+                rule_id="DECISION-002",
+                message=f"Trader action={action} 与 PM rating={rating_norm} 方向相反，"
+                        "下游执行字段互相冲突",
+                ticker=ticker,
+                file_path=decision_path,
+                suggestion="PM 的 rating 为权威方向；下游自动化必须以 rating 机械派生 action",
+            )]
+        if action == "Sell" and rating_norm == "Underweight":
+            return [AuditIssue(
+                severity="CRITICAL",
+                rule_id="DECISION-002",
+                message="Trader action=Sell（清仓）与 PM rating=Underweight（减半）执行语义"
+                        "差一整级：按 action 自动执行会触发清仓",
+                ticker=ticker,
+                file_path=decision_path,
+                suggestion="明确唯一执行字段：由 PM rating 机械派生 action，禁止两边独立填写",
+            )]
+        return []
+
+    @staticmethod
+    def check_target_anchor(texts: dict[str, str], ticker: str) -> list[AuditIssue]:
+        """DECISION-003 (WARNING): price_target 落在均线/布林/筹码位上而缺估值锚。"""
+        fields = DecisionLayerRules._pm_fields(texts)
+        target = fields.get("target")
+        if not isinstance(target, float):
+            return []
+        levels: set[float] = set()
+        for text in texts.values():
+            for line in text.splitlines():
+                if not any(marker in line for marker in _TECH_LEVEL_MARKERS):
+                    continue
+                for n in re.findall(r"(?<![\d.])(\d+\.\d+)(?![\d])", line):
+                    v = float(n)
+                    if 0.01 < v < 100000:
+                        levels.add(v)
+        for level in levels:
+            if abs(target - level) / level <= 0.005:
+                decision_path = next((p for p in texts if p.endswith("decision.md")), "")
+                return [AuditIssue(
+                    severity="WARNING",
+                    rule_id="DECISION-003",
+                    message=f"price_target {target} 恰为技术位（{level}，均线/布林/筹码），"
+                            "目标价疑似直接钉在技术指标上而非估值推导",
+                    ticker=ticker,
+                    file_path=decision_path,
+                    suggestion="目标价必须给出估值锚（PE/PB/DCF 推导）；纯技术位目标说明"
+                               "流水线未执行估值推导",
+                )]
+        return []
+
+    # ---------- SCOPE：降权来源仍被使用 ----------
+
+    @staticmethod
+    def _no_data_analysts(texts: dict[str, str]) -> set[str]:
+        """从决策层文本（manager/trader/decision 及完整报告）识别被标 no_data 的分析师。"""
+        flagged: set[str] = set()
+        haystack = "\n".join(texts.values())
+        for stem, (cn, en) in _ANALYST_LABELS.items():
+            patterns = [
+                rf"{cn}[^。\n]{{0,40}}no_data",
+                rf"no_data[^。\n]{{0,40}}{cn}",
+                rf"\|\s*{re.escape(en)}\s*\|\s*❌\s*no_data",
+            ]
+            if any(re.search(p, haystack) for p in patterns):
+                flagged.add(stem)
+        return flagged
+
+    @classmethod
+    def check_scope(cls, texts: dict[str, str], ticker: str) -> list[AuditIssue]:
+        """SCOPE-001 (CRITICAL): 被判 no_data 的来源贡献了 stop_loss 数值。
+
+        SCOPE-002 (WARNING): 被判 no_data 的报告正文超过 100 行（标记与内容不符）。
+        """
+        flagged = cls._no_data_analysts(texts)
+        if not flagged:
+            return []
+        issues: list[AuditIssue] = []
+        stop = cls._pm_fields(texts).get("stop")
+        for stem in sorted(flagged):
+            path = next((p for p in texts if f"1_analysts{os.sep}{stem}.md" in p), "")
+            text = texts.get(path, "")
+            line_count = len([ln for ln in text.splitlines() if ln.strip()])
+            if line_count > 100:
+                issues.append(AuditIssue(
+                    severity="WARNING",
+                    rule_id="SCOPE-002",
+                    message=f"{stem}.md 被标 no_data 但正文 {line_count} 行（>100），"
+                            "标记与内容规模不符：no_data 应只表示整份不可用",
+                    ticker=ticker,
+                    file_path=path,
+                    suggestion="拆分 no_data 为 partial（部分字段缺失）/ empty（无内容），"
+                               "partial 只降级具体字段",
+                ))
+            stop_hit = False
+            if isinstance(stop, float) and text:
+                # 词边界匹配，避免 "13.0" 子串命中 "113.05"
+                stop_hit = any(
+                    re.search(rf"(?<![\d.]){re.escape(c)}(?![\d.])", text)
+                    for c in {f"{stop:.2f}", f"{stop:g}"}
+                )
+                if stop_hit:
+                    issues.append(AuditIssue(
+                        severity="CRITICAL",
+                        rule_id="SCOPE-001",
+                        message=f"止损位 {stop} 出现在被判 no_data 的 {stem}.md 中——"
+                                "降权来源的数值仍被用于生成执行参数",
+                        ticker=ticker,
+                        file_path=path,
+                        suggestion="决策层禁止引用权重 < 0.10 / no_data 来源生成 stop/entry/size",
+                    ))
+            # 派生引用检查：止损常由 ATR/均线推导而非直接抄数——若决策文本引用的
+            # 技术位（均线/布林/筹码）出现在被判 no_data 的报告中，同样算降权来源
+            # 贡献了执行参数（航宇 688239 案例：止损与触发位全部来自 no_data 报告）
+            if text and not stop_hit:
+                fields = cls._pm_fields(texts)
+                exclude = {
+                    v for v in (fields.get("entry"), stop)
+                    if isinstance(v, float)
+                }
+                closes = [
+                    _f(m.group(1)) for t in texts.values()
+                    for m in _CLOSE_PRICE_RE.finditer(t)
+                ]
+                exclude.update(c for c in closes if c)
+                cited: list[float] = []
+                for line in text.splitlines():
+                    if not any(marker in line for marker in _TECH_LEVEL_MARKERS):
+                        continue
+                    for n in re.findall(r"(?<![\d.])(\d+\.\d+)(?![\d])", line):
+                        v = float(n)
+                        if not 1.0 <= v < 100000 or any(
+                            abs(v - e) / e <= 0.01 for e in exclude if e
+                        ):
+                            continue
+                        for dp, dt_ in texts.items():
+                            if not dp.endswith(("decision.md", "trader.md")):
+                                continue
+                            if re.search(rf"(?<![\d.]){re.escape(n)}(?![\d.])", dt_):
+                                cited.append(v)
+                                break
+                if cited:
+                    issues.append(AuditIssue(
+                        severity="CRITICAL",
+                        rule_id="SCOPE-001",
+                        message=f"决策引用的技术位 {sorted(set(cited))} 出自被判 no_data 的 "
+                                f"{stem}.md——降权来源的数值仍被用于生成执行参数",
+                        ticker=ticker,
+                        file_path=path,
+                        suggestion="决策层禁止引用权重 < 0.10 / no_data 来源生成 stop/entry/size",
+                    ))
+        return issues
+
+    # ---------- TIME：时间穿越 ----------
+
+    @staticmethod
+    def _resolve_analysis_date(batch_dir: Path, texts: dict[str, str],
+                               global_date: "datetime | None" = None) -> "datetime | None":
+        """分析基准日：优先取本票验证快照收盘日，退回全批次众数，再退批次目录日期。
+
+        强锚点（"收盘行已核对 / 验证快照 / 分析日期"附近）计 3 票，
+        普通"YYYY-MM-DD …收盘"只计 1 票，避免被历史行情日期带偏。
+        """
+        candidates: list[str] = []
+        for text in texts.values():
+            for m in re.finditer(
+                r"(20\d{2}-\d{2}-\d{2})[^\n]{0,12}(?:收盘行已核对|验证快照|分析日期|分析基准日)", text
+            ):
+                candidates.extend([m.group(1)] * 3)
+            for m in re.finditer(r"(20\d{2}-\d{2}-\d{2})[^\n]{0,25}收盘", text):
+                candidates.append(m.group(1))
+            for m in re.finditer(r"快照[（(]\s*(20\d{2}-\d{2}-\d{2})\s*[)）]", text):
+                candidates.append(m.group(1))
+        # 候选日必须在批次运行日前 20 天内：季报日期（2026-06-30）、历史行情日
+        # 等强锚点误匹配不应成为基准日；全部越界时保留原样交给后续回退
+        m_dir = re.search(r"(20\d{2})(\d{2})(\d{2})", Path(batch_dir).name)
+        dir_date = _parse_iso(f"{m_dir.group(1)}-{m_dir.group(2)}-{m_dir.group(3)}") if m_dir else None
+        if dir_date is not None and candidates:
+            lo = datetime.fromordinal(dir_date.toordinal() - 20)
+            # 越界候选直接丢弃：全部越界时交给 global/dir 回退，不保留脏众数
+            candidates = [
+                c for c in candidates
+                if (cd := _parse_iso(c)) is not None and lo <= cd <= dir_date
+            ]
+        if candidates:
+            best = max(set(candidates), key=candidates.count)
+            return _parse_iso(best)
+        if global_date is not None:
+            return global_date
+        m = re.search(r"(20\d{2})(\d{2})(\d{2})", Path(batch_dir).name)
+        if m:
+            return _parse_iso(f"{m.group(1)}-{m.group(2)}-{m.group(3)}")
+        return None
+
+    @classmethod
+    def check_time_travel(cls, texts: dict[str, str], ticker: str,
+                          analysis_date: "datetime | None") -> list[AuditIssue]:
+        """TIME-001 (CRITICAL): 新闻报告写入 event_date > analysis_date 的事件。
+
+        只扫描新闻分析师文件——PM/风控讨论未来计划（如"10月下旬三季报"）属正常
+        前瞻，不构成证据链污染；污染源是新闻报告本身（输出层硬过滤的对象）。
+        """
+        if analysis_date is None:
+            return []
+        news_paths = [p for p in texts if f"{os.sep}1_analysts{os.sep}news.md" in p]
+        scan_paths = news_paths or list(texts)
+        issues: list[AuditIssue] = []
+        for path in scan_paths:
+            for line in texts[path].splitlines():
+                # 财报预约披露日、多日期日程列表是已知未来安排，不构成证据链污染
+                if "预约" in line or "披露日" in line or "分析窗口" in line or "数据截至" in line:
+                    continue
+                for m in _FULL_DATE_RE.finditer(line):
+                    if line[m.end():m.end() + 1] in ("、", "/"):
+                        continue
+                    d = _parse_full_date_match(m)
+                    if d is not None and d.date() > analysis_date.date():
+                        issues.append(AuditIssue(
+                            severity="CRITICAL",
+                            rule_id="TIME-001",
+                            message=f"分析基准日 {analysis_date.date()} 之后的事件"
+                                    f"（{d.date()}）进入分析师报告：{line.strip()[:80]}",
+                            ticker=ticker,
+                            file_path=path,
+                            suggestion="输出层硬过滤：event_date > analysis_date 的条目直接丢弃",
+                        ))
+                        break
+                if len(issues) >= 5:
+                    return issues
+        return issues
+
+    # ---------- DERIVED：估值分位失真 ----------
+
+    @staticmethod
+    def check_derived_eps(metrics_by_file: dict[str, FinancialMetrics],
+                          ticker: str) -> list[AuditIssue]:
+        """DERIVED-001 (WARNING): PE(TTM) 反推 EPS 与卖方当年预测 EPS 偏离 > 15%。"""
+        price = pe = eps_fwd = None
+        file_path = ""
+        for path, m in metrics_by_file.items():
+            if price is None and m.price:
+                price = m.price
+            if pe is None and m.pe_ttm:
+                pe = m.pe_ttm
+                file_path = path
+            if eps_fwd is None and m.eps_expected:
+                eps_fwd = m.eps_expected
+        if not price or not pe or not eps_fwd or pe <= 0:
+            return []
+        implied = price / pe
+        if abs(implied - eps_fwd) / abs(eps_fwd) > 0.15:
+            return [AuditIssue(
+                severity="WARNING",
+                rule_id="DERIVED-001",
+                message=f"PE(TTM) {pe} 反推 TTM EPS ≈ {implied:.2f} 元，与卖方预测 EPS "
+                        f"{eps_fwd:.2f} 元偏离 {abs(implied - eps_fwd) / abs(eps_fwd):.1%}——"
+                        "历史分位衡量的是正在恶化的分母",
+                ticker=ticker,
+                file_path=file_path,
+                expected=f"前瞻 PE ≈ {price / eps_fwd:.2f}x",
+                actual=f"报告口径 PE(TTM) = {pe}x",
+                suggestion="用卖方一致预期 EPS 换算前瞻 PE 后再谈估值分位",
+            )]
+        return []
+
+    # ---------- RATIO：赔率-仓位联动 / 滑点 ----------
+
+    @staticmethod
+    def check_ratio(texts: dict[str, str], ticker: str,
+                    summary_row: dict | None) -> list[AuditIssue]:
+        """RATIO-001 (WARNING): R/R < 1.5 且仓位 ≥ 标准配置 50%。
+
+        RATIO-002 (INFO): 建议仓位变动量 / 日均成交量 > 5%，滑点风险未量化。
+        """
+        issues: list[AuditIssue] = []
+        fields = DecisionLayerRules._pm_fields(texts)
+        target = fields.get("target")
+        entry = fields.get("entry")
+        stop = fields.get("stop")
+        if summary_row:
+            entry = entry or _f(summary_row.get("entry"))
+            stop = stop or _f(summary_row.get("stop"))
+        size_text = ""
+        for path, text in texts.items():
+            if path.endswith("decision.md"):
+                m = re.search(r"\*\*Size\*\*[:：]?\s*(.+)", text)
+                if m:
+                    size_text = m.group(1)
+                break
+        if not size_text and summary_row:
+            size_text = str(summary_row.get("size") or "")
+        if isinstance(target, float) and isinstance(entry, float) and isinstance(stop, float) \
+                and entry > stop > 0 and target > entry:
+            rr = (target - entry) / (entry - stop)
+            size_frac = None
+            m = re.search(
+                r"标准(?:单票)?配置的?\s*[:：]?\s*(?:约|≈)?\s*"
+                r"(\d+(?:\.\d+)?)\s*%\s*[–—~\-～]\s*(\d+(?:\.\d+)?)\s*%"
+                r"|标准(?:单票)?配置的?\s*[:：]?\s*(?:约|≈)?\s*"
+                r"(\d+(?:\.\d+)?)\s*[–—~\-～]\s*(\d+(?:\.\d+)?)\s*%", size_text
+            )
+            if m:
+                nums = [_f(g) for g in m.groups() if g]
+                if nums:
+                    size_frac = max(nums) / 100
+            else:
+                m = re.search(r"(\d+(?:\.\d+)?)\s*%\s*(?:标准|仓位|组合)", size_text)
+                if m:
+                    size_frac = (_f(m.group(1)) or 0) / 100
+            if size_frac is not None and 0 < rr < 1.5 and size_frac >= 0.5:
+                decision_path = next((p for p in texts if p.endswith("decision.md")), "")
+                issues.append(AuditIssue(
+                    severity="WARNING",
+                    rule_id="RATIO-001",
+                    message=f"风险收益比 {rr:.2f} < 1.5，但仓位给到标准配置的 "
+                            f"{size_frac:.0%}——赔率与仓位未联动",
+                    ticker=ticker,
+                    file_path=decision_path,
+                    suggestion="R/R < 1.5 时应等比例削减仓位，或放宽目标价/收紧止损改善赔率",
+                ))
+        # RATIO-002: 建议股数 vs 日均成交量
+        vol = None
+        for path, text in texts.items():
+            if f"{os.sep}1_analysts{os.sep}market.md" in path:
+                m = re.search(r"日均成交量[：:]?\s*([\d.,]+)\s*(万|亿)?股", text)
+                if m:
+                    vol = _f(m.group(1))
+                    if vol is not None:
+                        vol *= {"万": 1e4, "亿": 1e8}.get(m.group(2) or "", 1)
+                break
+        if vol:
+            for m in re.finditer(r"\+?\s*([\d,]{3,})\s*股", size_text):
+                shares = _f(m.group(1))
+                if shares and vol > 0 and shares / vol > 0.05:
+                    decision_path = next((p for p in texts if p.endswith("decision.md")), "")
+                    issues.append(AuditIssue(
+                        severity="INFO",
+                        rule_id="RATIO-002",
+                        message=f"建议交易 {shares:,.0f} 股 ≈ 日均成交量的 {shares / vol:.1%}"
+                                "（>5%），滑点成本未量化",
+                        ticker=ticker,
+                        file_path=decision_path,
+                        suggestion="对低流动性标的应量化滑点并分批执行",
+                    ))
+                    break
+        return issues
+
+    # ---------- SNAPSHOT：结构化降级传播 ----------
+
+    @staticmethod
+    def check_snapshot_fallback(texts: dict[str, str], ticker: str,
+                                summary_row: dict | None) -> list[AuditIssue]:
+        """SNAPSHOT-001 (WARNING): 报告含 STRUCTURED_FALLBACK 标记但汇总层未标记（或反之）。"""
+        if summary_row is None:
+            return []
+        marker_in_files = any("STRUCTURED_FALLBACK" in t for t in texts.values())
+        summary_flag = bool(summary_row.get("fallback"))
+        if marker_in_files == summary_flag:
+            return []
+        decision_path = next((p for p in texts if p.endswith("decision.md")), "")
+        return [AuditIssue(
+            severity="WARNING",
+            rule_id="SNAPSHOT-001",
+            message=(
+                f"报告含 STRUCTURED_FALLBACK 标记但 batch_summary fallback={summary_flag}"
+                if marker_in_files else
+                "batch_summary fallback=True 但报告中没有 STRUCTURED_FALLBACK 标记"
+            ) + "——降级评级未经结构化字段校验，下游无法识别",
+            ticker=ticker,
+            file_path=decision_path,
+            suggestion="结构化降级状态必须传播到 batch_summary 并在摘要层显式标记",
+        )]
+
+
+def run_decision_layer_checks(batch_dir: Path,
+                              results: dict[str, AuditResult],
+                              texts: dict[str, dict[str, str]]) -> list[AuditIssue]:
+    """对整批运行全部决策层规则，返回跨文件问题列表。"""
+    issues: list[AuditIssue] = []
+    summary_rows = _load_summary_rows(Path(batch_dir))
+    # 全批次级别的快照日期众数，作为单票解析不到时的基准日回退
+    global_candidates: list[str] = []
+    for ticker_texts in texts.values():
+        for text in ticker_texts.values():
+            for m in re.finditer(r"(20\d{2}-\d{2}-\d{2})[^\n]{0,25}收盘", text):
+                global_candidates.append(m.group(1))
+    global_date = None
+    if global_candidates:
+        gd = max(set(global_candidates), key=global_candidates.count)
+        gd_parsed = _parse_iso(gd)
+        m_dir = re.search(r"(20\d{2})(\d{2})(\d{2})", str(batch_dir))
+        dir_date = _parse_iso(f"{m_dir.group(1)}-{m_dir.group(2)}-{m_dir.group(3)}") if m_dir else None
+        if gd_parsed is not None and dir_date is not None:
+            lo = datetime.fromordinal(dir_date.toordinal() - 20)
+            global_date = gd_parsed if lo <= gd_parsed <= dir_date else dir_date
+        else:
+            global_date = gd_parsed
+    for ticker, result in results.items():
+        ticker_texts = texts.get(ticker, {})
+        if not ticker_texts:
+            continue
+        summary_row = summary_rows.get(ticker)
+        analysis_date = DecisionLayerRules._resolve_analysis_date(
+            Path(batch_dir), ticker_texts, global_date
+        )
+        # 翻倍声称的基准价：优先取 PM 决策的 entry（= 验证快照收盘价），
+        # 退回"收盘价"提及的众数
+        base_price = DecisionLayerRules._pm_fields(ticker_texts).get("entry")
+        if not isinstance(base_price, float) or base_price <= 0:
+            closes = [
+                _f(m.group(1)) for t in ticker_texts.values()
+                for m in _CLOSE_PRICE_RE.finditer(t)
+            ]
+            closes = [c for c in closes if c]
+            base_price = max(set(closes), key=closes.count) if closes else None
+        for path, text in ticker_texts.items():
+            issues.extend(DecisionLayerRules.check_arith_divisions(text, ticker, path))
+            issues.extend(DecisionLayerRules.check_arith_peg(text, ticker, path))
+            issues.extend(
+                DecisionLayerRules.check_arith_doubling(text, ticker, path, base_price)
+            )
+            issues.extend(DecisionLayerRules.check_persist_pnl(text, ticker, path))
+        issues.extend(DecisionLayerRules.check_persist_snapshot(ticker_texts, ticker))
+        issues.extend(DecisionLayerRules.check_decision_fields(ticker_texts, ticker, summary_row))
+        issues.extend(DecisionLayerRules.check_action_rating(ticker_texts, ticker, summary_row))
+        issues.extend(DecisionLayerRules.check_target_anchor(ticker_texts, ticker))
+        issues.extend(DecisionLayerRules.check_scope(ticker_texts, ticker))
+        issues.extend(DecisionLayerRules.check_time_travel(ticker_texts, ticker, analysis_date))
+        issues.extend(DecisionLayerRules.check_derived_eps(result.metrics, ticker))
+        issues.extend(DecisionLayerRules.check_ratio(ticker_texts, ticker, summary_row))
+        issues.extend(DecisionLayerRules.check_snapshot_fallback(ticker_texts, ticker, summary_row))
+    # 同一论断在 complete_report.md 与分目录文件中重复出现，按 (rule, ticker, 消息) 去重
+    seen: set[tuple[str, str, str]] = set()
+    deduped: list[AuditIssue] = []
+    for issue in issues:
+        key = (issue.rule_id, issue.ticker, issue.message)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(issue)
+    return deduped
+
+
+# =============================================================================
 # 主审计引擎
 # =============================================================================
 
@@ -839,6 +1673,8 @@ class ReportAuditor:
         self.batch_dir = Path(batch_dir)
         self.extractor = MetricsExtractor()
         self.results: dict[str, AuditResult] = {}
+        # 决策层规则需要原文：path -> text，按 ticker 分组
+        self._texts: dict[str, dict[str, str]] = {}
         self._data_reliability = self._load_data_reliability()
 
     def _load_data_reliability(self) -> dict[str, dict[str, int]]:
@@ -960,6 +1796,11 @@ class ReportAuditor:
             if issue.ticker in self.results:
                 self.results[issue.ticker].issues.append(issue)
 
+        # 决策层规则（ARITH/PERSIST/DECISION/TIME/SCOPE/DERIVED/RATIO/SNAPSHOT）
+        for issue in run_decision_layer_checks(self.batch_dir, self.results, self._texts):
+            if issue.ticker in self.results:
+                self.results[issue.ticker].issues.append(issue)
+
         return self.results
 
     def _apply_realtime_validation(self, ticker: str, result: AuditResult, snapshot_fn) -> None:
@@ -999,6 +1840,7 @@ class ReportAuditor:
         for md_file in md_files:
             try:
                 text = md_file.read_text(encoding='utf-8')
+                self._texts.setdefault(ticker, {})[str(md_file)] = text
                 metrics, extract_issues = self.extractor.extract(text, ticker, str(md_file))
                 result.metrics[str(md_file)] = metrics
                 result.issues.extend(extract_issues)
