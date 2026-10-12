@@ -2,7 +2,7 @@ import json
 import subprocess
 import unittest
 from functools import partial
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -80,7 +80,9 @@ class RunGwsCommandTests(unittest.TestCase):
             "--params",
             json.dumps({"spreadsheetId": "abc123", "range": "Sheet1!A1:L1000"}),
         ]
-        mock_run.assert_called_once_with(expected_cmd, capture_output=True, text=True, check=True)
+        mock_run.assert_called_once_with(
+            expected_cmd, capture_output=True, text=True, check=True, env=ANY
+        )
 
 
 @pytest.mark.unit
