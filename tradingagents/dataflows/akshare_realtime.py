@@ -32,21 +32,33 @@ def _with_retry(fn: Callable, *, attempts: int = 3, delay_s: float = 2.0) -> Any
     or return rate-limit 400s. Each retry waits delay_s * (2 ** i) seconds,
     so attempts=3 yields 2s + 4s = 6s of cumulative back-off before giving up.
 
-    Only transient network errors are retried/absorbed; programming errors
-    (changed akshare schema, TypeError, ...) propagate immediately instead of
-    being masked behind retries. Every attempt is bounded by
-    ``_call_with_timeout`` (AKSHARE_TIMEOUT) so a hung socket cannot block
-    forever, and exhaustion is logged at WARNING so total failure is
-    distinguishable from a legitimately empty result.
+    Only transient upstream errors are retried/absorbed: raw network errors
+    plus ``akshare.exceptions.APIError`` — akshare wraps upstream HTTP/API
+    failures (rate-limit 400s, and Xueqiu's 400016 "requires a valid
+    xq_a_token" when the configured token expires) in APIError rather than
+    raising the raw requests exception, so without this entry a stale token
+    would crash callers instead of degrading to the Eastmoney fallback.
+    Programming errors (changed akshare schema, TypeError, ...) propagate
+    immediately instead of being masked behind retries. Every attempt is
+    bounded by ``_call_with_timeout`` (AKSHARE_TIMEOUT) so a hung socket
+    cannot block forever, and exhaustion is logged at WARNING so total
+    failure is distinguishable from a legitimately empty result.
     """
     from .akshare_common import _call_with_timeout, _network_error_types
 
     network_errors = _network_error_types()
+    try:
+        from akshare.exceptions import APIError as _AkshareAPIError
+
+        retryable_errors = network_errors + (_AkshareAPIError,)
+    except ImportError:  # pragma: no cover - akshare ships this module
+        retryable_errors = network_errors
+
     last_exc: BaseException | None = None
     for i in range(attempts):
         try:
             return _call_with_timeout(fn)
-        except network_errors as exc:
+        except retryable_errors as exc:
             last_exc = exc
             if i < attempts - 1:
                 time.sleep(delay_s * (2**i))

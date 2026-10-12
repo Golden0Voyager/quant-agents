@@ -36,6 +36,39 @@ class TestWithRetry:
         assert result is None
         assert fn.call_count == 2
 
+    def test_akshare_api_error_is_absorbed(self):
+        """Xueqiu 400016 (stale xq_a_token) arrives as akshare.exceptions.APIError.
+
+        Regression 2026-10-12: a stale XUEQIU_TOKEN crashed the realtime
+        smoke test because APIError was not in the retryable set. It must
+        degrade to None so callers fall back to Eastmoney.
+        """
+        from akshare.exceptions import APIError
+
+        fn = MagicMock(
+            side_effect=APIError(
+                "Xueqiu quote endpoint requires a valid xq_a_token or login session; "
+                "upstream returned 400016"
+            )
+        )
+        result = _with_retry(fn, attempts=2)
+        assert result is None
+        assert fn.call_count == 2
+
+    def test_api_error_then_success_recovers(self):
+        from akshare.exceptions import APIError
+
+        fn = MagicMock(side_effect=[APIError("400016 token expired"), "ok"])
+        assert _with_retry(fn, attempts=2) == "ok"
+        assert fn.call_count == 2
+
+    def test_programming_errors_propagate(self):
+        """TypeError/ValueError are not absorbed — akshare schema changes surface."""
+        fn = MagicMock(side_effect=TypeError("changed schema"))
+        with pytest.raises(TypeError):
+            _with_retry(fn, attempts=3)
+        fn.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # fetch_realtime_snapshot: failure paths and edge cases
