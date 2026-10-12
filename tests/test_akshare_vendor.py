@@ -1683,7 +1683,9 @@ class TestAkshareRegression:
 
         if len(failures) == len(critical_tickers):
             pytest.skip(
-                "所有 ticker 真值快照失败 — eastmoney 端点疑似限流，跳过该测试。"
+                "所有 ticker 真值快照失败 — eastmoney/雪球端点疑似限流或雪球登录态失效"
+                "（雪球现要求有效 xq_a_token，过期时整条 XQ 分支会自动降级到东财），"
+                "跳过该测试。"
                 f"failures={failures}"
             )
         assert len(failures) <= 1, (
