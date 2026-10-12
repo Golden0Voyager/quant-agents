@@ -711,5 +711,113 @@ class SnapshotToleranceEnforcementTests(unittest.TestCase):
         self.assertNotIn("**Note**:", output)
 
 
+@pytest.mark.unit
+class DecisionConsistencyEnforcementTests(unittest.TestCase):
+    """PM deterministically nulls incoherent targets and annotates the decision.
+
+    Covers _enforce_decision_consistency and _validate_pm_decision end to end
+    through the real invoke_structured_or_freetext path (bind_structured
+    mocked, same pattern as SnapshotToleranceEnforcementTests).
+    """
+
+    @staticmethod
+    def _make_decision(rating, entry=None, stop=None, target=None):
+        from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating
+
+        return PortfolioDecision(
+            rating=PortfolioRating(rating),
+            executive_summary="summary",
+            investment_thesis="thesis",
+            entry_price=entry,
+            stop_loss=stop,
+            price_target=target,
+        )
+
+    def _run_node(self, decision, trader_plan="Buy 100 shares"):
+        with (
+            patch(
+                "tradingagents.agents.managers.portfolio_manager.bind_structured",
+            ) as mock_bind,
+            patch(
+                "tradingagents.agents.managers.portfolio_manager.build_verified_market_snapshot",
+                return_value=None,
+            ),
+            patch(
+                "tradingagents.agents.managers.portfolio_manager.get_instrument_context_from_state",
+                return_value="The instrument to analyze is `AAPL`.",
+            ),
+        ):
+            mock_structured_llm = MagicMock()
+            mock_structured_llm.invoke.return_value = decision
+            mock_bind.return_value = mock_structured_llm
+            node = create_portfolio_manager(_make_mock_llm())
+            return node(
+                _make_state(trader_investment_plan=trader_plan)
+            )["final_trade_decision"]
+
+    def test_target_below_stop_is_nulled(self):
+        output = self._run_node(
+            self._make_decision("Buy", entry=150.0, stop=140.0, target=135.0)
+        )
+        self.assertNotIn("**Price Target**", output)
+        self.assertIn("price target 135.0 removed", output)
+
+    def test_target_equal_to_stop_within_tolerance_is_nulled(self):
+        output = self._run_node(
+            self._make_decision("Buy", entry=150.0, stop=140.0, target=140.05)
+        )
+        self.assertNotIn("**Price Target**", output)
+        self.assertIn("price target 140.05 removed", output)
+
+    def test_target_above_stop_is_kept(self):
+        output = self._run_node(
+            self._make_decision("Buy", entry=150.0, stop=140.0, target=170.0)
+        )
+        self.assertIn("**Price Target**: 170.0", output)
+        self.assertNotIn("price target", output)
+
+    def test_risk_reward_is_code_computed(self):
+        # entry 150, stop 140, target 170 → RR = 20/10 = 2.00
+        output = self._run_node(
+            self._make_decision("Buy", entry=150.0, stop=140.0, target=170.0)
+        )
+        self.assertIn("code-computed risk/reward = 2.00", output)
+
+    def test_low_risk_reward_flags_sizing_advice(self):
+        # entry 150, stop 148, target 151 → RR = 1/2 = 0.50 (< 1.5)
+        output = self._run_node(
+            self._make_decision("Buy", entry=150.0, stop=148.0, target=151.0)
+        )
+        self.assertIn("code-computed risk/reward = 0.50", output)
+        self.assertIn("cutting position size", output)
+
+    def test_no_risk_reward_without_target(self):
+        output = self._run_node(
+            self._make_decision("Buy", entry=150.0, stop=140.0)
+        )
+        self.assertNotIn("risk/reward", output)
+
+    def test_rating_action_conflict_adds_note(self):
+        output = self._run_node(
+            self._make_decision("Sell", entry=None, stop=None, target=None),
+            trader_plan="FINAL TRANSACTION PROPOSAL: **BUY**",
+        )
+        self.assertIn("contradicts the Trader's BUY action", output)
+
+    def test_aligned_rating_action_adds_no_note(self):
+        output = self._run_node(
+            self._make_decision("Buy", entry=None, stop=None, target=None),
+            trader_plan="FINAL TRANSACTION PROPOSAL: **BUY**",
+        )
+        self.assertNotIn("**Note**:", output)
+
+    def test_neutral_hold_never_flagged_as_conflict(self):
+        output = self._run_node(
+            self._make_decision("Hold", entry=None, stop=None, target=None),
+            trader_plan="FINAL TRANSACTION PROPOSAL: **SELL**",
+        )
+        self.assertNotIn("contradicts", output)
+
+
 if __name__ == "__main__":
     unittest.main()

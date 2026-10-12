@@ -11,6 +11,7 @@ from tradingagents.agents.utils.agent_utils import (
     observation_mode_instruction,
     sanitize_company_name_in_report,
 )
+from tradingagents.agents.utils.time_scope import drop_future_dated_lines
 from tradingagents.agents.utils.tool_capabilities import (
     BoundToolsByMarket,
     tool_guidance_for,
@@ -101,6 +102,18 @@ def create_news_analyst(llm):
         report = sanitize_company_name_in_report(
             report, ticker, company_name
         )
+
+        # Output-layer time-scope guard: tool results occasionally carry
+        # fetch dates after the analysis date; drop those lines so the
+        # report only cites evidence from within the analysis window.
+        report, dropped = drop_future_dated_lines(report, current_date)
+        if dropped:
+            report += (
+                f"\n\n> Time-scope check: {len(dropped)} item(s) dated after "
+                f"the analysis date {current_date} were excluded as outside "
+                f"the analysis window and must not be used as evidence. "
+                f"（时间范围校验：已剔除 {len(dropped)} 条晚于分析基准日的条目。）"
+            )
 
         return {
             "messages": [result],

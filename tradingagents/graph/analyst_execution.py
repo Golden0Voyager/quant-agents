@@ -151,8 +151,12 @@ def sync_analyst_tracker_from_chunk(
 
 
 _REPORT_QUALITY_RELIABLE = "reliable"
-_REPORT_QUALITY_NO_DATA = "no_data"
+_REPORT_QUALITY_EMPTY = "empty"
+_REPORT_QUALITY_PARTIAL = "partial"
 _REPORT_QUALITY_SPARSE = "sparse"
+# Backward-compatible alias: "empty" carries the former "no_data" semantics
+# (report unusable as a whole, discount to near-zero weight).
+_REPORT_QUALITY_NO_DATA = _REPORT_QUALITY_EMPTY
 
 # Both sentinels mean the underlying data source could not deliver usable data.
 _DATA_UNAVAILABLE_SENTINELS = ("NO_DATA_AVAILABLE", "DATA_UNAVAILABLE")
@@ -163,16 +167,24 @@ def validate_report_quality(report_key: str, report_text: str) -> str:
 
     Returns one of:
     - ``"reliable"`` — report has >= 50 words and no data-unavailable sentinel.
-    - ``"no_data"`` — report is empty or contains a data-unavailable sentinel.
+    - ``"empty"`` — report is blank, or so short that a data-unavailable
+      sentinel is essentially all it contains. The report as a whole carries
+      near-zero evidential weight.
+    - ``"partial"`` — report has substantive content (>= 50 words) but
+      mentions a data-unavailable sentinel: only the flagged fields are
+      missing; the remaining evidence stays usable and should receive normal
+      weight, discounted only for the missing fields.
     - ``"sparse"`` — report exists but has fewer than 50 words.
     """
     if not report_text or not report_text.strip():
-        return _REPORT_QUALITY_NO_DATA
-
-    if any(sentinel in report_text for sentinel in _DATA_UNAVAILABLE_SENTINELS):
-        return _REPORT_QUALITY_NO_DATA
+        return _REPORT_QUALITY_EMPTY
 
     word_count = len(report_text.split())
+    if any(sentinel in report_text for sentinel in _DATA_UNAVAILABLE_SENTINELS):
+        if word_count < 50:
+            return _REPORT_QUALITY_EMPTY
+        return _REPORT_QUALITY_PARTIAL
+
     if word_count < 50:
         return _REPORT_QUALITY_SPARSE
 
@@ -200,7 +212,12 @@ def build_data_quality_summary(
         report_text = state.get(spec.report_key, "")
         quality = validate_report_quality(spec.report_key, report_text)
         label = spec.agent_node
-        emoji = {"reliable": "✅", "no_data": "❌", "sparse": "⚠️"}.get(quality, "❓")
+        emoji = {
+            "reliable": "✅",
+            "empty": "❌",
+            "partial": "⚠️",
+            "sparse": "⚠️",
+        }.get(quality, "❓")
         if show_generation:
             generation = quality_flags.get(spec.key, "—")
             gen_emoji = {"ok": "✅", "warning": "⚠️", "critical": "❌"}.get(generation, "—")
@@ -214,7 +231,10 @@ def build_data_quality_summary(
     if unreliable_count > 0:
         lines.append(
             f"**{unreliable_count} of {len(specs)} analyst reports have data "
-            "quality issues. Treat conclusions from affected reports with caution.**"
+            "quality issues.** Reports marked ❌ empty are unusable as a whole "
+            "and should carry near-zero weight. Reports marked ⚠️ partial or "
+            "sparse are still usable: discount only the fields flagged as "
+            "missing, not the entire report.**"
         )
     else:
         lines.append("**All analyst reports have reliable data.**")

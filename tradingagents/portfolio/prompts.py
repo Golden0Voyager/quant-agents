@@ -5,7 +5,7 @@ that can be injected into specific agents' prompts.
 """
 from __future__ import annotations
 
-from tradingagents.portfolio.models import Portfolio, Transaction
+from tradingagents.portfolio.models import Holding, Portfolio, Transaction
 
 
 def _format_money(value: float | None) -> str:
@@ -18,6 +18,33 @@ def _format_money(value: float | None) -> str:
     if abs_v >= 1e4:
         return f"{value / 1e4:.2f}万"
     return f"{value:,.2f}"
+
+
+def _reconciled_pnl_pct(h: Holding) -> tuple[float | None, bool]:
+    """Return the P&L percentage to display, plus whether it was recomputed.
+
+    ``h.pnl_pct`` can drift from ``avg_cost`` / ``market_price`` when the
+    sync layer stales (price updated without recalculating the ratio). When
+    both price and cost are present, the arithmetic value
+    ``market_price / avg_cost - 1`` wins whenever it disagrees with the
+    stored field by more than half a percentage point — the agents must
+    never act on a stale P&L.
+    """
+    stored = h.pnl_pct
+    if h.market_price is None or not h.avg_cost:
+        return stored, False
+    computed = h.market_price / h.avg_cost - 1
+    if stored is None or abs(computed - stored) > 0.005:
+        return computed, True
+    return stored, False
+
+
+def _format_pnl_line(label: str, pnl: float, recomputed: bool) -> str:
+    sign = "+" if pnl >= 0 else ""
+    line = f"- {label}: {sign}{pnl * 100:.2f}%"
+    if recomputed:
+        line += "（同步字段不一致，已按现价/成本重算）"
+    return line
 
 
 def _build_transactions_text(ticker: str, transactions: list[Transaction]) -> str:
@@ -92,9 +119,9 @@ def build_pm_prompt(
 
     if h.market_price is not None:
         lines.append(f"- 现价: {h.market_price:.3f}")
-    if h.pnl_pct is not None:
-        sign = "+" if h.pnl_pct >= 0 else ""
-        lines.append(f"- 盈亏率: {sign}{h.pnl_pct * 100:.2f}%")
+    pnl, pnl_recomputed = _reconciled_pnl_pct(h)
+    if pnl is not None:
+        lines.append(_format_pnl_line("盈亏率", pnl, pnl_recomputed))
     if h.weight is not None:
         lines.append(f"- 仓位占比: {h.weight * 100:.2f}%")
     if h.invested_amount is not None:
@@ -149,10 +176,10 @@ def build_risk_prompt(
         lines.append(f"- 该股票仓位占比: {h.weight * 100:.2f}%")
         if h.weight > 0.15:
             lines.append("  ⚠️ 该票仓位已超过组合 15%，属于集中持仓，请注意风险。")
-    if h.pnl_pct is not None:
-        sign = "+" if h.pnl_pct >= 0 else ""
-        lines.append(f"- 当前浮盈/浮亏: {sign}{h.pnl_pct * 100:.2f}%")
-        if h.pnl_pct < -0.20:
+    pnl, pnl_recomputed = _reconciled_pnl_pct(h)
+    if pnl is not None:
+        lines.append(_format_pnl_line("当前浮盈/浮亏", pnl, pnl_recomputed))
+        if pnl < -0.20:
             lines.append("  ⚠️ 该票已亏损超过 20%，若信号继续看空建议严格止损。")
 
     tx_text = _build_transactions_text(ticker, tx_list)
